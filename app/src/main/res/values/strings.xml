@@ -1,0 +1,12 @@
+<resources>
+    <string name="app_name">LyricBar</string>
+    <string name="lyrics_channel_name">LyricBar Lyrics Overlay</string>
+    <string name="lyrics_channel_description">Shows active lyrics overlay status and controls</string>
+    <string name="notification_title">LyricBar Overlay Active</string>
+    <string name="notification_reposition">Reposition / Drag</string>
+    <string name="notification_stop">Hide Overlay</string>
+    <string name="permission_overlay_title">Display Over Other Apps</string>
+    <string name="permission_overlay_desc">Allows floating lyrics to be drawn over any screen or music player.</string>
+    <string name="permission_listener_title">Media &amp; Notification Access</string>
+    <string name="permission_listener_desc">Used solely to detect currently playing track metadata and playback position.</string>
+</resources>

@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tt xmlns="http://www.w3.org/ns/ttml"
+    xmlns:ttm="http://www.w3.org/ns/ttml#metadata"
+    xmlns:itunes="http://music.apple.com/lyric-ttml">
+  <head>
+    <metadata>
+      <ttm:title>Bohemian Rhapsody</ttm:title>
+      <ttm:agent type="person">Queen</ttm:agent>
+      <itunes:album>A Night at the Opera</itunes:album>
+    </metadata>
+  </head>
+  <body>
+    <div>
+      <p begin="00:00:00.000" end="00:00:04.200">
+        <span begin="00:00:00.000" end="00:00:00.600">Is</span>
+        <span begin="00:00:00.650" end="00:00:01.100">this</span>
+        <span begin="00:00:01.150" end="00:00:01.800">the</span>
+        <span begin="00:00:01.850" end="00:00:02.800">real</span>
+        <span begin="00:00:02.850" end="00:00:04.200">life?</span>
+      </p>
+      <p begin="00:00:04.500" end="00:00:08.200">
+        <span begin="00:00:04.500" end="00:00:05.100">Is</span>
+        <span begin="00:00:05.150" end="00:00:05.700">this</span>
+        <span begin="00:00:05.750" end="00:00:06.600">just</span>
+        <span begin="00:00:06.650" end="00:00:08.200">fantasy?</span>
+      </p>
+      <p begin="00:00:08.500" end="00:00:15.500">
+        <span begin="00:00:08.500" end="00:00:09.500">Caught</span>
+        <span begin="00:00:09.550" end="00:00:10.100">in</span>
+        <span begin="00:00:10.150" end="00:00:10.500">a</span>
+        <span begin="00:00:10.550" end="00:00:12.400">landslide,</span>
+        <span begin="00:00:12.600" end="00:00:13.200">no</span>
+        <span begin="00:00:13.250" end="00:00:14.200">escape</span>
+        <span begin="00:00:14.250" end="00:00:14.700">from</span>
+        <span begin="00:00:14.750" end="00:00:15.500">reality</span>
+      </p>
+      <p begin="00:00:16.000" end="00:00:26.500">
+        <span begin="00:00:16.000" end="00:00:17.200">Open</span>
+        <span begin="00:00:17.250" end="00:00:18.000">your</span>
+        <span begin="00:00:18.050" end="00:00:19.400">eyes,</span>
+        <span begin="00:00:19.800" end="00:00:20.600">look</span>
+        <span begin="00:00:20.650" end="00:00:21.400">up</span>
+        <span begin="00:00:21.450" end="00:00:22.000">to</span>
+        <span begin="00:00:22.050" end="00:00:22.600">the</span>
+        <span begin="00:00:22.650" end="00:00:24.500">skies</span>
+        <span begin="00:00:24.600" end="00:00:25.200">and</span>
+        <span begin="00:00:25.250" end="00:00:26.500">see</span>
+      </p>
+      <p begin="00:00:27.500" end="00:00:33.500">
+        <span begin="00:00:27.500" end="00:00:28.200">I'm</span>
+        <span begin="00:00:28.250" end="00:00:29.000">just</span>
+        <span begin="00:00:29.050" end="00:00:29.400">a</span>
+        <span begin="00:00:29.450" end="00:00:30.400">poor</span>
+        <span begin="00:00:30.450" end="00:00:31.500">boy,</span>
+        <span begin="00:00:31.700" end="00:00:32.100">I</span>
+        <span begin="00:00:32.150" end="00:00:32.700">need</span>
+        <span begin="00:00:32.750" end="00:00:33.100">no</span>
+        <span begin="00:00:33.150" end="00:00:33.500">sympathy</span>
+      </p>
+      <p begin="00:00:34.000" end="00:00:41.000">
+        <span begin="00:00:34.000" end="00:00:34.800">Because</span>
+        <span begin="00:00:34.850" end="00:00:35.300">I'm</span>
+        <span begin="00:00:35.350" end="00:00:36.100">easy</span>
+        <span begin="00:00:36.150" end="00:00:37.000">come,</span>
+        <span begin="00:00:37.200" end="00:00:37.800">easy</span>
+        <span begin="00:00:37.850" end="00:00:38.600">go,</span>
+        <span begin="00:00:38.800" end="00:00:39.400">little</span>
+        <span begin="00:00:39.450" end="00:00:40.200">high,</span>
+        <span begin="00:00:40.400" end="00:00:41.000">little</span>
+        <span begin="00:00:41.050" end="00:00:41.800">low</span>
+      </p>
+    </div>
+  </body>
+</tt>

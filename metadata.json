@@ -1,0 +1,6 @@
+{
+  "name": "LyricBar",
+  "description": "Live floating lyrics synchronized with your music player with pure minimal transparent overlay.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
