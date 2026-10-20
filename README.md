@@ -1,109 +1,164 @@
-# Auralis — Minimal Floating Lyrics & Media Detection
 
-A native Android application providing live, time-synchronized lyrics floating over active music players, featuring a truly transparent, distraction-free **Minimal Floating Lyrics** overlay, edge-to-edge system bars placement, Room database caching, and millisecond sync precision.
+# LyricBar 
 
----
+LyricBar is a native Android app that displays synchronized song lyrics in a customizable floating overlay while music plays in another app. It includes a lyrics screen, playback history, local lyric import, animation settings, and wallpaper-based dynamic colour support on compatible Android versions.
 
-## 1. Minimal Floating Lyrics Overlay
+> **Project status:** Under active development. Features and behaviour may change while bugs are being fixed. Please test on your device before relying on timing-sensitive lyrics.
 
-The primary differentiator of Auralis is its **Minimal Lyrics Mode**:
+## A little note about the code 🤖
 
-- **True Transparency**: The overlay window (`WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY`) and root drawing surface are 100% transparent (`PixelFormat.TRANSLUCENT`). No card, pill fill, rounded rectangle background, border, gradient, or blur is rendered.
-- **Pure White Lyrics**: Only the currently active line of lyrics is displayed in crisp `#FFFFFF` text.
-- **Omission of Distractions**: Album artwork thumbnails, music player logos, artist/title headers, decorative buttons, and borders are strictly removed from the overlay.
-- **Readability Contrast**: An optional subtle glyph shadow (`textShadowEnabled`) provides contrast against bright or white background apps without adding an opaque surface box.
-- **Granular Small-Unit Typography (6sp to 15sp)**: Granular 1sp-step typography grid ranging from 6sp to 24sp (with dedicated 6sp, 8sp, 10sp, 12sp, 14sp, 18sp presets and live preview) for subtle, compact floating lyrics.
-- **Horizontal Marquee Scrolling**: When a lyric line exceeds the available overlay width, a smooth, rhythmic right-to-left marquee animation gently scrolls the text within a clean, clipped container area without clipping words or text distortion.
-- **Smooth Upward Animation**: When the active lyric line changes, the outgoing line glides upward while fading out, and the incoming line smoothly rises into place from below via an interpolated transition synchronized with playback.
-- **Interactive In-App Karaoke**: The main app Lyrics screen features streaming-service-style karaoke highlighting (active line glow, timestamp tags, past-line fading, and tap-to-scrub time seeking).
-- **Material Theme Style (Wallpaper vs. Curated)**:
-  - **Wallpaper Dynamic Colors (Material You)**: Automatically derives accent and surface color schemes from your device wallpaper on Android 12+.
-  - **4 Curated Dark Palettes**: Instant switching between Obsidian Mint, Midnight Azure, Sunset Amber, and Cyber Violet.
-- **Zero Touch Interference**: Under normal playback, `FLAG_NOT_TOUCHABLE` ensures all taps, gestures, and keyboard interactions pass directly through to background apps.
-- **Reposition / Drag Mode**: Can be activated via persistent notification or in-app settings to drag the lyrics to any coordinates on screen in real time.
+LyricBar is kinda **vibe-coded** — AI tools helped write and tweak parts of the code. So yeah, some bugs or weird AI moments might slip through  If something breaks, don't roast the app too hard. Open an issue with what happened and how to reproduce it, and I'll check it out and try to fix it ASAP.
 
----
+AI helped write the whole code, but I'm still the dev maintaining the project. Bug reports, suggestions, and PRs are welcome!
 
-## 2. Architecture & Components
+## Features ✨
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      Android System                         │
-│  ┌───────────────────────┐       ┌────────────────────────┐ │
-│  │ NotificationListener  │       │  WindowManager Overlay │ │
-│  │ MediaSessionManager   │       │  TYPE_APPLICATION_     │ │
-│  └───────────┬───────────┘       │  OVERLAY (Edge-to-Edge)│ │
-│              │                   └───────────▲────────────┘ │
-└──────────────┼───────────────────────────────┼──────────────┘
-               │ Active Session                │ Active Line
-               ▼                               │ (Over system bars)
-┌───────────────────────────────┐  ┌───────────┴────────────┐
-│      MediaPlaybackManager     │  │     OverlayService     │
-│  - Tracks active player       │  │  - Transparent Window  │
-│  - Real-time position ticker  │  │  - Tap-through & Drag  │
-│  - StateFlow<PlaybackState>   │  │  - Persistent Notif    │
-└──────────────┬────────────────┘  └───────────▲────────────┘
-               │ Track Key                     │
-               ▼                               │
-┌───────────────────────────────┐              │ Current Line
-│       LyricsRepository        │──────────────┘
-│  - Room Database (Cache)      │
-│  - LRCLIB Provider (Synced)   │
-│  - Lyrics.ovh (Plain fallback)│
-│  - Local LRC/TXT Parser (SAF) │
-└──────────────┬────────────────┘
-               │
-┌──────────────▼────────────────┐
-│      Main UI (Jetpack M3)     │
-│  - Now Playing & Demo Mode    │
-│  - Full Lyrics Scrolling View │
-│  - Settings & Screen Presets  │
-│  - 50-Track Playback History  │
-│  - Permissions Onboarding     │
-└───────────────────────────────┘
-```
+- **Floating Lyrics Overlay** — Display lyrics over other apps while music plays.
+- **Media Detection** — Detect song metadata and playback state through Android's media-session integration.
+- **Online Lyrics** — Fetch synchronized lyrics using LRCLIB, with Lyrics.ovh as a plain-lyrics fallback.
+- **Local Lyrics Import** — Import lyric files using Android's document picker.
+- **Multiple Animations** — Apple-style Karaoke, Smooth Line Transition, Fade In / Fade Out, Blur Reveal, Typewriter, and Instant.
+- **Customizable Overlay** — Adjust text size, opacity, font, alignment, position, dimensions, animation, and single-line mode.
+- **Lyrics Timing Adjustment** — Adjust lyric synchronization with per-track offset support.
+- **Playback History** — Store playback history locally using Room.
+- **Saved Preferences** — Keep app settings between sessions using DataStore.
+- **Dynamic Colours** — Material 3 interface with wallpaper-based colours on supported Android versions and fallback theme presets.
 
-### Core Components
-- **`MediaListenerService`**: `NotificationListenerService` that observes active `MediaController` sessions.
-- **`OverlayService`**: Foreground service managing `MinimalOverlayView` with `WindowManager`.
-- **`AuralisDatabase`**: SQLite database storing:
-  - `lyrics` table: cached synced and plain lyrics.
-  - `song_history` table: last 50 played tracks with timestamps.
-- **`UserPreferencesRepository`**: Backed by Jetpack `DataStore` preferences.
-- **`LrcParser`**: High-performance parser supporting `[mm:ss.xx]`, `[mm:ss.xxx]`, multi-timestamp lines, and `[offset:+/-ms]` tags.
-- **`LrcLibProvider`**: Primary synchronized lyrics provider querying `https://lrclib.net/`.
-- **`LyricsOvhProvider`**: Fallback provider for plain lyrics.
+> Precise word-by-word karaoke highlighting depends on the lyric source providing word-level timestamps. Standard LRC files usually provide line-level timing only.
 
----
+## Requirements 📱
 
-## 3. Required Permissions
+- Android Studio with a compatible Android Gradle Plugin and Kotlin toolchain.
+- Android SDK matching the project's configured `compileSdk`.
+- Minimum Android version: **Android 7.0 (API 24)**.
+- Internet connection for online lyric lookup.
 
-1. **`SYSTEM_ALERT_WINDOW` ("Display Over Other Apps")**:
-   Allows floating lyrics to be drawn over other applications and over the status/nav bar regions.
-2. **`BIND_NOTIFICATION_LISTENER_SERVICE` ("Media & Notification Access")**:
-   Enables Android's `MediaSessionManager` to read the active track title, artist, playback position, and playback state. Personal notifications are never read or transmitted.
-3. **`INTERNET` & `ACCESS_NETWORK_STATE`**:
-   Used to query lyrics providers (LRCLIB and Lyrics.ovh).
-4. **`POST_NOTIFICATIONS`**:
-   Required on Android 13+ to display the persistent foreground overlay controls notification.
+### Tech Stack
 
----
+- Kotlin
+- Jetpack Compose
+- Material 3
+- Room Database
+- Jetpack DataStore
+- Kotlin Coroutines
+- Retrofit
+- OkHttp
 
-## 4. Build & Verification Instructions
+## Permissions 🔐
 
-### Building with Gradle
+LyricBar requires certain permissions for its features:
+
+- **Display over other apps:** Required for the floating lyrics overlay.
+- **Notification listener access:** Used to detect active media sessions and retrieve playback information.
+- **Internet access:** Required for online lyric lookup.
+- **Notifications:** Used for the foreground overlay service on supported Android versions.
+- **Vibration:** Used for interactions where applicable.
+
+You may need to enable overlay permission and notification-listener access manually in Android Settings.
+
+## Getting Started 🚀
+
+### 1. Clone the repository
+
 ```bash
-# Compile debug APK
-gradle :app:assembleDebug
-
-# Run unit tests (LRC parsing, timing, Robolectric tests)
-gradle :app:testDebugUnitTest
+git clone https://github.com/ishaanj2007/LyricBar.git
 ```
 
-### Manual Testing Guide
-1. Launch Auralis and grant the two required permissions in the onboarding screen.
-2. Start playing music in Spotify, YouTube Music, or tap **Test Demo** on the Now Playing screen.
-3. Confirm that clean white lyrics appear on screen without any card background, music logo, or album art.
-4. Go to **Settings** and use the **Vertical Screen Position** slider to float lyrics directly over the top status bar area (Y = 0) or bottom navigation bar area (Y = 1900+).
-5. Switch on **Reposition / Drag Mode** to drag the lyrics directly on the screen, then switch it off to restore full tap-through.
-6. Use the **-500ms / +500ms** offset buttons to adjust timing; verify that per-track offsets persist.
+### 2. Open the project
+
+1. Open Android Studio.
+2. Select **Open**.
+3. Choose the cloned LyricBar project folder.
+4. Allow Gradle to sync.
+5. Install any Android SDK components requested by Android Studio.
+
+### 3. Run the app
+
+Connect an Android device with USB debugging enabled or start an emulator.
+
+Select the `app` run configuration and click **Run**.
+
+> The current project ZIP did not include `gradlew` or `gradlew.bat`. Build through Android Studio, or add a Gradle wrapper using a compatible Gradle installation before running the commands below.
+
+### Command-line build
+
+After adding the Gradle wrapper:
+
+**Linux / macOS**
+```bash
+./gradlew :app:assembleDebug
+./gradlew :app:testDebugUnitTest
+```
+
+**Windows**
+```bat
+gradlew.bat :app:assembleDebug
+gradlew.bat :app:testDebugUnitTest
+```
+
+## Testing 🧪
+
+Unit tests are included for areas such as:
+
+- LRC parsing
+- Karaoke highlighting logic
+- Smooth line transition speed
+- Fade and blur reveal animation logic
+- Animation consistency and performance-related logic
+
+The tests need to be run in a compatible environment to confirm that they pass.
+
+## Project Structure 📂
+
+```text
+.
+├── app/
+│   ├── src/
+│   │   ├── main/
+│   │   │   ├── java/
+│   │   │   │   ├── data/
+│   │   │   ├── domain/
+│   │   │   ├── service/
+│   │   │   └── ui/
+│   │   ├── res/
+│   │   └── assets/
+│   └── test/
+├── build.gradle.kts
+├── settings.gradle.kts
+├── gradle/
+│   └── libs.versions.toml
+└── README.md
+```
+
+*The exact package names and folder structure may differ in the current source.*
+
+## Privacy 🔒
+
+- Song titles, artists, and playback information are used to identify lyrics and synchronize them with playback.
+- Online lyric searches send the required song metadata to the selected lyric provider.
+- Review the implementation and provider terms before distributing a public release.
+- Never commit private API keys, signing keys, passwords, or local machine configuration to GitHub.
+
+## Before Publishing 🛠️
+
+A few things worth checking before calling LyricBar production-ready:
+
+- Karaoke highlighting stays smooth and synchronized during long playback sessions.
+- Lyrics timing adjustment works in both directions and persists correctly.
+- Long lyrics and single-line scrolling remain responsive.
+- All animation styles work without freezing or excessive lag.
+- Dynamic colours apply consistently to the main app and floating overlay.
+- Permissions and foreground-service behaviour work on supported Android versions.
+- Unit tests pass and a release build completes successfully.
+
+The source may still contain internal identifiers such as `Auralis` or `com.example`, even though the visible app name is LyricBar. Review these before publishing. Changing the application ID after release can prevent normal in-place updates.
+
+## License 📄
+
+No license has been specified yet. If you want others to legally reuse, modify, or distribute this project, add a suitable `LICENSE` file.
+
+Until then, the default copyright restrictions apply.
+
+---
+
+Made with love, and a bit of vibe coding
