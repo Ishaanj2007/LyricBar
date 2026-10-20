@@ -19,6 +19,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
@@ -26,6 +27,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.abs
@@ -181,6 +183,37 @@ fun SettingsScreen(
                             }
                         },
                         modifier = Modifier.testTag("settings_shadow_switch")
+                    )
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
+                // Toggle: Single-Line Lyrics
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Single-Line Lyrics",
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Keep each lyric on one line and scroll horizontally when needed.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = userPreferences.singleLineLyrics,
+                        onCheckedChange = { enabled ->
+                            coroutineScope.launch {
+                                playbackManager.preferencesRepository.setSingleLineLyrics(enabled)
+                            }
+                        },
+                        modifier = Modifier.testTag("settings_single_line_lyrics_switch")
                     )
                 }
 
@@ -405,11 +438,350 @@ fun SettingsScreen(
                     }
                 }
 
+                // Smooth Line Transition Speed (Appears ONLY when Smooth Line Transition style is selected)
+                if (userPreferences.animationStyle == "SMOOTH_SLIDE") {
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        Icons.Default.Speed,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Transition Speed",
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 13.sp,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                val speedLabel = when {
+                                    userPreferences.smoothTransitionSpeed <= 0.6f -> "0.5× — Slow"
+                                    userPreferences.smoothTransitionSpeed <= 0.85f -> "0.7× — Relaxed"
+                                    userPreferences.smoothTransitionSpeed in 0.86f..1.25f -> "1.0× — Normal"
+                                    else -> "1.5× — Fast"
+                                }
+                                Text(
+                                    text = speedLabel,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            Text(
+                                text = "Adjust how gently lyrics fade and slide during line transitions",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+
+                            var localSpeed by remember(userPreferences.smoothTransitionSpeed) {
+                                mutableFloatStateOf(userPreferences.smoothTransitionSpeed)
+                            }
+
+                            Slider(
+                                value = localSpeed,
+                                onValueChange = { localSpeed = it },
+                                onValueChangeFinished = {
+                                    coroutineScope.launch {
+                                        playbackManager.preferencesRepository.setSmoothTransitionSpeed(localSpeed)
+                                    }
+                                },
+                                valueRange = 0.5f..1.5f,
+                                modifier = Modifier.fillMaxWidth().testTag("transition_speed_slider")
+                            )
+
+                            // Quick speed preset buttons
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                listOf(
+                                    "0.5× — Slow" to 0.5f,
+                                    "0.7× — Relaxed" to 0.7f,
+                                    "1.0× — Normal" to 1.0f,
+                                    "1.5× — Fast" to 1.5f
+                                ).forEach { (label, speedVal) ->
+                                    val isSelected = abs(userPreferences.smoothTransitionSpeed - speedVal) < 0.08f
+                                    val tagKey = when (speedVal) {
+                                        0.5f -> "0_5"
+                                        0.7f -> "0_7"
+                                        1.0f -> "1_0"
+                                        else -> "1_5"
+                                    }
+                                    FilledTonalButton(
+                                        onClick = {
+                                            coroutineScope.launch {
+                                                playbackManager.preferencesRepository.setSmoothTransitionSpeed(speedVal)
+                                            }
+                                        },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .testTag("transition_speed_preset_$tagKey"),
+                                        contentPadding = PaddingValues(horizontal = 2.dp, vertical = 6.dp),
+                                        colors = ButtonDefaults.filledTonalButtonColors(
+                                            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                                            contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                        ),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Text(
+                                            text = label,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            textAlign = TextAlign.Center
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Fade In / Fade Out Speed (Appears ONLY when Fade In / Fade Out style is selected)
+                if (userPreferences.animationStyle == "FADE") {
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        Icons.Default.Speed,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Transition Speed",
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 13.sp,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                val speedLabel = when {
+                                    userPreferences.fadeSpeed <= 0.6f -> "0.5× — Slow"
+                                    userPreferences.fadeSpeed <= 0.85f -> "0.7× — Relaxed"
+                                    userPreferences.fadeSpeed in 0.86f..1.25f -> "1.0× — Normal"
+                                    else -> "1.5× — Fast"
+                                }
+                                Text(
+                                    text = speedLabel,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            Text(
+                                text = "Adjust how gently lyrics dissolve between previous and incoming lines",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+
+                            var localFadeSpeed by remember(userPreferences.fadeSpeed) {
+                                mutableFloatStateOf(userPreferences.fadeSpeed)
+                            }
+
+                            Slider(
+                                value = localFadeSpeed,
+                                onValueChange = { localFadeSpeed = it },
+                                onValueChangeFinished = {
+                                    coroutineScope.launch {
+                                        playbackManager.preferencesRepository.setFadeSpeed(localFadeSpeed)
+                                    }
+                                },
+                                valueRange = 0.5f..1.5f,
+                                modifier = Modifier.fillMaxWidth().testTag("fade_speed_slider")
+                            )
+
+                            // Quick speed preset buttons
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                listOf(
+                                    "0.5× — Slow" to 0.5f,
+                                    "0.7× — Relaxed" to 0.7f,
+                                    "1.0× — Normal" to 1.0f,
+                                    "1.5× — Fast" to 1.5f
+                                ).forEach { (label, speedVal) ->
+                                    val isSelected = abs(userPreferences.fadeSpeed - speedVal) < 0.08f
+                                    val tagKey = when (speedVal) {
+                                        0.5f -> "0_5"
+                                        0.7f -> "0_7"
+                                        1.0f -> "1_0"
+                                        else -> "1_5"
+                                    }
+                                    FilledTonalButton(
+                                        onClick = {
+                                            coroutineScope.launch {
+                                                playbackManager.preferencesRepository.setFadeSpeed(speedVal)
+                                            }
+                                        },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .testTag("fade_speed_preset_$tagKey"),
+                                        contentPadding = PaddingValues(horizontal = 2.dp, vertical = 6.dp),
+                                        colors = ButtonDefaults.filledTonalButtonColors(
+                                            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                                            contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                        ),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Text(
+                                            text = label,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            textAlign = TextAlign.Center
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Blur Reveal Speed (Appears ONLY when Blur Reveal style is selected)
+                if (userPreferences.animationStyle == "BLUR_REVEAL") {
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        Icons.Default.Speed,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Transition Speed",
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 13.sp,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                val speedLabel = when {
+                                    userPreferences.blurRevealSpeed <= 0.6f -> "0.5× — Slow"
+                                    userPreferences.blurRevealSpeed <= 0.85f -> "0.7× — Relaxed"
+                                    userPreferences.blurRevealSpeed in 0.86f..1.25f -> "1.0× — Normal"
+                                    else -> "1.5× — Fast"
+                                }
+                                Text(
+                                    text = speedLabel,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            Text(
+                                text = "Adjust the duration of the gentle blur-to-sharp reveal motion",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+
+                            var localBlurSpeed by remember(userPreferences.blurRevealSpeed) {
+                                mutableFloatStateOf(userPreferences.blurRevealSpeed)
+                            }
+
+                            Slider(
+                                value = localBlurSpeed,
+                                onValueChange = { localBlurSpeed = it },
+                                onValueChangeFinished = {
+                                    coroutineScope.launch {
+                                        playbackManager.preferencesRepository.setBlurRevealSpeed(localBlurSpeed)
+                                    }
+                                },
+                                valueRange = 0.5f..1.5f,
+                                modifier = Modifier.fillMaxWidth().testTag("blur_speed_slider")
+                            )
+
+                            // Quick speed preset buttons
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                listOf(
+                                    "0.5× — Slow" to 0.5f,
+                                    "0.7× — Relaxed" to 0.7f,
+                                    "1.0× — Normal" to 1.0f,
+                                    "1.5× — Fast" to 1.5f
+                                ).forEach { (label, speedVal) ->
+                                    val isSelected = abs(userPreferences.blurRevealSpeed - speedVal) < 0.08f
+                                    val tagKey = when (speedVal) {
+                                        0.5f -> "0_5"
+                                        0.7f -> "0_7"
+                                        1.0f -> "1_0"
+                                        else -> "1_5"
+                                    }
+                                    FilledTonalButton(
+                                        onClick = {
+                                            coroutineScope.launch {
+                                                playbackManager.preferencesRepository.setBlurRevealSpeed(speedVal)
+                                            }
+                                        },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .testTag("blur_speed_preset_$tagKey"),
+                                        contentPadding = PaddingValues(horizontal = 2.dp, vertical = 6.dp),
+                                        colors = ButtonDefaults.filledTonalButtonColors(
+                                            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                                            contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                        ),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Text(
+                                            text = label,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            textAlign = TextAlign.Center
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Interactive Live Preview
                 AnimationStylePreview(
                     styleName = userPreferences.animationStyle,
                     textOpacity = userPreferences.overlayTextOpacity,
-                    typewriterSpeed = userPreferences.typewriterSpeed
+                    typewriterSpeed = userPreferences.typewriterSpeed,
+                    smoothTransitionSpeed = userPreferences.smoothTransitionSpeed,
+                    fadeSpeed = userPreferences.fadeSpeed,
+                    blurRevealSpeed = userPreferences.blurRevealSpeed
                 )
             }
         }
@@ -1184,9 +1556,9 @@ fun SettingsScreen(
                         modifier = Modifier.weight(1f).testTag("clear_history_button"),
                         shape = RoundedCornerShape(10.dp)
                     ) {
-                        Icon(Icons.Default.History, contentDescription = null, tint = SkyAccent)
+                        Icon(Icons.Default.History, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Clear History", color = SkyAccent, fontSize = 12.sp)
+                        Text("Clear History", color = MaterialTheme.colorScheme.secondary, fontSize = 12.sp)
                     }
                 }
 
@@ -1209,7 +1581,10 @@ fun SettingsScreen(
 private fun AnimationStylePreview(
     styleName: String,
     textOpacity: Float = 1.0f,
-    typewriterSpeed: Float = 1.0f
+    typewriterSpeed: Float = 1.0f,
+    smoothTransitionSpeed: Float = 1.0f,
+    fadeSpeed: Float = 1.0f,
+    blurRevealSpeed: Float = 1.0f
 ) {
     var previewTick by remember { mutableIntStateOf(0) }
     LaunchedEffect(styleName, typewriterSpeed) {
@@ -1264,16 +1639,214 @@ private fun AnimationStylePreview(
                     }
                 }
                 "SMOOTH_SLIDE" -> {
-                    Text(
-                        text = "Caught in a landslide, no escape from reality",
-                        color = Color.White.copy(alpha = textOpacity),
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
+                    val sampleLines = remember {
+                        listOf(
+                            "Caught in a landslide, no escape from reality",
+                            "Open your eyes, look up to the skies and see",
+                            "I'm just a poor boy, I need no sympathy",
+                            "Because I'm easy come, easy go, little high, little low"
+                        )
+                    }
+                    var currentLineIdx by remember { mutableIntStateOf(0) }
+                    var prevLineIdx by remember { mutableIntStateOf(-1) }
+                    val animProgress = remember { androidx.compose.animation.core.Animatable(1f) }
+
+                    LaunchedEffect(styleName, smoothTransitionSpeed) {
+                        while (true) {
+                            kotlinx.coroutines.delay(2000L)
+                            prevLineIdx = currentLineIdx
+                            currentLineIdx = (currentLineIdx + 1) % sampleLines.size
+                            val baseDuration = 300L
+                            val speed = smoothTransitionSpeed.coerceIn(0.3f, 3.0f)
+                            val transDuration = (baseDuration / speed).toInt().coerceIn(100, 2000)
+                            animProgress.snapTo(0f)
+                            animProgress.animateTo(
+                                targetValue = 1f,
+                                animationSpec = androidx.compose.animation.core.tween(
+                                    durationMillis = transDuration,
+                                    easing = androidx.compose.animation.core.FastOutSlowInEasing
+                                )
+                            )
+                        }
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (animProgress.value < 1f && prevLineIdx in sampleLines.indices) {
+                            val outgoingOffsetY = (-animProgress.value * 20).dp
+                            val outgoingAlpha = ((1f - animProgress.value) * (textOpacity * 0.35f)).coerceIn(0f, 1f)
+                            Text(
+                                text = sampleLines[prevLineIdx],
+                                color = Color.White.copy(alpha = outgoingAlpha),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                modifier = Modifier.offset(y = outgoingOffsetY)
+                            )
+                        }
+
+                        val incomingOffsetY = ((1f - animProgress.value) * 16).dp
+                        val incomingAlpha = (animProgress.value * textOpacity).coerceIn(0f, 1f)
+                        Text(
+                            text = sampleLines[currentLineIdx],
+                            color = Color.White.copy(alpha = incomingAlpha),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            modifier = Modifier.offset(y = incomingOffsetY)
+                        )
+                    }
+
                     Spacer(modifier = Modifier.height(4.dp))
+                    val durationMs = (300L / smoothTransitionSpeed.coerceIn(0.3f, 3.0f)).roundToInt()
                     Text(
-                        text = "Next line glides smoothly upward on transition",
+                        text = "Smooth transition • ${String.format(java.util.Locale.US, "%.1f×", smoothTransitionSpeed)} speed (${durationMs}ms duration)",
+                        color = Color(0xFF94A3B8),
+                        fontSize = 10.sp
+                    )
+                }
+                "FADE" -> {
+                    val sampleLines = remember {
+                        listOf(
+                            "Caught in a landslide, no escape from reality",
+                            "Open your eyes, look up to the skies and see",
+                            "I'm just a poor boy, I need no sympathy",
+                            "Because I'm easy come, easy go, little high, little low"
+                        )
+                    }
+                    var currentLineIdx by remember { mutableIntStateOf(0) }
+                    var prevLineIdx by remember { mutableIntStateOf(-1) }
+                    val animProgress = remember { androidx.compose.animation.core.Animatable(1f) }
+
+                    LaunchedEffect(styleName, fadeSpeed) {
+                        while (true) {
+                            kotlinx.coroutines.delay(2200L)
+                            prevLineIdx = currentLineIdx
+                            currentLineIdx = (currentLineIdx + 1) % sampleLines.size
+                            val baseDuration = 360L
+                            val speed = fadeSpeed.coerceIn(0.3f, 3.0f)
+                            val transDuration = (baseDuration / speed).toInt().coerceIn(100, 2000)
+                            animProgress.snapTo(0f)
+                            animProgress.animateTo(
+                                targetValue = 1f,
+                                animationSpec = androidx.compose.animation.core.tween(
+                                    durationMillis = transDuration,
+                                    easing = androidx.compose.animation.core.FastOutSlowInEasing
+                                )
+                            )
+                        }
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (animProgress.value < 1f && prevLineIdx in sampleLines.indices) {
+                            val outgoingAlpha = ((1f - animProgress.value) * textOpacity).coerceIn(0f, 1f)
+                            Text(
+                                text = sampleLines[prevLineIdx],
+                                color = Color.White.copy(alpha = outgoingAlpha),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                        }
+
+                        val incomingAlpha = (animProgress.value * textOpacity).coerceIn(0f, 1f)
+                        Text(
+                            text = sampleLines[currentLineIdx],
+                            color = Color.White.copy(alpha = incomingAlpha),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+                    val durationMs = (360L / fadeSpeed.coerceIn(0.3f, 3.0f)).roundToInt()
+                    Text(
+                        text = "Pure fade transition • ${String.format(java.util.Locale.US, "%.1f×", fadeSpeed)} speed (${durationMs}ms duration)",
+                        color = Color(0xFF94A3B8),
+                        fontSize = 10.sp
+                    )
+                }
+                "BLUR_REVEAL" -> {
+                    val sampleLines = remember {
+                        listOf(
+                            "Caught in a landslide, no escape from reality",
+                            "Open your eyes, look up to the skies and see",
+                            "I'm just a poor boy, I need no sympathy",
+                            "Because I'm easy come, easy go, little high, little low"
+                        )
+                    }
+                    var currentLineIdx by remember { mutableIntStateOf(0) }
+                    var prevLineIdx by remember { mutableIntStateOf(-1) }
+                    val animProgress = remember { androidx.compose.animation.core.Animatable(1f) }
+
+                    LaunchedEffect(styleName, blurRevealSpeed) {
+                        while (true) {
+                            kotlinx.coroutines.delay(2200L)
+                            prevLineIdx = currentLineIdx
+                            currentLineIdx = (currentLineIdx + 1) % sampleLines.size
+                            val baseDuration = 400L
+                            val speed = blurRevealSpeed.coerceIn(0.3f, 3.0f)
+                            val transDuration = (baseDuration / speed).toInt().coerceIn(100, 2000)
+                            animProgress.snapTo(0f)
+                            animProgress.animateTo(
+                                targetValue = 1f,
+                                animationSpec = androidx.compose.animation.core.tween(
+                                    durationMillis = transDuration,
+                                    easing = androidx.compose.animation.core.FastOutSlowInEasing
+                                )
+                            )
+                        }
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (animProgress.value < 1f && prevLineIdx in sampleLines.indices) {
+                            val outgoingAlpha = ((1f - animProgress.value) * textOpacity).coerceIn(0f, 1f)
+                            Text(
+                                text = sampleLines[prevLineIdx],
+                                color = Color.White.copy(alpha = outgoingAlpha),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                        }
+
+                        val blurDp = ((1f - animProgress.value) * 6f).dp
+                        val incomingAlpha = (animProgress.value * textOpacity).coerceIn(0f, 1f)
+                        val blurModifier = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && blurDp > 0.5.dp) {
+                            Modifier.blur(blurDp)
+                        } else {
+                            Modifier
+                        }
+
+                        Text(
+                            text = sampleLines[currentLineIdx],
+                            color = Color.White.copy(alpha = incomingAlpha),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            modifier = blurModifier
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+                    val durationMs = (400L / blurRevealSpeed.coerceIn(0.3f, 3.0f)).roundToInt()
+                    Text(
+                        text = "Blur to sharp reveal • ${String.format(java.util.Locale.US, "%.1f×", blurRevealSpeed)} speed (${durationMs}ms duration)",
                         color = Color(0xFF94A3B8),
                         fontSize = 10.sp
                     )

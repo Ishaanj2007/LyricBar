@@ -10,8 +10,11 @@ import android.provider.Settings
 import android.view.Gravity
 import android.view.WindowManager
 import androidx.core.app.NotificationCompat
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.ui.graphics.toArgb
 import com.example.MainActivity
 import com.example.R
+import com.example.data.preferences.ThemePreset
 import com.example.ui.components.MinimalOverlayView
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.combine
@@ -174,10 +177,30 @@ class OverlayService : Service() {
                 view.textSizeSp = prefs.overlayTextSizeSp
                 view.textOpacity = prefs.overlayTextOpacity
                 view.typewriterSpeed = prefs.typewriterSpeed
+                view.smoothTransitionSpeed = prefs.smoothTransitionSpeed
+                view.fadeSpeed = prefs.fadeSpeed
+                view.blurRevealSpeed = prefs.blurRevealSpeed
                 view.textShadowEnabled = prefs.textShadowEnabled
                 view.textAlignMode = prefs.overlayTextAlign
                 view.animationStyle = prefs.animationStyle
+                view.singleLineMode = prefs.singleLineLyrics
                 view.fontResId = prefs.selectedFont.fontResId
+
+                val resolvedPrimary = if (prefs.useWallpaperDynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    try {
+                        dynamicDarkColorScheme(this@OverlayService).primary.toArgb()
+                    } catch (_: Exception) {
+                        android.graphics.Color.rgb(0, 229, 163)
+                    }
+                } else {
+                    when (prefs.themePreset) {
+                        ThemePreset.OBSIDIAN_MINT -> android.graphics.Color.rgb(0, 229, 163)
+                        ThemePreset.MIDNIGHT_AZURE -> android.graphics.Color.rgb(59, 130, 246)
+                        ThemePreset.SUNSET_AMBER -> android.graphics.Color.rgb(245, 158, 11)
+                        ThemePreset.CYBER_VIOLET -> android.graphics.Color.rgb(168, 85, 247)
+                    }
+                }
+                view.primaryColor = resolvedPrimary
 
                 // Update drag mode if changed externally from settings
                 if (isDragMode != prefs.isDragRepositionMode) {

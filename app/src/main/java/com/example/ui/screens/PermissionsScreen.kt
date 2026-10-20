@@ -27,7 +27,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.app.NotificationManagerCompat
-import com.example.ui.theme.MintAccent
 
 @Composable
 fun PermissionsScreen(
@@ -124,7 +123,7 @@ fun PermissionsScreen(
                 Icon(
                     imageVector = Icons.Default.Security,
                     contentDescription = "Privacy",
-                    tint = MintAccent,
+                    tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(20.dp)
                 )
                 Spacer(modifier = Modifier.width(12.dp))
@@ -148,8 +147,8 @@ fun PermissionsScreen(
                 .height(52.dp)
                 .testTag("continue_to_app_button"),
             colors = ButtonDefaults.buttonColors(
-                containerColor = MintAccent,
-                contentColor = Color(0xFF0D0F14),
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
                 disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant
             ),
             shape = RoundedCornerShape(12.dp)
@@ -186,7 +185,7 @@ private fun PermissionCard(
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = if (isGranted) MintAccent else MaterialTheme.colorScheme.primary,
+                    tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(24.dp)
                 )
                 Spacer(modifier = Modifier.width(12.dp))
@@ -224,7 +223,7 @@ private fun PermissionCard(
                 ) {
                     Text(
                         text = "Grant Permission in Settings",
-                        color = MintAccent,
+                        color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.Medium
                     )
                 }
@@ -236,7 +235,7 @@ private fun PermissionCard(
 @Composable
 private fun StatusChip(isGranted: Boolean) {
     Surface(
-        color = if (isGranted) Color(0xFF1B3D2F) else Color(0xFF3D2E1B),
+        color = if (isGranted) MaterialTheme.colorScheme.primaryContainer else Color(0xFF3D2E1B),
         shape = RoundedCornerShape(20.dp)
     ) {
         Row(
@@ -246,7 +245,7 @@ private fun StatusChip(isGranted: Boolean) {
             Icon(
                 imageVector = if (isGranted) Icons.Default.CheckCircle else Icons.Default.Warning,
                 contentDescription = null,
-                tint = if (isGranted) MintAccent else Color(0xFFFFB74D),
+                tint = if (isGranted) MaterialTheme.colorScheme.primary else Color(0xFFFFB74D),
                 modifier = Modifier.size(14.dp)
             )
             Spacer(modifier = Modifier.width(4.dp))
@@ -254,7 +253,7 @@ private fun StatusChip(isGranted: Boolean) {
                 text = if (isGranted) "Granted" else "Required",
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
-                color = if (isGranted) MintAccent else Color(0xFFFFB74D)
+                color = if (isGranted) MaterialTheme.colorScheme.primary else Color(0xFFFFB74D)
             )
         }
     }

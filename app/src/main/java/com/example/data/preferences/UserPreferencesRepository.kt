@@ -38,6 +38,8 @@ enum class FontOption(val title: String, val fontResId: Int?) {
 enum class OverlayAnimationStyle(val title: String, val description: String) {
     KARAOKE("Apple-style Karaoke", "Progressively highlights each word in sync with playback when word timestamps exist"),
     SMOOTH_SLIDE("Smooth Line Transition", "Gently fades and slides between lyric lines without fake word timing"),
+    FADE("Fade In / Fade Out", "Gradually fades between lyric lines with pure opacity changes"),
+    BLUR_REVEAL("Blur Reveal", "Gently transitions lyrics from a soft blur to sharp clarity"),
     TYPEWRITER("Typewriter", "Reveals text progressively from left to right"),
     INSTANT("Instant", "Replaces the current line immediately with no animation")
 }
@@ -47,6 +49,9 @@ data class UserPreferences(
     val overlayTextSizeSp: Float = 14f,
     val overlayTextOpacity: Float = 1.0f, // 0.2f (20%) to 1.0f (100%)
     val typewriterSpeed: Float = 1.0f, // 0.4x (Slow) to 2.0x (Fast)
+    val smoothTransitionSpeed: Float = 1.0f, // 0.5x (Slow) to 1.5x (Fast)
+    val fadeSpeed: Float = 1.0f, // 0.5x (Slow) to 1.5x (Fast)
+    val blurRevealSpeed: Float = 1.0f, // 0.5x (Slow) to 1.5x (Fast)
     val textShadowEnabled: Boolean = true,
     val overlayYPosition: Int = 180, // Full range
     val overlayXPosition: Int = 0, // Full range
@@ -62,6 +67,7 @@ data class UserPreferences(
     val themePreset: ThemePreset = ThemePreset.OBSIDIAN_MINT,
     val selectedFont: FontOption = FontOption.POPPINS,
     val appleMusicStyle: Boolean = true,
+    val singleLineLyrics: Boolean = false,
     val globalOffsetMs: Long = 0L
 )
 
@@ -72,6 +78,9 @@ class UserPreferencesRepository(private val context: Context) {
         val OVERLAY_TEXT_SIZE = floatPreferencesKey("overlay_text_size")
         val OVERLAY_TEXT_OPACITY = floatPreferencesKey("overlay_text_opacity")
         val TYPEWRITER_SPEED = floatPreferencesKey("typewriter_speed")
+        val SMOOTH_TRANSITION_SPEED = floatPreferencesKey("smooth_transition_speed")
+        val FADE_SPEED = floatPreferencesKey("fade_speed")
+        val BLUR_REVEAL_SPEED = floatPreferencesKey("blur_reveal_speed")
         val OVERLAY_TEXT_SHADOW = booleanPreferencesKey("overlay_text_shadow")
         val OVERLAY_Y_POS = intPreferencesKey("overlay_y_position")
         val OVERLAY_X_POS = intPreferencesKey("overlay_x_position")
@@ -88,6 +97,7 @@ class UserPreferencesRepository(private val context: Context) {
         val THEME_PRESET = stringPreferencesKey("theme_preset")
         val SELECTED_FONT = stringPreferencesKey("selected_font")
         val APPLE_MUSIC_STYLE = booleanPreferencesKey("apple_music_style")
+        val SINGLE_LINE_LYRICS = booleanPreferencesKey("single_line_lyrics")
         val GLOBAL_OFFSET_MS = longPreferencesKey("global_offset_ms")
     }
 
@@ -127,6 +137,8 @@ class UserPreferencesRepository(private val context: Context) {
             val animStyle = when (rawStyle) {
                 "APPLE_MUSIC", "KARAOKE" -> OverlayAnimationStyle.KARAOKE.name
                 "SMOOTH_SLIDE_UP", "SOFT_FADE", "SCALE_POP", "SMOOTH_SLIDE" -> OverlayAnimationStyle.SMOOTH_SLIDE.name
+                "FADE", "FADE_IN_OUT" -> OverlayAnimationStyle.FADE.name
+                "BLUR_REVEAL", "BLUR" -> OverlayAnimationStyle.BLUR_REVEAL.name
                 "TYPEWRITER" -> OverlayAnimationStyle.TYPEWRITER.name
                 "MINIMAL_STATIC", "INSTANT" -> OverlayAnimationStyle.INSTANT.name
                 else -> OverlayAnimationStyle.KARAOKE.name
@@ -137,6 +149,9 @@ class UserPreferencesRepository(private val context: Context) {
                 overlayTextSizeSp = preferences[PreferencesKeys.OVERLAY_TEXT_SIZE] ?: 14f,
                 overlayTextOpacity = (preferences[PreferencesKeys.OVERLAY_TEXT_OPACITY] ?: 1.0f).coerceIn(0.15f, 1.0f),
                 typewriterSpeed = (preferences[PreferencesKeys.TYPEWRITER_SPEED] ?: 1.0f).coerceIn(0.3f, 3.0f),
+                smoothTransitionSpeed = (preferences[PreferencesKeys.SMOOTH_TRANSITION_SPEED] ?: 1.0f).coerceIn(0.3f, 3.0f),
+                fadeSpeed = (preferences[PreferencesKeys.FADE_SPEED] ?: 1.0f).coerceIn(0.3f, 3.0f),
+                blurRevealSpeed = (preferences[PreferencesKeys.BLUR_REVEAL_SPEED] ?: 1.0f).coerceIn(0.3f, 3.0f),
                 textShadowEnabled = preferences[PreferencesKeys.OVERLAY_TEXT_SHADOW] ?: true,
                 overlayYPosition = clampedY,
                 overlayXPosition = clampedX,
@@ -152,6 +167,7 @@ class UserPreferencesRepository(private val context: Context) {
                 themePreset = preset,
                 selectedFont = font,
                 appleMusicStyle = preferences[PreferencesKeys.APPLE_MUSIC_STYLE] ?: true,
+                singleLineLyrics = preferences[PreferencesKeys.SINGLE_LINE_LYRICS] ?: false,
                 globalOffsetMs = preferences[PreferencesKeys.GLOBAL_OFFSET_MS] ?: 0L
             )
         }
@@ -170,8 +186,27 @@ class UserPreferencesRepository(private val context: Context) {
         context.dataStore.edit { it[PreferencesKeys.TYPEWRITER_SPEED] = bounded }
     }
 
+    suspend fun setSmoothTransitionSpeed(speed: Float) {
+        val bounded = speed.coerceIn(0.3f, 3.0f)
+        context.dataStore.edit { it[PreferencesKeys.SMOOTH_TRANSITION_SPEED] = bounded }
+    }
+
+    suspend fun setFadeSpeed(speed: Float) {
+        val bounded = speed.coerceIn(0.3f, 3.0f)
+        context.dataStore.edit { it[PreferencesKeys.FADE_SPEED] = bounded }
+    }
+
+    suspend fun setBlurRevealSpeed(speed: Float) {
+        val bounded = speed.coerceIn(0.3f, 3.0f)
+        context.dataStore.edit { it[PreferencesKeys.BLUR_REVEAL_SPEED] = bounded }
+    }
+
     suspend fun setAppleMusicStyle(enabled: Boolean) {
         context.dataStore.edit { it[PreferencesKeys.APPLE_MUSIC_STYLE] = enabled }
+    }
+
+    suspend fun setSingleLineLyrics(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.SINGLE_LINE_LYRICS] = enabled }
     }
 
     suspend fun setOverlayEnabled(enabled: Boolean) {

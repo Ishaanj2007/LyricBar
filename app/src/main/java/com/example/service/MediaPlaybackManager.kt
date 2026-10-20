@@ -119,16 +119,19 @@ class MediaPlaybackManager private constructor(private val context: Context) {
         )
     }
 
+    private var offsetJob: Job? = null
+
     private fun onTrackChanged(track: TrackMetadata) {
-        // Cancel any pending stale network requests
+        // Cancel any pending stale network requests and offset collectors
         fetchJob?.cancel()
+        offsetJob?.cancel()
 
         _currentLyrics.value = null
         _activeLyricLine.value = null
         _isLoadingLyrics.value = true
 
         // Load persisted offset for this specific track
-        scope.launch {
+        offsetJob = scope.launch {
             preferencesRepository.getTrackOffsetFlow(track.key).collect { offset ->
                 _trackOffsetMs.value = offset
             }

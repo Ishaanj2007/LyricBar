@@ -1,10 +1,12 @@
 package com.example.ui.theme
 
 import android.os.Build
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -13,11 +15,13 @@ import com.example.data.preferences.ThemePreset
 
 private val ObsidianMintScheme = darkColorScheme(
     primary = MintAccent,
-    onPrimary = DarkBackground,
+    onPrimary = Color(0xFF003826),
     primaryContainer = MintAccentDim,
-    onPrimaryContainer = Color.White,
+    onPrimaryContainer = Color(0xFF6FF7CC),
     secondary = SkyAccent,
-    onSecondary = DarkBackground,
+    onSecondary = Color(0xFF003549),
+    secondaryContainer = Color(0xFF004D69),
+    onSecondaryContainer = Color(0xFFC3E8FF),
     background = DarkBackground,
     onBackground = TextPrimary,
     surface = DarkSurface,
@@ -25,6 +29,8 @@ private val ObsidianMintScheme = darkColorScheme(
     surfaceVariant = DarkSurfaceContainer,
     onSurfaceVariant = TextSecondary,
     surfaceContainer = DarkSurfaceElevated,
+    outline = Color(0xFF334155),
+    outlineVariant = Color(0xFF1E293B),
     error = CoralAccent,
     onError = Color.White
 )
@@ -91,9 +97,23 @@ fun MyApplicationTheme(
     content: @Composable () -> Unit
 ) {
     val context = LocalContext.current
+    val darkTheme = isSystemInDarkTheme()
 
     val colorScheme: ColorScheme = if (useWallpaperDynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        dynamicDarkColorScheme(context)
+        if (darkTheme) {
+            val dynamicDark = dynamicDarkColorScheme(context)
+            dynamicDark.copy(
+                background = DarkBackground,
+                surface = DarkSurface,
+                surfaceVariant = DarkSurfaceContainer,
+                surfaceContainer = DarkSurfaceElevated,
+                onBackground = TextPrimary,
+                onSurface = TextPrimary,
+                onSurfaceVariant = TextSecondary
+            )
+        } else {
+            dynamicLightColorScheme(context)
+        }
     } else {
         when (themePreset) {
             ThemePreset.OBSIDIAN_MINT -> ObsidianMintScheme

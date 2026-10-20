@@ -27,7 +27,6 @@ import androidx.compose.ui.unit.sp
 import com.example.data.preferences.UserPreferences
 import com.example.service.MediaPlaybackManager
 import com.example.service.OverlayService
-import com.example.ui.theme.MintAccent
 import kotlinx.coroutines.launch
 
 @Composable
@@ -70,7 +69,7 @@ fun NowPlayingScreen(
                     text = if (userPreferences.overlayEnabled) "HUD On" else "HUD Off",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = if (userPreferences.overlayEnabled) MintAccent else MaterialTheme.colorScheme.onSurfaceVariant
+                    color = if (userPreferences.overlayEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Switch(
@@ -112,7 +111,7 @@ fun NowPlayingScreen(
                 Icon(
                     imageVector = Icons.Default.MusicNote,
                     contentDescription = null,
-                    tint = MintAccent,
+                    tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(80.dp)
                 )
             }
@@ -168,7 +167,7 @@ fun NowPlayingScreen(
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 1.sp,
-                        color = MintAccent
+                        color = MaterialTheme.colorScheme.primary
                     )
                     TextButton(
                         onClick = onNavigateToLyrics,
@@ -187,6 +186,99 @@ fun NowPlayingScreen(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Lyrics Timing Delay / Offset Adjustment Card
+        val trackOffset by playbackManager.trackOffsetMs.collectAsState()
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .testTag("now_playing_delay_card"),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "LYRICS TIMING DELAY",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    val offsetSec = trackOffset / 1000.0
+                    val formattedOffset = if (trackOffset > 0) "+%.1fs".format(offsetSec) else if (trackOffset < 0) "%.1fs".format(offsetSec) else "0.0s (In Sync)"
+                    Text(
+                        text = formattedOffset,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (trackOffset != 0L) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.testTag("now_playing_delay_display")
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    FilledTonalButton(
+                        onClick = { playbackManager.adjustTrackOffset(-500L) },
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                        modifier = Modifier.weight(1f).height(32.dp).testTag("now_playing_delay_minus_500")
+                    ) {
+                        Text("-0.5s", fontSize = 11.sp)
+                    }
+                    FilledTonalButton(
+                        onClick = { playbackManager.adjustTrackOffset(-100L) },
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                        modifier = Modifier.weight(1f).height(32.dp).testTag("now_playing_delay_minus_100")
+                    ) {
+                        Text("-0.1s", fontSize = 11.sp)
+                    }
+                    if (trackOffset != 0L) {
+                        Button(
+                            onClick = { playbackManager.setExplicitOffset(0L) },
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            ),
+                            modifier = Modifier.weight(1f).height(32.dp).testTag("now_playing_delay_reset")
+                        ) {
+                            Text("Reset", fontSize = 11.sp, color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    FilledTonalButton(
+                        onClick = { playbackManager.adjustTrackOffset(100L) },
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                        modifier = Modifier.weight(1f).height(32.dp).testTag("now_playing_delay_plus_100")
+                    ) {
+                        Text("+0.1s", fontSize = 11.sp)
+                    }
+                    FilledTonalButton(
+                        onClick = { playbackManager.adjustTrackOffset(500L) },
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                        modifier = Modifier.weight(1f).height(32.dp).testTag("now_playing_delay_plus_500")
+                    ) {
+                        Text("+0.5s", fontSize = 11.sp)
+                    }
+                }
             }
         }
 
@@ -214,14 +306,14 @@ fun NowPlayingScreen(
                 onClick = { playbackManager.playPause() },
                 modifier = Modifier.size(68.dp),
                 shape = CircleShape,
-                color = MintAccent,
+                color = MaterialTheme.colorScheme.primary,
                 tonalElevation = 4.dp
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
                         imageVector = if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                         contentDescription = if (state.isPlaying) "Pause" else "Play",
-                        tint = MaterialTheme.colorScheme.background,
+                        tint = MaterialTheme.colorScheme.onPrimary,
                         modifier = Modifier.size(36.dp)
                     )
                 }

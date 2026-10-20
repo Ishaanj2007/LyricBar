@@ -51,12 +51,18 @@ class MinimalOverlayView(
         color = Color.WHITE
         textAlign = Paint.Align.LEFT
         isFakeBoldText = true
-        setShadowLayer(14f, 0f, 0f, Color.argb(220, 255, 255, 255))
+        setShadowLayer(4f, 0f, 0f, Color.argb(120, 255, 255, 255))
+    }
+
+    private val blurRevealPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textAlign = Paint.Align.LEFT
+        isFakeBoldText = true
     }
 
     // Editable bounding box paints (displayed ONLY when isDragMode == true)
     private val editBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(160, 56, 232, 176) // Mint boundary outline
+        color = Color.argb(160, 56, 232, 176) // Adaptive boundary outline
         style = Paint.Style.STROKE
         strokeWidth = 2.5f
     }
@@ -65,6 +71,17 @@ class MinimalOverlayView(
         color = Color.argb(220, 56, 232, 176)
         style = Paint.Style.FILL
     }
+
+    var primaryColor: Int = Color.argb(255, 0, 229, 163)
+        set(value) {
+            field = value
+            val r = Color.red(value)
+            val g = Color.green(value)
+            val b = Color.blue(value)
+            editBorderPaint.color = Color.argb(160, r, g, b)
+            editHandlePaint.color = Color.argb(220, r, g, b)
+            invalidate()
+        }
 
     // Layout data structures for zero-allocation rendering & smooth multi-line wrapping
     data class LayoutWord(
@@ -92,6 +109,12 @@ class MinimalOverlayView(
     private var maxScrollY: Float = 0f
     private var targetScrollY: Float = 0f
     private var currentScrollY: Float = 0f
+
+    // Horizontal auto-scroll state for single-line mode
+    private var maxScrollX: Float = 0f
+    private var targetScrollX: Float = 0f
+    private var currentScrollX: Float = 0f
+    private var previousScrollX: Float = 0f
 
     // Playback and synchronization state
     private var isPlaying: Boolean = false
@@ -123,22 +146,37 @@ class MinimalOverlayView(
                 }
             }
 
+            // Update smooth horizontal auto-scroll for single-line mode
+            if (singleLineMode && maxScrollX > 0f) {
+                updateHorizontalScrollTarget(posMs)
+                val diffX = targetScrollX - currentScrollX
+                if (abs(diffX) > 0.3f) {
+                    currentScrollX += diffX * 0.16f
+                } else {
+                    currentScrollX = targetScrollX
+                }
+            }
+
             invalidate()
 
             val currentStyle = when (animationStyle) {
                 "KARAOKE", "APPLE_MUSIC" -> "KARAOKE"
                 "SMOOTH_SLIDE", "SMOOTH_SLIDE_UP", "SOFT_FADE", "SCALE_POP" -> "SMOOTH_SLIDE"
+                "FADE", "FADE_IN_OUT" -> "FADE"
+                "BLUR_REVEAL", "BLUR" -> "BLUR_REVEAL"
                 "TYPEWRITER" -> "TYPEWRITER"
                 "INSTANT", "MINIMAL_STATIC" -> "INSTANT"
                 else -> "KARAOKE"
             }
 
-            // Run continuous 60 FPS animation loop when actively playing KARAOKE or TYPEWRITER, or during transitions
+            // Run continuous 60 FPS animation loop only when there are active per-frame updates
+            val isKaraoke = currentStyle == "KARAOKE" && activeLyricLine != null
             val needsContinuous = isPlaying && (
-                (currentStyle == "KARAOKE") ||
+                isKaraoke ||
                 (currentStyle == "TYPEWRITER") ||
                 (transitionAnimator?.isRunning == true) ||
-                (maxScrollY > 0f && abs(targetScrollY - currentScrollY) > 0.3f)
+                (maxScrollY > 0f && abs(targetScrollY - currentScrollY) > 0.3f) ||
+                (singleLineMode && maxScrollX > 0f && abs(targetScrollX - currentScrollX) > 0.3f)
             )
 
             if (needsContinuous) {
@@ -151,7 +189,8 @@ class MinimalOverlayView(
 
     var activeLyricLine: LyricLine? = null
         set(value) {
-            val oldText = field?.text ?: text
+            val oldLine = field
+            val oldText = oldLine?.text ?: text
             val newText = value?.text ?: ""
             field = value
 
@@ -159,19 +198,40 @@ class MinimalOverlayView(
                 val currentStyle = when (animationStyle) {
                     "KARAOKE", "APPLE_MUSIC" -> "KARAOKE"
                     "SMOOTH_SLIDE", "SMOOTH_SLIDE_UP", "SOFT_FADE", "SCALE_POP" -> "SMOOTH_SLIDE"
+                    "FADE", "FADE_IN_OUT" -> "FADE"
+                    "BLUR_REVEAL", "BLUR" -> "BLUR_REVEAL"
                     "TYPEWRITER" -> "TYPEWRITER"
                     "INSTANT", "MINIMAL_STATIC" -> "INSTANT"
                     else -> "KARAOKE"
                 }
-                if (currentStyle != "INSTANT" && currentStyle != "TYPEWRITER" && currentLayoutLines.isNotEmpty() && newText.isNotBlank()) {
+
+                // Check for normal forward sequential lyric advance
+                val isNormalSequentialAdvance = oldLine != null && value != null &&
+                    value.timeMs >= oldLine.timeMs &&
+                    (value.timeMs - oldLine.timeMs) < 15000L
+
+                if (currentStyle != "INSTANT" && currentStyle != "TYPEWRITER" &&
+                    currentLayoutLines.isNotEmpty() && newText.isNotBlank() && isNormalSequentialAdvance) {
                     previousLayoutLines = currentLayoutLines.toList()
                     startUpwardTransition()
                 } else {
+                    transitionAnimator?.cancel()
                     previousLayoutLines = emptyList()
                     animProgress = 1f
                 }
+                previousScrollX = currentScrollX
+                currentScrollX = 0f
+                targetScrollX = 0f
                 text = newText
                 recalculateLayout()
+                if (isPlaying) {
+                    startLoopIfNeeded()
+                }
+            } else {
+                invalidate()
+                if (isPlaying) {
+                    startLoopIfNeeded()
+                }
             }
         }
 
@@ -201,6 +261,33 @@ class MinimalOverlayView(
             }
         }
 
+    var smoothTransitionSpeed: Float = 1.0f
+        set(value) {
+            val clamped = value.coerceIn(0.3f, 3.0f)
+            if (field != clamped) {
+                field = clamped
+                invalidate()
+            }
+        }
+
+    var fadeSpeed: Float = 1.0f
+        set(value) {
+            val clamped = value.coerceIn(0.3f, 3.0f)
+            if (field != clamped) {
+                field = clamped
+                invalidate()
+            }
+        }
+
+    var blurRevealSpeed: Float = 1.0f
+        set(value) {
+            val clamped = value.coerceIn(0.3f, 3.0f)
+            if (field != clamped) {
+                field = clamped
+                invalidate()
+            }
+        }
+
     var textSizeSp: Float = 14f
         set(value) {
             if (field != value) {
@@ -214,6 +301,7 @@ class MinimalOverlayView(
                 wordInactivePaint.textSize = px
                 previousTextPaint.textSize = px
                 wordGlowPaint.textSize = px
+                blurRevealPaint.textSize = px
                 recalculateLayout()
             }
         }
@@ -239,7 +327,21 @@ class MinimalOverlayView(
         set(value) {
             if (field != value) {
                 field = value
+                transitionAnimator?.cancel()
+                previousLayoutLines = emptyList()
+                animProgress = 1f
+                blurRevealPaint.clearShadowLayer()
+                recalculateLayout()
+                startLoopIfNeeded()
                 invalidate()
+            }
+        }
+
+    var singleLineMode: Boolean = false
+        set(value) {
+            if (field != value) {
+                field = value
+                recalculateLayout()
             }
         }
 
@@ -259,6 +361,7 @@ class MinimalOverlayView(
                 wordInactivePaint.typeface = typeface
                 previousTextPaint.typeface = typeface
                 wordGlowPaint.typeface = typeface
+                blurRevealPaint.typeface = typeface
                 recalculateLayout()
             }
         }
@@ -290,6 +393,7 @@ class MinimalOverlayView(
         wordInactivePaint.textSize = initialPx
         previousTextPaint.textSize = initialPx
         wordGlowPaint.textSize = initialPx
+        blurRevealPaint.textSize = initialPx
         updateShadow(wordActivePaint, textShadowEnabled)
         updateShadow(wordInactivePaint, textShadowEnabled)
         updateShadow(previousTextPaint, textShadowEnabled)
@@ -309,10 +413,28 @@ class MinimalOverlayView(
         speed: Float,
         updatedTimestamp: Long
     ) {
+        val posDiff = abs(positionMs - lastPositionMs)
+        val isSeeking = posDiff > 1500L
+
         isPlaying = playing
         lastPositionMs = positionMs
         playbackSpeed = if (speed > 0f) speed else 1.0f
         lastUpdatedTimestamp = updatedTimestamp
+
+        if (isSeeking) {
+            transitionAnimator?.cancel()
+            previousLayoutLines = emptyList()
+            animProgress = 1f
+            blurRevealPaint.clearShadowLayer()
+            if (singleLineMode && maxScrollX > 0f) {
+                updateHorizontalScrollTarget(positionMs)
+                currentScrollX = targetScrollX
+            }
+            if (maxScrollY > 0f) {
+                updateScrollTarget(positionMs)
+                currentScrollY = targetScrollY
+            }
+        }
 
         if (isPlaying) {
             startLoopIfNeeded()
@@ -339,6 +461,8 @@ class MinimalOverlayView(
         val currentStyle = when (animationStyle) {
             "KARAOKE", "APPLE_MUSIC" -> "KARAOKE"
             "SMOOTH_SLIDE", "SMOOTH_SLIDE_UP", "SOFT_FADE", "SCALE_POP" -> "SMOOTH_SLIDE"
+            "FADE", "FADE_IN_OUT" -> "FADE"
+            "BLUR_REVEAL", "BLUR" -> "BLUR_REVEAL"
             "TYPEWRITER" -> "TYPEWRITER"
             "INSTANT", "MINIMAL_STATIC" -> "INSTANT"
             else -> "KARAOKE"
@@ -351,7 +475,19 @@ class MinimalOverlayView(
 
         animProgress = 0f
         transitionAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 240L
+            val baseDuration = when (currentStyle) {
+                "SMOOTH_SLIDE" -> 300L
+                "FADE" -> 360L
+                "BLUR_REVEAL" -> 400L
+                else -> 240L
+            }
+            val speed = when (currentStyle) {
+                "SMOOTH_SLIDE" -> smoothTransitionSpeed.coerceIn(0.3f, 3.0f)
+                "FADE" -> fadeSpeed.coerceIn(0.3f, 3.0f)
+                "BLUR_REVEAL" -> blurRevealSpeed.coerceIn(0.3f, 3.0f)
+                else -> 1.0f
+            }
+            duration = kotlin.math.round(baseDuration / speed.toDouble()).toLong().coerceIn(100L, 2000L)
             interpolator = DecelerateInterpolator(1.5f)
             addUpdateListener { animator ->
                 animProgress = animator.animatedValue as Float
@@ -366,6 +502,9 @@ class MinimalOverlayView(
         maxScrollY = 0f
         targetScrollY = 0f
         currentScrollY = 0f
+        maxScrollX = 0f
+        targetScrollX = 0f
+        currentScrollX = 0f
 
         val currentLine = activeLyricLine
         val rawText = currentLine?.text ?: text
@@ -410,33 +549,48 @@ class MinimalOverlayView(
             return
         }
 
-        // 2. Wrap words into lines strictly respecting availableWidth
+        // 2. Wrap words into lines strictly respecting availableWidth (or keep single line if singleLineMode)
         val lineList = mutableListOf<LayoutLine>()
-        var curLineWords = mutableListOf<LayoutWord>()
-        var curLineWidth = 0f
-
-        for (w in wordsToWrap) {
-            val additionalWidth = if (curLineWords.isEmpty()) w.width else (spaceWidth + w.width)
-            if (curLineWords.isNotEmpty() && (curLineWidth + additionalWidth > availableWidth)) {
-                lineList.add(LayoutLine(curLineWords, curLineWidth))
-                curLineWords = mutableListOf(w)
-                curLineWidth = w.width
-            } else {
-                curLineWords.add(w)
-                curLineWidth += additionalWidth
+        if (singleLineMode) {
+            var curLineWidth = 0f
+            for ((idx, w) in wordsToWrap.withIndex()) {
+                curLineWidth += w.width + (if (idx > 0) spaceWidth else 0f)
             }
-        }
-        if (curLineWords.isNotEmpty()) {
-            lineList.add(LayoutLine(curLineWords, curLineWidth))
+            lineList.add(LayoutLine(wordsToWrap.toMutableList(), curLineWidth))
+            maxScrollX = (curLineWidth - availableWidth + 24f).coerceAtLeast(0f)
+        } else {
+            var curLineWords = mutableListOf<LayoutWord>()
+            var curLineWidth = 0f
+
+            for (w in wordsToWrap) {
+                val additionalWidth = if (curLineWords.isEmpty()) w.width else (spaceWidth + w.width)
+                if (curLineWords.isNotEmpty() && (curLineWidth + additionalWidth > availableWidth)) {
+                    lineList.add(LayoutLine(curLineWords, curLineWidth))
+                    curLineWords = mutableListOf(w)
+                    curLineWidth = w.width
+                } else {
+                    curLineWords.add(w)
+                    curLineWidth += additionalWidth
+                }
+            }
+            if (curLineWords.isNotEmpty()) {
+                lineList.add(LayoutLine(curLineWords, curLineWidth))
+            }
+            maxScrollX = 0f
         }
 
         // 3. Compute paragraph alignment (LEFT, CENTER / CENTRE, RIGHT) for each line
         val alignUpper = textAlignMode.trim().uppercase()
         for (line in lineList) {
-            val startX = when (alignUpper) {
-                "LEFT" -> contentLeft
-                "RIGHT" -> (contentRight - line.lineWidth).coerceAtLeast(contentLeft)
-                else -> contentLeft + ((availableWidth - line.lineWidth) / 2f).coerceAtLeast(0f)
+            val startX = if (singleLineMode && line.lineWidth > availableWidth) {
+                // When single line exceeds width, start at contentLeft so scrolling from right to left smoothly reveals the rest
+                contentLeft
+            } else {
+                when (alignUpper) {
+                    "LEFT" -> contentLeft
+                    "RIGHT" -> (contentRight - line.lineWidth).coerceAtLeast(contentLeft)
+                    else -> contentLeft + ((availableWidth - line.lineWidth) / 2f).coerceAtLeast(0f)
+                }
             }
             var curX = startX
             for (w in line.words) {
@@ -486,11 +640,28 @@ class MinimalOverlayView(
         }
 
         var activeLineIdx = 0
-        for ((lineIdx, line) in currentLayoutLines.withIndex()) {
-            for (w in line.words) {
-                if (posMs >= w.startMs) {
+        val isWordSynced = activeLyricLine?.isWordSynced == true
+        if (isWordSynced && activeLyricLine?.words?.isNotEmpty() == true) {
+            for ((lineIdx, line) in currentLayoutLines.withIndex()) {
+                val lineStartMs = line.words.firstOrNull()?.startMs ?: 0L
+                if (posMs >= lineStartMs) {
                     activeLineIdx = lineIdx
                 }
+            }
+        } else {
+            val lineStart = activeLyricLine?.timeMs ?: 0L
+            val lineEnd = activeLyricLine?.endTimeMs ?: (lineStart + 3500L)
+            val rawDuration = (lineEnd - lineStart).coerceIn(1500L, 8000L)
+            val totalChars = currentLayoutLines.sumOf { l -> l.words.sumOf { it.word.length } }.coerceAtLeast(1)
+            var charAcc = 0
+            for ((lineIdx, line) in currentLayoutLines.withIndex()) {
+                val lineChars = line.words.sumOf { it.word.length }.coerceAtLeast(1)
+                val startFrac = charAcc.toFloat() / totalChars
+                val lStart = lineStart + (rawDuration * startFrac).toLong()
+                if (posMs >= lStart) {
+                    activeLineIdx = lineIdx
+                }
+                charAcc += lineChars
             }
         }
 
@@ -501,6 +672,92 @@ class MinimalOverlayView(
         // Center the active line vertically in the overlay window
         val idealScrollY = activeLineCenterY - (height / 2f)
         targetScrollY = idealScrollY.coerceIn(0f, maxScrollY)
+    }
+
+    private fun updateHorizontalScrollTarget(posMs: Long) {
+        if (maxScrollX <= 0f || currentLayoutLines.isEmpty()) {
+            targetScrollX = 0f
+            return
+        }
+
+        val line = currentLayoutLines.firstOrNull() ?: return
+        val isWordSynced = activeLyricLine?.isWordSynced == true
+        val currentStyle = when (animationStyle) {
+            "KARAOKE", "APPLE_MUSIC" -> "KARAOKE"
+            "SMOOTH_SLIDE", "SMOOTH_SLIDE_UP", "SOFT_FADE", "SCALE_POP" -> "SMOOTH_SLIDE"
+            "TYPEWRITER" -> "TYPEWRITER"
+            "INSTANT", "MINIMAL_STATIC" -> "INSTANT"
+            else -> "KARAOKE"
+        }
+
+        val paddingHorizontal = 28f
+        val contentLeft = paddingHorizontal
+        val availableWidth = (width - paddingHorizontal * 2).coerceAtLeast(60f)
+
+        if (currentStyle == "KARAOKE" && isWordSynced && line.words.isNotEmpty()) {
+            // Apple-style Karaoke with TTML words: follow active singing focus point smoothly
+            val firstWordStart = line.words.first().startMs
+            val lastWordEnd = line.words.last().endMs.coerceAtLeast(firstWordStart + 1L)
+
+            if (posMs < firstWordStart) {
+                targetScrollX = 0f
+                return
+            }
+            if (posMs >= lastWordEnd) {
+                targetScrollX = maxScrollX
+                return
+            }
+
+            var focusX = contentLeft
+            for (w in line.words) {
+                if (posMs < w.startMs) {
+                    break
+                } else if (posMs >= w.endMs) {
+                    focusX = w.x + w.width
+                } else {
+                    val wDuration = (w.endMs - w.startMs).coerceAtLeast(1L)
+                    val wProg = ((posMs - w.startMs).toFloat() / wDuration).coerceIn(0f, 1f)
+                    focusX = w.x + (w.width * wProg)
+                    break
+                }
+            }
+
+            val desiredOffset = focusX - (contentLeft + availableWidth * 0.45f)
+            targetScrollX = desiredOffset.coerceIn(0f, maxScrollX)
+        } else if (currentStyle == "TYPEWRITER") {
+            // Coordinate horizontal scrolling with typewriter character reveal
+            val speed = typewriterSpeed.coerceIn(0.3f, 3.0f)
+            val lineStart = activeLyricLine?.timeMs ?: 0L
+            val lineEnd = activeLyricLine?.endTimeMs ?: (lineStart + 3500L)
+            val baseDuration = (lineEnd - lineStart).coerceIn(1200L, 4000L)
+            val duration = (baseDuration / speed).toLong().coerceIn(600L, 12000L)
+
+            val frac = if (posMs < lineStart) 0f
+                else if (posMs >= lineStart + duration) 1f
+                else ((posMs - lineStart).toFloat() / duration).coerceIn(0f, 1f)
+
+            val revealedWidth = line.lineWidth * frac
+            val desiredOffset = (contentLeft + revealedWidth) - (contentLeft + availableWidth * 0.55f)
+            targetScrollX = desiredOffset.coerceIn(0f, maxScrollX)
+        } else {
+            // SMOOTH_SLIDE, INSTANT, or LRC line-timed KARAOKE:
+            // Proportional smooth scroll from start to end of line duration
+            val lineStart = activeLyricLine?.timeMs ?: 0L
+            val lineEnd = activeLyricLine?.endTimeMs ?: (lineStart + 3500L)
+            val duration = (lineEnd - lineStart).coerceIn(1500L, 8000L)
+
+            val leadIn = (duration * 0.12f).toLong().coerceIn(200L, 800L)
+            val activeDuration = (duration - leadIn).coerceAtLeast(500L)
+
+            val frac = if (posMs <= lineStart + leadIn) {
+                0f
+            } else if (posMs >= lineStart + duration) {
+                1f
+            } else {
+                ((posMs - (lineStart + leadIn)).toFloat() / activeDuration).coerceIn(0f, 1f)
+            }
+            targetScrollX = (maxScrollX * frac).coerceIn(0f, maxScrollX)
+        }
     }
 
     fun startLoopIfNeeded() {
@@ -559,33 +816,53 @@ class MinimalOverlayView(
         val currentStyle = when (animationStyle) {
             "KARAOKE", "APPLE_MUSIC" -> "KARAOKE"
             "SMOOTH_SLIDE", "SMOOTH_SLIDE_UP", "SOFT_FADE", "SCALE_POP" -> "SMOOTH_SLIDE"
+            "FADE", "FADE_IN_OUT" -> "FADE"
+            "BLUR_REVEAL", "BLUR" -> "BLUR_REVEAL"
             "TYPEWRITER" -> "TYPEWRITER"
             "INSTANT", "MINIMAL_STATIC" -> "INSTANT"
             else -> "KARAOKE"
         }
 
-        // 1. If transition is running, draw outgoing previous line (for KARAOKE & SMOOTH_SLIDE)
+        // 1. If transition is running, draw outgoing previous line
         val baseAlpha = (255 * textOpacity).toInt().coerceIn(0, 255)
         if (animProgress < 1f && previousLayoutLines.isNotEmpty() && currentStyle != "INSTANT" && currentStyle != "TYPEWRITER") {
-            val outgoingOffsetY = -animProgress * 24f
-            val outgoingAlpha = ((1f - animProgress) * baseAlpha).toInt().coerceIn(0, 255)
+            val outgoingOffsetY = if (currentStyle == "KARAOKE" || currentStyle == "SMOOTH_SLIDE") {
+                -animProgress * 24f
+            } else {
+                0f
+            }
+            val outgoingAlpha = if (currentStyle == "FADE" || currentStyle == "BLUR_REVEAL") {
+                ((1f - animProgress) * baseAlpha).toInt().coerceIn(0, 255)
+            } else {
+                ((1f - animProgress) * (baseAlpha * 0.35f)).toInt().coerceIn(0, 255)
+            }
             previousTextPaint.alpha = outgoingAlpha
+            canvas.save()
+            if (singleLineMode && previousScrollX > 0f) {
+                canvas.translate(-previousScrollX, 0f)
+            }
             for (line in previousLayoutLines) {
                 for (w in line.words) {
                     canvas.drawText(w.word, w.x, w.y + outgoingOffsetY, previousTextPaint)
                 }
             }
+            canvas.restore()
         }
 
         // 2. Draw incoming / active lyric line
         val incomingOffsetY = if (animProgress < 1f && (currentStyle == "KARAOKE" || currentStyle == "SMOOTH_SLIDE")) {
             (1f - animProgress) * 18f
         } else 0f
-        val incomingAlpha = if (animProgress < 1f && (currentStyle == "KARAOKE" || currentStyle == "SMOOTH_SLIDE")) {
+        val incomingAlpha = if (animProgress < 1f && (currentStyle == "KARAOKE" || currentStyle == "SMOOTH_SLIDE" || currentStyle == "FADE" || currentStyle == "BLUR_REVEAL")) {
             (animProgress * baseAlpha).toInt().coerceIn(0, 255)
         } else baseAlpha
         val posMs = getCalculatedPositionMs()
         val isWordSynced = activeLyricLine?.isWordSynced == true
+
+        canvas.save()
+        if (singleLineMode && currentScrollX > 0f) {
+            canvas.translate(-currentScrollX, 0f)
+        }
 
         when (currentStyle) {
             "KARAOKE" -> {
@@ -595,50 +872,59 @@ class MinimalOverlayView(
                     wordActivePaint.alpha = incomingAlpha
                     wordGlowPaint.alpha = incomingAlpha
 
-                    for (line in currentLayoutLines) {
+                    // Determine the single active visual line index
+                    var activeLineIdx = 0
+                    for ((lineIdx, line) in currentLayoutLines.withIndex()) {
+                        val lineStartMs = line.words.firstOrNull()?.startMs ?: 0L
+                        if (posMs >= lineStartMs) {
+                            activeLineIdx = lineIdx
+                        }
+                    }
+
+                    for ((lineIdx, line) in currentLayoutLines.withIndex()) {
                         val drawY = line.baselineY - currentScrollY + incomingOffsetY
-                        for (w in line.words) {
-                            if (posMs < w.startMs) {
-                                // Word not sung yet: draw with low opacity below
-                                canvas.drawText(w.word, w.x, drawY, wordInactivePaint)
-                            } else if (posMs >= w.endMs) {
-                                // Word fully sung: draw with glowing high-opacity active text
-                                canvas.drawText(w.word, w.x, drawY, wordGlowPaint)
-                                canvas.drawText(w.word, w.x, drawY, wordActivePaint)
-                            } else {
-                                // Word actively being sung: progressive fill from left to right
-                                val duration = (w.endMs - w.startMs).coerceAtLeast(1L)
-                                val progress = ((posMs - w.startMs).toFloat() / duration).coerceIn(0f, 1f)
 
-                                // Low opacity below
+                        if (lineIdx != activeLineIdx) {
+                            // Inactive lines (previous or upcoming): display dimmed, never highlighted or glowing
+                            for (w in line.words) {
                                 canvas.drawText(w.word, w.x, drawY, wordInactivePaint)
+                            }
+                        } else {
+                            // Single active line: progressive word highlight
+                            for (w in line.words) {
+                                if (posMs < w.startMs) {
+                                    // Word not sung yet on active line: draw with low opacity below
+                                    canvas.drawText(w.word, w.x, drawY, wordInactivePaint)
+                                } else if (posMs >= w.endMs) {
+                                    // Word fully sung on active line: draw with clean active text
+                                    canvas.drawText(w.word, w.x, drawY, wordActivePaint)
+                                } else {
+                                    // Word actively being sung on active line: progressive fill from left to right
+                                    val duration = (w.endMs - w.startMs).coerceAtLeast(1L)
+                                    val progress = ((posMs - w.startMs).toFloat() / duration).coerceIn(0f, 1f)
 
-                                // High-opacity glowing active text clipped progressively left to right
-                                val splitX = w.x + (w.width * progress)
-                                canvas.save()
-                                canvas.clipRect(w.x, 0f, splitX, height.toFloat())
-                                canvas.drawText(w.word, w.x, drawY, wordGlowPaint)
-                                canvas.drawText(w.word, w.x, drawY, wordActivePaint)
-                                canvas.restore()
+                                    // Low opacity below
+                                    canvas.drawText(w.word, w.x, drawY, wordInactivePaint)
+
+                                    // High-opacity glowing active text clipped progressively left to right
+                                    val splitX = w.x + (w.width * progress)
+                                    canvas.save()
+                                    canvas.clipRect(w.x, 0f, splitX, height.toFloat())
+                                    canvas.drawText(w.word, w.x, drawY, wordGlowPaint)
+                                    canvas.drawText(w.word, w.x, drawY, wordActivePaint)
+                                    canvas.restore()
+                                }
                             }
                         }
                     }
                 } else {
-                    // 2. Synchronized word timestamps (TTML) unavailable:
-                    // Display text with low opacity below, while showing high-opacity, glowing text above that fades in slowly left to right!
+                    // 2. Synchronized word timestamps (TTML) unavailable (LRC line-timed or plain):
                     val lineStart = activeLyricLine?.timeMs ?: 0L
                     val lineEnd = activeLyricLine?.endTimeMs ?: (lineStart + 3500L)
                     val rawDuration = (lineEnd - lineStart).coerceIn(1500L, 8000L)
-                    val lineProgress = if (posMs < lineStart) {
-                        if (lineStart == 0L) 1f else 0f
-                    } else if (posMs >= lineStart + rawDuration) {
-                        1f
-                    } else {
-                        ((posMs - lineStart).toFloat() / rawDuration).coerceIn(0f, 1f)
-                    }
 
-                    // A: Display the text with low opacity below
-                    wordInactivePaint.alpha = (incomingAlpha * 0.32f).toInt().coerceIn(0, 255)
+                    // A: Always display ALL lines with low opacity below (inactive/base layer)
+                    wordInactivePaint.alpha = (incomingAlpha * 0.35f).toInt().coerceIn(0, 255)
                     for (line in currentLayoutLines) {
                         val drawY = line.baselineY - currentScrollY + incomingOffsetY
                         for (w in line.words) {
@@ -647,20 +933,56 @@ class MinimalOverlayView(
                     }
 
                     // B: Show high-opacity glowing text above that fades in slowly left to right
-                    if (lineProgress > 0f) {
-                        wordActivePaint.alpha = incomingAlpha
-                        wordGlowPaint.alpha = incomingAlpha
+                    // CRITICAL: Only the single active visual line receives the highlight sweep!
+                    if (currentLayoutLines.isNotEmpty()) {
+                        val totalChars = currentLayoutLines.sumOf { l -> l.words.sumOf { it.word.length } }.coerceAtLeast(1)
 
-                        for (line in currentLayoutLines) {
-                            val lineLeft = line.words.firstOrNull()?.x ?: paddingHorizontal
-                            val lineRight = (line.words.lastOrNull()?.let { it.x + it.width }) ?: (width - paddingHorizontal)
+                        var activeLineIdx = 0
+                        var activeLineStart = lineStart
+                        var activeLineDuration = rawDuration
+                        var charAccumulator = 0
+
+                        for ((idx, line) in currentLayoutLines.withIndex()) {
+                            val lineChars = line.words.sumOf { it.word.length }.coerceAtLeast(1)
+                            val startFrac = charAccumulator.toFloat() / totalChars
+                            val endFrac = (charAccumulator + lineChars).toFloat() / totalChars
+                            val lStart = lineStart + (rawDuration * startFrac).toLong()
+                            val lEnd = lineStart + (rawDuration * endFrac).toLong()
+
+                            if (posMs >= lStart && (idx == currentLayoutLines.lastIndex || posMs < lEnd)) {
+                                activeLineIdx = idx
+                                activeLineStart = lStart
+                                activeLineDuration = (lEnd - lStart).coerceAtLeast(1L)
+                                break
+                            } else if (idx == currentLayoutLines.lastIndex && posMs >= lEnd) {
+                                activeLineIdx = idx
+                                activeLineStart = lStart
+                                activeLineDuration = (lEnd - lStart).coerceAtLeast(1L)
+                            }
+                            charAccumulator += lineChars
+                        }
+
+                        val lineProgress = if (posMs < activeLineStart) {
+                            if (activeLineStart == 0L) 1f else 0f
+                        } else if (posMs >= activeLineStart + activeLineDuration) {
+                            1f
+                        } else {
+                            ((posMs - activeLineStart).toFloat() / activeLineDuration).coerceIn(0f, 1f)
+                        }
+
+                        if (lineProgress > 0f) {
+                            wordActivePaint.alpha = incomingAlpha
+                            wordGlowPaint.alpha = incomingAlpha
+
+                            val activeLine = currentLayoutLines[activeLineIdx]
+                            val lineLeft = activeLine.words.firstOrNull()?.x ?: paddingHorizontal
+                            val lineRight = (activeLine.words.lastOrNull()?.let { it.x + it.width }) ?: (width - paddingHorizontal)
                             val sweepX = lineLeft + ((lineRight - lineLeft) * lineProgress)
-                            val drawY = line.baselineY - currentScrollY + incomingOffsetY
+                            val drawY = activeLine.baselineY - currentScrollY + incomingOffsetY
 
                             canvas.save()
                             canvas.clipRect(0f, 0f, sweepX, height.toFloat())
-                            for (w in line.words) {
-                                canvas.drawText(w.word, w.x, drawY, wordGlowPaint)
+                            for (w in activeLine.words) {
                                 canvas.drawText(w.word, w.x, drawY, wordActivePaint)
                             }
                             canvas.restore()
@@ -672,6 +994,39 @@ class MinimalOverlayView(
                 wordActivePaint.alpha = incomingAlpha
                 for (line in currentLayoutLines) {
                     val drawY = line.baselineY - currentScrollY + incomingOffsetY
+                    for (w in line.words) {
+                        canvas.drawText(w.word, w.x, drawY, wordActivePaint)
+                    }
+                }
+            }
+            "FADE" -> {
+                wordActivePaint.alpha = incomingAlpha
+                for (line in currentLayoutLines) {
+                    val drawY = line.baselineY - currentScrollY
+                    for (w in line.words) {
+                        canvas.drawText(w.word, w.x, drawY, wordActivePaint)
+                    }
+                }
+            }
+            "BLUR_REVEAL" -> {
+                if (animProgress < 1f) {
+                    val blurRadius = (1f - animProgress) * 14f
+                    if (blurRadius > 0.8f) {
+                        blurRevealPaint.alpha = ((1f - animProgress) * baseAlpha * 0.7f).toInt().coerceIn(0, 255)
+                        blurRevealPaint.setShadowLayer(blurRadius, 0f, 0f, Color.WHITE)
+                        for (line in currentLayoutLines) {
+                            val drawY = line.baselineY - currentScrollY
+                            for (w in line.words) {
+                                canvas.drawText(w.word, w.x, drawY, blurRevealPaint)
+                            }
+                        }
+                    }
+                } else {
+                    blurRevealPaint.clearShadowLayer()
+                }
+                wordActivePaint.alpha = incomingAlpha
+                for (line in currentLayoutLines) {
+                    val drawY = line.baselineY - currentScrollY
                     for (w in line.words) {
                         canvas.drawText(w.word, w.x, drawY, wordActivePaint)
                     }
@@ -741,7 +1096,8 @@ class MinimalOverlayView(
             }
         }
 
-        canvas.restore()
+        canvas.restore() // Restore horizontal translation
+        canvas.restore() // Restore container clipRect
 
         // 3. EDIT MODE BOUNDING BOX & HANDLES (Only visible during edit mode, hidden during normal playback)
         if (isDragMode) {

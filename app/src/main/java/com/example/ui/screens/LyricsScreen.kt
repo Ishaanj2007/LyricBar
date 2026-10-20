@@ -40,8 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.domain.parser.LrcParser
 import com.example.service.MediaPlaybackManager
-import com.example.ui.theme.MintAccent
-import com.example.ui.theme.SkyAccent
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -88,41 +87,58 @@ fun LyricsScreen(
         }
     }
 
-    val activeIndex = remember(playbackState.calculatedPositionMs, currentLyrics, trackOffset) {
-        currentLyrics?.findActiveIndex(playbackState.calculatedPositionMs, trackOffset) ?: -1
+    // Continuously ticking playback position when playing for smooth UI rendering & active line calculation
+    var currentPlaybackPosMs by remember { mutableLongStateOf(playbackState.calculatedPositionMs) }
+
+    LaunchedEffect(playbackState.isPlaying, playbackState.positionMs, playbackState.lastUpdatedMs, playbackState.playbackSpeed) {
+        if (playbackState.isPlaying) {
+            while (isActive) {
+                currentPlaybackPosMs = playbackState.calculatedPositionMs
+                kotlinx.coroutines.delay(33) // ~30fps UI refresh
+            }
+        } else {
+            currentPlaybackPosMs = playbackState.calculatedPositionMs
+        }
+    }
+
+    val activeIndex = remember(currentPlaybackPosMs, currentLyrics, trackOffset) {
+        currentLyrics?.findActiveIndex(currentPlaybackPosMs, trackOffset) ?: -1
     }
 
     // Smooth auto-scroll keeping active line vertically centered like Apple Music
     LaunchedEffect(activeIndex) {
-        if (activeIndex in 0..(currentLyrics?.lines?.size ?: 0)) {
+        if (activeIndex in 0 until (currentLyrics?.lines?.size ?: 0)) {
             val targetScroll = (activeIndex - 2).coerceAtLeast(0)
             listState.animateScrollToItem(targetScroll)
         }
     }
+
+    val themePrimary = MaterialTheme.colorScheme.primary
+    val themeSecondary = MaterialTheme.colorScheme.secondary
 
     // Apple Music signature atmospheric gradient mesh background
     Box(
         modifier = modifier
             .fillMaxSize()
             .drawBehind {
-                // Top-left atmospheric radial glow (deep twilight cyan)
+                // Top-left atmospheric radial glow (adaptive dynamic primary)
                 drawCircle(
                     brush = Brush.radialGradient(
-                        colors = listOf(Color(0x3338E8B0), Color.Transparent),
+                        colors = listOf(themePrimary.copy(alpha = 0.20f), Color.Transparent),
                         center = Offset(size.width * 0.2f, size.height * 0.25f),
                         radius = size.width * 0.8f
                     )
                 )
-                // Bottom-right atmospheric radial glow (deep royal purple)
+                // Bottom-right atmospheric radial glow (adaptive dynamic secondary)
                 drawCircle(
                     brush = Brush.radialGradient(
-                        colors = listOf(Color(0x384E95FF), Color.Transparent),
+                        colors = listOf(themeSecondary.copy(alpha = 0.22f), Color.Transparent),
                         center = Offset(size.width * 0.85f, size.height * 0.75f),
                         radius = size.width * 0.9f
                     )
                 )
             }
-            .background(Color(0xFF0A0D14))
+            .background(MaterialTheme.colorScheme.background)
     ) {
         Column(
             modifier = Modifier
@@ -158,13 +174,13 @@ fun LyricsScreen(
                     val lyrics = currentLyrics
                     if (lyrics != null) {
                         Surface(
-                            color = if (lyrics.isWordSynced) Color(0x3338E8B0) else if (lyrics.isSynced) Color(0x334E95FF) else Color(0x33FFB74D),
+                            color = if (lyrics.isWordSynced) themePrimary.copy(alpha = 0.2f) else if (lyrics.isSynced) themeSecondary.copy(alpha = 0.2f) else Color(0x33FFB74D),
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.padding(end = 6.dp)
                         ) {
                             Text(
                                 text = if (lyrics.isWordSynced) "TTML WORD-SYNC" else if (lyrics.isSynced) "LRC LINE-TIMED" else "PLAIN",
-                                color = if (lyrics.isWordSynced) MintAccent else if (lyrics.isSynced) SkyAccent else Color(0xFFFFB74D),
+                                color = if (lyrics.isWordSynced) themePrimary else if (lyrics.isSynced) themeSecondary else Color(0xFFFFB74D),
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
@@ -176,7 +192,7 @@ fun LyricsScreen(
                         onClick = { playbackManager.resyncLyrics(forceRefresh = true) },
                         modifier = Modifier.testTag("lyrics_resync_button")
                     ) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Resync Lyric Timeline", tint = MintAccent)
+                        Icon(Icons.Default.Refresh, contentDescription = "Resync Lyric Timeline", tint = themePrimary)
                     }
                     IconButton(
                         onClick = { showManualSearchDialog = true },
@@ -188,17 +204,116 @@ fun LyricsScreen(
                         onClick = { filePicker.launch(arrayOf("text/*", "*/*")) },
                         modifier = Modifier.testTag("upload_lrc_icon_button")
                     ) {
-                        Icon(Icons.Default.UploadFile, contentDescription = "Import TTML/LRC", tint = SkyAccent)
+                        Icon(Icons.Default.UploadFile, contentDescription = "Import TTML/LRC", tint = themeSecondary)
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(6.dp))
+            // Lyrics Delay / Timing Adjustment Bar
+            val lyrics = currentLyrics
+            if (lyrics != null && lyrics.isSynced) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Surface(
+                    color = Color(0x221E293B),
+                    shape = RoundedCornerShape(12.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x33FFFFFF)),
+                    modifier = Modifier.fillMaxWidth().testTag("lyrics_delay_control_card")
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "Timing Delay:",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF94A3B8)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            val offsetSec = trackOffset / 1000.0
+                            val formattedOffset = if (trackOffset > 0) "+%.1fs".format(offsetSec) else if (trackOffset < 0) "%.1fs".format(offsetSec) else "0.0s"
+                            Text(
+                                text = formattedOffset,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (trackOffset != 0L) themePrimary else Color.White,
+                                modifier = Modifier.testTag("lyrics_delay_display")
+                            )
+                        }
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            // -0.5s
+                            FilledTonalButton(
+                                onClick = { playbackManager.adjustTrackOffset(-500L) },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.filledTonalButtonColors(containerColor = Color(0x33FFFFFF)),
+                                modifier = Modifier.height(28.dp).testTag("lyrics_delay_minus_500")
+                            ) {
+                                Text("-0.5s", fontSize = 11.sp, color = Color.White)
+                            }
+                            // -0.1s
+                            FilledTonalButton(
+                                onClick = { playbackManager.adjustTrackOffset(-100L) },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.filledTonalButtonColors(containerColor = Color(0x33FFFFFF)),
+                                modifier = Modifier.height(28.dp).testTag("lyrics_delay_minus_100")
+                            ) {
+                                Text("-0.1s", fontSize = 11.sp, color = Color.White)
+                            }
+                            // Reset
+                            if (trackOffset != 0L) {
+                                FilledTonalButton(
+                                    onClick = { playbackManager.setExplicitOffset(0L) },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = ButtonDefaults.filledTonalButtonColors(
+                                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                    ),
+                                    modifier = Modifier.height(28.dp).testTag("lyrics_delay_reset")
+                                ) {
+                                    Text("Reset", fontSize = 11.sp, color = MaterialTheme.colorScheme.onPrimaryContainer, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            // +0.1s
+                            FilledTonalButton(
+                                onClick = { playbackManager.adjustTrackOffset(100L) },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.filledTonalButtonColors(containerColor = Color(0x33FFFFFF)),
+                                modifier = Modifier.height(28.dp).testTag("lyrics_delay_plus_100")
+                            ) {
+                                Text("+0.1s", fontSize = 11.sp, color = Color.White)
+                            }
+                            // +0.5s
+                            FilledTonalButton(
+                                onClick = { playbackManager.adjustTrackOffset(500L) },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.filledTonalButtonColors(containerColor = Color(0x33FFFFFF)),
+                                modifier = Modifier.height(28.dp).testTag("lyrics_delay_plus_500")
+                            ) {
+                                Text("+0.5s", fontSize = 11.sp, color = Color.White)
+                            }
+                        }
+                    }
+                }
+            } else {
+                Spacer(modifier = Modifier.height(6.dp))
+            }
 
             Spacer(modifier = Modifier.height(6.dp))
 
             // Lyrics List
-            val lyrics = currentLyrics
             Box(modifier = Modifier.weight(1f)) {
                 when {
                     isLoading -> {
@@ -207,7 +322,7 @@ fun LyricsScreen(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center
                         ) {
-                            CircularProgressIndicator(color = MintAccent)
+                            CircularProgressIndicator(color = themePrimary)
                             Spacer(modifier = Modifier.height(16.dp))
                             Text(
                                 text = "Searching synchronized lyrics…",
@@ -243,13 +358,16 @@ fun LyricsScreen(
                             ) {
                                 Button(
                                     onClick = { showManualSearchDialog = true },
-                                    colors = ButtonDefaults.buttonColors(containerColor = MintAccent),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = themePrimary,
+                                        contentColor = MaterialTheme.colorScheme.onPrimary
+                                    ),
                                     shape = RoundedCornerShape(12.dp),
                                     modifier = Modifier.testTag("empty_state_search_button")
                                 ) {
-                                    Icon(Icons.Default.Search, contentDescription = null, tint = Color(0xFF0D0F14))
+                                    Icon(Icons.Default.Search, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary)
                                     Spacer(Modifier.width(8.dp))
-                                    Text("Search Online", color = Color(0xFF0D0F14))
+                                    Text("Search Online", color = MaterialTheme.colorScheme.onPrimary)
                                 }
                                 Spacer(Modifier.width(12.dp))
                                 OutlinedButton(
@@ -257,9 +375,9 @@ fun LyricsScreen(
                                     shape = RoundedCornerShape(12.dp),
                                     modifier = Modifier.testTag("empty_state_import_button")
                                 ) {
-                                    Icon(Icons.Default.UploadFile, contentDescription = null, tint = SkyAccent)
+                                    Icon(Icons.Default.UploadFile, contentDescription = null, tint = themeSecondary)
                                     Spacer(Modifier.width(8.dp))
-                                    Text("Import File", color = SkyAccent)
+                                    Text("Import File", color = themeSecondary)
                                 }
                             }
                         }
@@ -268,9 +386,12 @@ fun LyricsScreen(
                         LazyColumn(
                             state = listState,
                             modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(top = 20.dp, bottom = 120.dp)
+                            contentPadding = PaddingValues(top = 10.dp, bottom = 120.dp)
                         ) {
-                            itemsIndexed(lyrics.lines) { index, line ->
+                            itemsIndexed(
+                                items = lyrics.lines,
+                                key = { index, line -> "${line.timeMs}_${index}" }
+                            ) { index, line ->
                                 val isActive = index == activeIndex
                                 val isPast = activeIndex != -1 && index < activeIndex
 
@@ -312,7 +433,7 @@ fun LyricsScreen(
                                             modifier = Modifier.fillMaxWidth(),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            val currentPos = playbackState.calculatedPositionMs + trackOffset
+                                            val currentPos = currentPlaybackPosMs + trackOffset
                                             val inAppTextAlign = when (userPreferences.overlayTextAlign.uppercase()) {
                                                 "LEFT" -> TextAlign.Start
                                                 "RIGHT" -> TextAlign.End
@@ -329,7 +450,7 @@ fun LyricsScreen(
                                                             Color.White.copy(alpha = 0.35f)
                                                         } else {
                                                             // Currently sung word glowing sweep
-                                                            MintAccent
+                                                            themePrimary
                                                         }
                                                         val wordWeight = if (wordProg > 0f) FontWeight.ExtraBold else FontWeight.Bold
                                                         pushStyle(androidx.compose.ui.text.SpanStyle(color = wordColor, fontWeight = wordWeight))
@@ -374,7 +495,7 @@ fun LyricsScreen(
                                                         text = "%02d:%02d".format(minutes, seconds),
                                                         fontSize = 11.sp,
                                                         fontWeight = FontWeight.Bold,
-                                                        color = MintAccent,
+                                                        color = themePrimary,
                                                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
                                                     )
                                                 }
@@ -440,12 +561,12 @@ fun LyricsScreen(
                             onClick = { playbackManager.togglePlayPause() },
                             modifier = Modifier
                                 .size(40.dp)
-                                .background(MintAccent, CircleShape)
+                                .background(themePrimary, CircleShape)
                         ) {
                             Icon(
                                 imageVector = if (playbackState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                                 contentDescription = if (playbackState.isPlaying) "Pause" else "Play",
-                                tint = Color(0xFF0D0F14)
+                                tint = MaterialTheme.colorScheme.onPrimary
                             )
                         }
                     }
@@ -513,10 +634,13 @@ private fun ManualSearchDialog(
         confirmButton = {
             Button(
                 onClick = { onSearch(title, artist) },
-                colors = ButtonDefaults.buttonColors(containerColor = MintAccent),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ),
                 modifier = Modifier.testTag("submit_search_button")
             ) {
-                Text("Search", color = Color(0xFF0D0F14))
+                Text("Search", color = MaterialTheme.colorScheme.onPrimary)
             }
         },
         dismissButton = {

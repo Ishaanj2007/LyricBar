@@ -22,7 +22,6 @@ import androidx.compose.ui.unit.dp
 import com.example.data.preferences.UserPreferences
 import com.example.service.OverlayService
 import com.example.ui.screens.*
-import com.example.ui.theme.MintAccent
 import com.example.ui.theme.MyApplicationTheme
 
 enum class AppTab(val title: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
@@ -114,9 +113,9 @@ fun MainAppScaffold(
                         icon = { Icon(tab.icon, contentDescription = tab.title) },
                         label = { Text(tab.title) },
                         colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = MaterialTheme.colorScheme.background,
-                            indicatorColor = MintAccent,
-                            selectedTextColor = MintAccent
+                            selectedIconColor = MaterialTheme.colorScheme.onPrimary,
+                            indicatorColor = MaterialTheme.colorScheme.primary,
+                            selectedTextColor = MaterialTheme.colorScheme.primary
                         ),
                         modifier = Modifier.testTag("nav_tab_${tab.name.lowercase()}")
                     )
