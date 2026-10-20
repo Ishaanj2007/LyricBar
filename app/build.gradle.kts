@@ -20,8 +20,8 @@ android {
     // To release a new update of LyricBar:
     // 1. Increment versionCode integer by 1 (e.g., 1 -> 2)
     // 2. Update versionName string (e.g., "1.0" -> "1.1")
-    versionCode = 1
-    versionName = "1.0"
+    versionCode = 2
+    versionName = "1.1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

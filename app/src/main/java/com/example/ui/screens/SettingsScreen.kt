@@ -1675,7 +1675,7 @@ fun SettingsScreen(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "Version 1.0.0",
+                    text = "Version 1.1.0",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
