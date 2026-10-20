@@ -136,22 +136,6 @@ The tests need to be run in a compatible environment to confirm that they pass.
 
 - Song titles, artists, and playback information are used to identify lyrics and synchronize them with playback.
 - Online lyric searches send the required song metadata to the selected lyric provider.
-- Review the implementation and provider terms before distributing a public release.
-- Never commit private API keys, signing keys, passwords, or local machine configuration to GitHub.
-
-## Before Publishing 🛠️
-
-A few things worth checking before calling LyricBar production-ready:
-
-- Karaoke highlighting stays smooth and synchronized during long playback sessions.
-- Lyrics timing adjustment works in both directions and persists correctly.
-- Long lyrics and single-line scrolling remain responsive.
-- All animation styles work without freezing or excessive lag.
-- Dynamic colours apply consistently to the main app and floating overlay.
-- Permissions and foreground-service behaviour work on supported Android versions.
-- Unit tests pass and a release build completes successfully.
-
-The source may still contain internal identifiers such as `Auralis` or `com.example`, even though the visible app name is LyricBar. Review these before publishing. Changing the application ID after release can prevent normal in-place updates.
 
 ## License 📄
 
