@@ -13,9 +13,13 @@ android {
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
-    applicationId = "com.aistudio.auralis.kxmpzq"
+    applicationId = "com.aistudio.lyricbar.kxmpzq"
     minSdk = 24
     targetSdk = 36
+    // VERSION MANAGEMENT:
+    // To release a new update of LyricBar:
+    // 1. Increment versionCode integer by 1 (e.g., 1 -> 2)
+    // 2. Update versionName string (e.g., "1.0" -> "1.1")
     versionCode = 1
     versionName = "1.0"
 

@@ -11,7 +11,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
-class AuralisApp : Application() {
+class LyricBarApp : Application() {
 
     private val appScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     lateinit var playbackManager: MediaPlaybackManager
@@ -33,8 +33,8 @@ class AuralisApp : Application() {
                 Pair(state, prefs)
             }.collect { (state, prefs) ->
                 if (prefs.overlayEnabled && prefs.autoShowOnPlayback && state.isPlaying) {
-                    if (Settings.canDrawOverlays(this@AuralisApp)) {
-                        OverlayService.start(this@AuralisApp)
+                    if (Settings.canDrawOverlays(this@LyricBarApp)) {
+                        OverlayService.start(this@LyricBarApp)
                     }
                 }
             }

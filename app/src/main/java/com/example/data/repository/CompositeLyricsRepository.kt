@@ -1,7 +1,7 @@
 package com.example.data.repository
 
 import android.content.Context
-import com.example.data.local.AuralisDatabase
+import com.example.data.local.LyricBarDatabase
 import com.example.data.local.entity.LyricsEntity
 import com.example.data.local.entity.SongHistoryEntity
 import com.example.data.model.ParsedLyrics
@@ -16,7 +16,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 
 class CompositeLyricsRepository(
-    private val database: AuralisDatabase,
+    private val database: LyricBarDatabase,
     private val providers: List<LyricsProvider> = listOf(
         LrcLibProvider(),
         LyricsOvhProvider()
@@ -165,7 +165,7 @@ class CompositeLyricsRepository(
 
         fun getInstance(context: Context): CompositeLyricsRepository {
             return INSTANCE ?: synchronized(this) {
-                val db = AuralisDatabase.getInstance(context)
+                val db = LyricBarDatabase.getInstance(context)
                 val repo = CompositeLyricsRepository(db)
                 INSTANCE = repo
                 repo

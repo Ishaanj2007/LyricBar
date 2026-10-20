@@ -117,6 +117,18 @@ class MediaPlaybackManager private constructor(private val context: Context) {
             playbackSpeed = if (speed > 0f) speed else 1.0f,
             lastUpdatedMs = System.currentTimeMillis()
         )
+
+        // Immediately sync active lyric line on playback/seek update so highlight is never stale
+        val lyrics = _currentLyrics.value
+        val track = _playbackState.value.track
+        if (track != null && lyrics != null) {
+            val offset = _trackOffsetMs.value
+            val activeObj = lyrics.getActiveLyricLine(position, offset)
+            if (_activeLyricObject.value != activeObj) {
+                _activeLyricObject.value = activeObj
+                _activeLyricLine.value = activeObj?.text
+            }
+        }
     }
 
     private var offsetJob: Job? = null
@@ -127,6 +139,7 @@ class MediaPlaybackManager private constructor(private val context: Context) {
         offsetJob?.cancel()
 
         _currentLyrics.value = null
+        _activeLyricObject.value = null
         _activeLyricLine.value = null
         _isLoadingLyrics.value = true
 

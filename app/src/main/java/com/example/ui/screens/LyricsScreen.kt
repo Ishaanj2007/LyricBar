@@ -1,8 +1,12 @@
 package com.example.ui.screens
 
+import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import com.example.domain.lyricsengine.LyricsFileFormat
+import com.example.domain.lyricsengine.LyricsSearchQueryBuilder
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -165,7 +169,7 @@ fun LyricsScreen(
                     Text(
                         text = playbackState.track?.artist ?: "Apple-style synced lyrics view",
                         style = MaterialTheme.typography.bodySmall,
-                        color = Color(0xFF94A3B8),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1
                     )
                 }
@@ -214,9 +218,9 @@ fun LyricsScreen(
             if (lyrics != null && lyrics.isSynced) {
                 Spacer(modifier = Modifier.height(6.dp))
                 Surface(
-                    color = Color(0x221E293B),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
                     shape = RoundedCornerShape(12.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x33FFFFFF)),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
                     modifier = Modifier.fillMaxWidth().testTag("lyrics_delay_control_card")
                 ) {
                     Row(
@@ -231,7 +235,7 @@ fun LyricsScreen(
                                 text = "Timing Delay:",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = Color(0xFF94A3B8)
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             val offsetSec = trackOffset / 1000.0
@@ -240,7 +244,7 @@ fun LyricsScreen(
                                 text = formattedOffset,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = if (trackOffset != 0L) themePrimary else Color.White,
+                                color = if (trackOffset != 0L) themePrimary else MaterialTheme.colorScheme.onSurface,
                                 modifier = Modifier.testTag("lyrics_delay_display")
                             )
                         }
@@ -254,20 +258,26 @@ fun LyricsScreen(
                                 onClick = { playbackManager.adjustTrackOffset(-500L) },
                                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                                 shape = RoundedCornerShape(8.dp),
-                                colors = ButtonDefaults.filledTonalButtonColors(containerColor = Color(0x33FFFFFF)),
+                                colors = ButtonDefaults.filledTonalButtonColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                ),
                                 modifier = Modifier.height(28.dp).testTag("lyrics_delay_minus_500")
                             ) {
-                                Text("-0.5s", fontSize = 11.sp, color = Color.White)
+                                Text("-0.5s", fontSize = 11.sp)
                             }
                             // -0.1s
                             FilledTonalButton(
                                 onClick = { playbackManager.adjustTrackOffset(-100L) },
                                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                                 shape = RoundedCornerShape(8.dp),
-                                colors = ButtonDefaults.filledTonalButtonColors(containerColor = Color(0x33FFFFFF)),
+                                colors = ButtonDefaults.filledTonalButtonColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                ),
                                 modifier = Modifier.height(28.dp).testTag("lyrics_delay_minus_100")
                             ) {
-                                Text("-0.1s", fontSize = 11.sp, color = Color.White)
+                                Text("-0.1s", fontSize = 11.sp)
                             }
                             // Reset
                             if (trackOffset != 0L) {
@@ -289,20 +299,26 @@ fun LyricsScreen(
                                 onClick = { playbackManager.adjustTrackOffset(100L) },
                                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                                 shape = RoundedCornerShape(8.dp),
-                                colors = ButtonDefaults.filledTonalButtonColors(containerColor = Color(0x33FFFFFF)),
+                                colors = ButtonDefaults.filledTonalButtonColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                ),
                                 modifier = Modifier.height(28.dp).testTag("lyrics_delay_plus_100")
                             ) {
-                                Text("+0.1s", fontSize = 11.sp, color = Color.White)
+                                Text("+0.1s", fontSize = 11.sp)
                             }
                             // +0.5s
                             FilledTonalButton(
                                 onClick = { playbackManager.adjustTrackOffset(500L) },
                                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                                 shape = RoundedCornerShape(8.dp),
-                                colors = ButtonDefaults.filledTonalButtonColors(containerColor = Color(0x33FFFFFF)),
+                                colors = ButtonDefaults.filledTonalButtonColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                ),
                                 modifier = Modifier.height(28.dp).testTag("lyrics_delay_plus_500")
                             ) {
-                                Text("+0.5s", fontSize = 11.sp, color = Color.White)
+                                Text("+0.5s", fontSize = 11.sp)
                             }
                         }
                     }
@@ -326,7 +342,7 @@ fun LyricsScreen(
                             Spacer(modifier = Modifier.height(16.dp))
                             Text(
                                 text = "Searching synchronized lyrics…",
-                                color = Color(0xFF94A3B8)
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
@@ -340,14 +356,14 @@ fun LyricsScreen(
                                 text = "No lyrics available for this track",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White,
+                                color = MaterialTheme.colorScheme.onSurface,
                                 textAlign = TextAlign.Center
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
                                 text = "Search for lyrics online or import your own .ttml or .lrc file",
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = Color(0xFF94A3B8),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = TextAlign.Center
                             )
                             Spacer(modifier = Modifier.height(24.dp))
@@ -526,8 +542,8 @@ fun LyricsScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(bottom = 16.dp)
-                        .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(24.dp)),
-                    color = Color(0xD91E2330),
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f), RoundedCornerShape(24.dp)),
+                    color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.95f),
                     shape = RoundedCornerShape(24.dp),
                     tonalElevation = 8.dp
                 ) {
@@ -543,14 +559,14 @@ fun LyricsScreen(
                                 text = playbackState.track?.title ?: "",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp,
-                                color = Color.White,
+                                color = MaterialTheme.colorScheme.onSurface,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
                                 text = playbackState.track?.artist ?: "",
                                 fontSize = 12.sp,
-                                color = Color(0xFF94A3B8),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1
                             )
                         }
@@ -606,46 +622,135 @@ private fun ManualSearchDialog(
     onDismiss: () -> Unit,
     onSearch: (title: String, artist: String) -> Unit
 ) {
-    var title by remember { mutableStateOf(initialTitle) }
-    var artist by remember { mutableStateOf(initialArtist) }
+    val context = LocalContext.current
+    val cleanInitialTitle = remember(initialTitle) { LyricsSearchQueryBuilder.cleanMetadata(initialTitle) }
+    val cleanInitialArtist = remember(initialArtist) { LyricsSearchQueryBuilder.cleanMetadata(initialArtist) }
+
+    var title by remember { mutableStateOf(cleanInitialTitle) }
+    var artist by remember { mutableStateOf(cleanInitialArtist) }
+    var selectedFormat by remember { mutableStateOf(LyricsFileFormat.LRC) }
+
+    fun launchGoogleSearch() {
+        val query = LyricsSearchQueryBuilder.buildQuery(title, artist, selectedFormat)
+        if (query.isBlank()) {
+            Toast.makeText(context, "Please enter a song title to search", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val url = LyricsSearchQueryBuilder.buildGoogleSearchUrl(query)
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        try {
+            context.startActivity(intent)
+            onDismiss()
+        } catch (e: Exception) {
+            Toast.makeText(context, "No web browser app found to open search", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Search Lyrics Online", fontWeight = FontWeight.Bold) },
+        title = {
+            Text(
+                text = "Search Lyrics Online",
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.titleMedium
+            )
+        },
         text = {
-            Column(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
                     label = { Text("Track Title") },
+                    placeholder = { Text("e.g. Cry") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth().testTag("search_title_input")
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("search_title_input")
                 )
-                Spacer(modifier = Modifier.height(10.dp))
+
                 OutlinedTextField(
                     value = artist,
                     onValueChange = { artist = it },
-                    label = { Text("Artist") },
+                    label = { Text("Artist Name") },
+                    placeholder = { Text("e.g. Cigarettes After Sex") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth().testTag("search_artist_input")
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("search_artist_input")
+                )
+
+                Spacer(modifier = Modifier.height(2.dp))
+
+                Text(
+                    text = "Desired File Format:",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    LyricsFileFormat.entries.forEach { format ->
+                        val isSelected = selectedFormat == format
+                        FilterChip(
+                            selected = isSelected,
+                            onClick = { selectedFormat = format },
+                            label = { Text(format.displayName, fontSize = 11.sp, fontWeight = FontWeight.SemiBold) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                            ),
+                            modifier = Modifier.testTag("format_chip_${format.name.lowercase()}")
+                        )
+                    }
+                }
+
+                Text(
+                    text = selectedFormat.description,
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         },
         confirmButton = {
             Button(
-                onClick = { onSearch(title, artist) },
+                onClick = { launchGoogleSearch() },
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary
                 ),
                 modifier = Modifier.testTag("submit_search_button")
             ) {
-                Text("Search", color = MaterialTheme.colorScheme.onPrimary)
+                Text("Search Google", color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(
+                    onClick = {
+                        val cleanT = LyricsSearchQueryBuilder.cleanMetadata(title)
+                        val cleanA = LyricsSearchQueryBuilder.cleanMetadata(artist)
+                        if (cleanT.isBlank()) {
+                            Toast.makeText(context, "Please enter a song title to search", Toast.LENGTH_SHORT).show()
+                        } else {
+                            onSearch(cleanT, cleanA)
+                        }
+                    },
+                    modifier = Modifier.testTag("submit_in_app_search_button")
+                ) {
+                    Text("In-App Lookup")
+                }
+
+                TextButton(onClick = onDismiss) {
+                    Text("Cancel")
+                }
             }
         }
     )

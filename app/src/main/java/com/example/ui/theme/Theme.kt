@@ -18,10 +18,10 @@ private val ObsidianMintScheme = darkColorScheme(
     onPrimary = Color(0xFF003826),
     primaryContainer = MintAccentDim,
     onPrimaryContainer = Color(0xFF6FF7CC),
-    secondary = SkyAccent,
-    onSecondary = Color(0xFF003549),
-    secondaryContainer = Color(0xFF004D69),
-    onSecondaryContainer = Color(0xFFC3E8FF),
+    secondary = Color(0xFF34D399),
+    onSecondary = Color(0xFF003822),
+    secondaryContainer = Color(0xFF064E3B),
+    onSecondaryContainer = Color(0xFFA7F3D0),
     background = DarkBackground,
     onBackground = TextPrimary,
     surface = DarkSurface,
@@ -29,19 +29,21 @@ private val ObsidianMintScheme = darkColorScheme(
     surfaceVariant = DarkSurfaceContainer,
     onSurfaceVariant = TextSecondary,
     surfaceContainer = DarkSurfaceElevated,
-    outline = Color(0xFF334155),
-    outlineVariant = Color(0xFF1E293B),
-    error = CoralAccent,
-    onError = Color.White
+    outline = Color(0xFF263C32),
+    outlineVariant = Color(0xFF16251F),
+    error = Color(0xFFF87171),
+    onError = Color(0xFF450A0A)
 )
 
 private val MidnightAzureScheme = darkColorScheme(
     primary = AzurePrimary,
-    onPrimary = Color.White,
+    onPrimary = Color(0xFF002952),
     primaryContainer = Color(0xFF1E3A8A),
-    onPrimaryContainer = Color.White,
+    onPrimaryContainer = Color(0xFFBFDBFE),
     secondary = AzureSecondary,
-    onSecondary = Color.White,
+    onSecondary = Color(0xFF0A2540),
+    secondaryContainer = Color(0xFF1E293B),
+    onSecondaryContainer = Color(0xFFE2E8F0),
     background = AzureBackground,
     onBackground = TextPrimary,
     surface = AzureSurface,
@@ -49,17 +51,21 @@ private val MidnightAzureScheme = darkColorScheme(
     surfaceVariant = AzureSurfaceContainer,
     onSurfaceVariant = TextSecondary,
     surfaceContainer = Color(0xFF223152),
-    error = CoralAccent,
-    onError = Color.White
+    outline = Color(0xFF2D3F66),
+    outlineVariant = Color(0xFF1E293B),
+    error = Color(0xFFF87171),
+    onError = Color(0xFF450A0A)
 )
 
 private val SunsetAmberScheme = darkColorScheme(
     primary = AmberPrimary,
     onPrimary = Color(0xFF1F1200),
     primaryContainer = Color(0xFF78350F),
-    onPrimaryContainer = Color.White,
+    onPrimaryContainer = Color(0xFFFDE68A),
     secondary = AmberSecondary,
     onSecondary = Color(0xFF1F1200),
+    secondaryContainer = Color(0xFF451A03),
+    onSecondaryContainer = Color(0xFFFED7AA),
     background = AmberBackground,
     onBackground = TextPrimary,
     surface = AmberSurface,
@@ -67,17 +73,21 @@ private val SunsetAmberScheme = darkColorScheme(
     surfaceVariant = AmberSurfaceContainer,
     onSurfaceVariant = TextSecondary,
     surfaceContainer = Color(0xFF3D2A1F),
-    error = CoralAccent,
-    onError = Color.White
+    outline = Color(0xFF523B28),
+    outlineVariant = Color(0xFF2E1F14),
+    error = Color(0xFFF87171),
+    onError = Color(0xFF450A0A)
 )
 
 private val CyberVioletScheme = darkColorScheme(
     primary = VioletPrimary,
-    onPrimary = Color.White,
+    onPrimary = Color(0xFF2E0854),
     primaryContainer = Color(0xFF581C87),
-    onPrimaryContainer = Color.White,
+    onPrimaryContainer = Color(0xFFE9D5FF),
     secondary = VioletSecondary,
-    onSecondary = Color.White,
+    onSecondary = Color(0xFF2E0854),
+    secondaryContainer = Color(0xFF3B0764),
+    onSecondaryContainer = Color(0xFFF3E8FF),
     background = VioletBackground,
     onBackground = TextPrimary,
     surface = VioletSurface,
@@ -85,8 +95,10 @@ private val CyberVioletScheme = darkColorScheme(
     surfaceVariant = VioletSurfaceContainer,
     onSurfaceVariant = TextSecondary,
     surfaceContainer = Color(0xFF372654),
-    error = CoralAccent,
-    onError = Color.White
+    outline = Color(0xFF4C2A75),
+    outlineVariant = Color(0xFF281440),
+    error = Color(0xFFF87171),
+    onError = Color(0xFF450A0A)
 )
 
 @Composable
@@ -101,17 +113,10 @@ fun MyApplicationTheme(
 
     val colorScheme: ColorScheme = if (useWallpaperDynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         if (darkTheme) {
-            val dynamicDark = dynamicDarkColorScheme(context)
-            dynamicDark.copy(
-                background = DarkBackground,
-                surface = DarkSurface,
-                surfaceVariant = DarkSurfaceContainer,
-                surfaceContainer = DarkSurfaceElevated,
-                onBackground = TextPrimary,
-                onSurface = TextPrimary,
-                onSurfaceVariant = TextSecondary
-            )
+            // Authentic native Material You dynamic dark scheme with tonal harmony
+            dynamicDarkColorScheme(context)
         } else {
+            // Authentic native Material You dynamic light scheme
             dynamicLightColorScheme(context)
         }
     } else {

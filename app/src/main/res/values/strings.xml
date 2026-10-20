@@ -9,4 +9,10 @@
     <string name="permission_overlay_desc">Allows floating lyrics to be drawn over any screen or music player.</string>
     <string name="permission_listener_title">Media &amp; Notification Access</string>
     <string name="permission_listener_desc">Used solely to detect currently playing track metadata and playback position.</string>
+    <string name="show_more_fonts">Show more fonts</string>
+    <string name="show_less_fonts">Show less</string>
+    <string name="about_title">ABOUT &amp; DEVELOPER</string>
+    <string name="developer_name">Ishaan</string>
+    <string name="made_with_love">Made with ❤️ by Ishaan</string>
+    <string name="open_source_tagline">Open source • AI-assisted development</string>
 </resources>

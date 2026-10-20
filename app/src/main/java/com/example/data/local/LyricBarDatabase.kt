@@ -14,21 +14,21 @@ import com.example.data.local.entity.SongHistoryEntity
     version = 1,
     exportSchema = false
 )
-abstract class AuralisDatabase : RoomDatabase() {
+abstract class LyricBarDatabase : RoomDatabase() {
 
     abstract fun lyricsDao(): LyricsDao
     abstract fun songHistoryDao(): SongHistoryDao
 
     companion object {
         @Volatile
-        private var INSTANCE: AuralisDatabase? = null
+        private var INSTANCE: LyricBarDatabase? = null
 
-        fun getInstance(context: Context): AuralisDatabase {
+        fun getInstance(context: Context): LyricBarDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
-                    AuralisDatabase::class.java,
-                    "auralis_database"
+                    LyricBarDatabase::class.java,
+                    "lyricbar_database"
                 )
                     .fallbackToDestructiveMigration(true)
                     .build()

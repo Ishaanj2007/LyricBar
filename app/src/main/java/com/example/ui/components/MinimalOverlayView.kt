@@ -51,7 +51,7 @@ class MinimalOverlayView(
         color = Color.WHITE
         textAlign = Paint.Align.LEFT
         isFakeBoldText = true
-        setShadowLayer(4f, 0f, 0f, Color.argb(120, 255, 255, 255))
+        setShadowLayer(14f, 0f, 0f, Color.argb(220, 255, 255, 255))
     }
 
     private val blurRevealPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -62,24 +62,21 @@ class MinimalOverlayView(
 
     // Editable bounding box paints (displayed ONLY when isDragMode == true)
     private val editBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(160, 56, 232, 176) // Adaptive boundary outline
+        color = androidx.core.graphics.ColorUtils.setAlphaComponent(Color.WHITE, 160)
         style = Paint.Style.STROKE
         strokeWidth = 2.5f
     }
 
     private val editHandlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(220, 56, 232, 176)
+        color = androidx.core.graphics.ColorUtils.setAlphaComponent(Color.WHITE, 220)
         style = Paint.Style.FILL
     }
 
-    var primaryColor: Int = Color.argb(255, 0, 229, 163)
+    var primaryColor: Int = Color.WHITE
         set(value) {
             field = value
-            val r = Color.red(value)
-            val g = Color.green(value)
-            val b = Color.blue(value)
-            editBorderPaint.color = Color.argb(160, r, g, b)
-            editHandlePaint.color = Color.argb(220, r, g, b)
+            editBorderPaint.color = androidx.core.graphics.ColorUtils.setAlphaComponent(value, 160)
+            editHandlePaint.color = androidx.core.graphics.ColorUtils.setAlphaComponent(value, 220)
             invalidate()
         }
 
@@ -169,8 +166,8 @@ class MinimalOverlayView(
                 else -> "KARAOKE"
             }
 
-            // Run continuous 60 FPS animation loop only when there are active per-frame updates
-            val isKaraoke = currentStyle == "KARAOKE" && activeLyricLine != null
+            // Run continuous 60 FPS animation loop whenever music is playing in KARAOKE style
+            val isKaraoke = currentStyle == "KARAOKE"
             val needsContinuous = isPlaying && (
                 isKaraoke ||
                 (currentStyle == "TYPEWRITER") ||
@@ -439,6 +436,7 @@ class MinimalOverlayView(
         if (isPlaying) {
             startLoopIfNeeded()
         } else {
+            stopLoop()
             invalidate()
         }
     }
@@ -767,6 +765,11 @@ class MinimalOverlayView(
         }
     }
 
+    fun stopLoop() {
+        removeCallbacks(frameRunnable)
+        isLoopRunning = false
+    }
+
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         if (isPlaying) {
@@ -777,7 +780,7 @@ class MinimalOverlayView(
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
         transitionAnimator?.cancel()
-        isLoopRunning = false
+        stopLoop()
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
@@ -896,7 +899,8 @@ class MinimalOverlayView(
                                     // Word not sung yet on active line: draw with low opacity below
                                     canvas.drawText(w.word, w.x, drawY, wordInactivePaint)
                                 } else if (posMs >= w.endMs) {
-                                    // Word fully sung on active line: draw with clean active text
+                                    // Word fully sung on active line: draw with glowing high-opacity active text
+                                    canvas.drawText(w.word, w.x, drawY, wordGlowPaint)
                                     canvas.drawText(w.word, w.x, drawY, wordActivePaint)
                                 } else {
                                     // Word actively being sung on active line: progressive fill from left to right
@@ -983,6 +987,7 @@ class MinimalOverlayView(
                             canvas.save()
                             canvas.clipRect(0f, 0f, sweepX, height.toFloat())
                             for (w in activeLine.words) {
+                                canvas.drawText(w.word, w.x, drawY, wordGlowPaint)
                                 canvas.drawText(w.word, w.x, drawY, wordActivePaint)
                             }
                             canvas.restore()

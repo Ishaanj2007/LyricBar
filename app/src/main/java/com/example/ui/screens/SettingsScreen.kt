@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -39,6 +40,7 @@ import com.example.data.repository.CompositeLyricsRepository
 import com.example.service.MediaPlaybackManager
 import com.example.service.OverlayService
 import com.example.ui.theme.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import kotlinx.coroutines.launch
 
 @Composable
@@ -50,6 +52,7 @@ fun SettingsScreen(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     var showCacheClearedToast by remember { mutableStateOf(false) }
+    var isFontListExpanded by rememberSaveable { mutableStateOf(false) }
 
     Column(
         modifier = modifier
@@ -1426,12 +1429,52 @@ fun SettingsScreen(
                 )
                 Spacer(modifier = Modifier.height(10.dp))
 
+                val allFonts = com.example.data.preferences.FontOption.entries
+                val visibleFonts = if (isFontListExpanded) allFonts else allFonts.take(4)
+                val selectedFont = userPreferences.selectedFont
+                val isSelectedFontHidden = !isFontListExpanded && selectedFont !in visibleFonts
+
+                if (isSelectedFontHidden) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { isFontListExpanded = true },
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Selected: ${selectedFont.title}",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = "Tap to reveal in list",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                    }
+                }
+
                 Column(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .animateContentSize(),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    com.example.data.preferences.FontOption.entries.forEach { fontOption ->
-                        val isSelected = userPreferences.selectedFont == fontOption
+                    visibleFonts.forEach { fontOption ->
+                        val isSelected = selectedFont == fontOption
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -1443,7 +1486,7 @@ fun SettingsScreen(
                                 }
                                 .border(
                                     width = if (isSelected) 2.dp else 1.dp,
-                                    color = if (isSelected) MaterialTheme.colorScheme.primary else Color(0xFF2A3142),
+                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
                                     shape = RoundedCornerShape(10.dp)
                                 ),
                             color = if (isSelected) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surfaceContainer,
@@ -1480,6 +1523,34 @@ fun SettingsScreen(
                                     )
                                 }
                             }
+                        }
+                    }
+
+                    OutlinedButton(
+                        onClick = { isFontListExpanded = !isFontListExpanded },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = MaterialTheme.colorScheme.primary
+                        )
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Text(
+                                text = if (isFontListExpanded) "Show less" else "Show more fonts",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Icon(
+                                imageVector = if (isFontListExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                contentDescription = if (isFontListExpanded) "Show less fonts" else "Show more fonts",
+                                modifier = Modifier.size(18.dp)
+                            )
                         }
                     }
                 }
@@ -1573,6 +1644,84 @@ fun SettingsScreen(
             }
         }
 
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // SECTION 8: ABOUT & DEVELOPER
+        SettingsSectionHeader(title = "ABOUT & DEVELOPER")
+
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(16.dp),
+            tonalElevation = 2.dp
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(18.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Info,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(36.dp)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "LyricBar",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = "Version 1.0.0",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Made with ❤️ by ${DeveloperConfig.DEVELOPER_NAME}",
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = "Visit Github For More Projects",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(DeveloperConfig.GITHUB_PROFILE_URL))
+                            context.startActivity(intent)
+                        },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text("Developer GitHub", fontSize = 12.sp, maxLines = 1)
+                    }
+
+                    Button(
+                        onClick = {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(DeveloperConfig.SOURCE_CODE_URL))
+                            context.startActivity(intent)
+                        },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text("Source Code", fontSize = 12.sp, maxLines = 1)
+                    }
+                }
+            }
+        }
+
         Spacer(modifier = Modifier.height(84.dp))
     }
 }
@@ -1602,9 +1751,9 @@ private fun AnimationStylePreview(
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = 10.dp),
-        color = Color(0xFF0F131C),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
         shape = RoundedCornerShape(12.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF232A3B))
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
     ) {
         Column(
             modifier = Modifier.padding(14.dp),
@@ -1628,11 +1777,17 @@ private fun AnimationStylePreview(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         sampleWords.forEachIndexed { idx, w ->
-                            val isSung = idx <= activeWordIndex
+                            val isSung = idx < activeWordIndex
+                            val isCurrent = idx == activeWordIndex
+                            val wordColor = when {
+                                isCurrent -> MaterialTheme.colorScheme.primary
+                                isSung -> Color.White.copy(alpha = textOpacity)
+                                else -> Color.White.copy(alpha = 0.35f * textOpacity)
+                            }
                             Text(
                                 text = "$w ",
-                                color = if (isSung) Color.White.copy(alpha = textOpacity) else Color.White.copy(alpha = 0.32f * textOpacity),
-                                fontWeight = FontWeight.Bold,
+                                color = wordColor,
+                                fontWeight = if (isSung || isCurrent) FontWeight.ExtraBold else FontWeight.Bold,
                                 fontSize = 13.sp
                             )
                         }
@@ -1705,7 +1860,7 @@ private fun AnimationStylePreview(
                     val durationMs = (300L / smoothTransitionSpeed.coerceIn(0.3f, 3.0f)).roundToInt()
                     Text(
                         text = "Smooth transition • ${String.format(java.util.Locale.US, "%.1f×", smoothTransitionSpeed)} speed (${durationMs}ms duration)",
-                        color = Color(0xFF94A3B8),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 10.sp
                     )
                 }
@@ -1772,7 +1927,7 @@ private fun AnimationStylePreview(
                     val durationMs = (360L / fadeSpeed.coerceIn(0.3f, 3.0f)).roundToInt()
                     Text(
                         text = "Pure fade transition • ${String.format(java.util.Locale.US, "%.1f×", fadeSpeed)} speed (${durationMs}ms duration)",
-                        color = Color(0xFF94A3B8),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 10.sp
                     )
                 }
@@ -1847,7 +2002,7 @@ private fun AnimationStylePreview(
                     val durationMs = (400L / blurRevealSpeed.coerceIn(0.3f, 3.0f)).roundToInt()
                     Text(
                         text = "Blur to sharp reveal • ${String.format(java.util.Locale.US, "%.1f×", blurRevealSpeed)} speed (${durationMs}ms duration)",
-                        color = Color(0xFF94A3B8),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 10.sp
                     )
                 }
@@ -1886,7 +2041,7 @@ private fun AnimationStylePreview(
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = "Immediate line replacement • Zero transition motion",
-                        color = Color(0xFF94A3B8),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 10.sp
                     )
                 }
@@ -1923,7 +2078,7 @@ private fun ThemePresetCard(
             .clickable(onClick = onClick)
             .border(
                 width = if (isSelected) 2.dp else 1.dp,
-                color = if (isSelected) primaryColor else Color(0xFF2A3142),
+                color = if (isSelected) primaryColor else MaterialTheme.colorScheme.outlineVariant,
                 shape = RoundedCornerShape(12.dp)
             ),
         color = surfaceColor,
@@ -1948,7 +2103,7 @@ private fun ThemePresetCard(
             Text(
                 text = subtitle,
                 fontSize = 9.sp,
-                color = Color(0xFF98A2B3)
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }

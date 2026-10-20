@@ -36,7 +36,7 @@ class LrcLibProvider(
 
             val request = Request.Builder()
                 .url(urlBuilder.build())
-                .header("User-Agent", "Auralis/1.0.6 (Android)")
+                .header("User-Agent", "LyricBar/1.0.6 (Android)")
                 .get()
                 .build()
 

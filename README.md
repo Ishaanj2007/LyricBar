@@ -1,4 +1,3 @@
-
 # LyricBar 
 
 LyricBar is a native Android app that displays synchronized song lyrics in a customizable floating overlay while music plays in another app. It includes a lyrics screen, playback history, local lyric import, animation settings, and wallpaper-based dynamic colour support on compatible Android versions.

@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import java.io.IOException
 
-val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "auralis_prefs")
+val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "lyricbar_prefs")
 
 enum class ThemePreset(val title: String) {
     OBSIDIAN_MINT("Obsidian Mint"),

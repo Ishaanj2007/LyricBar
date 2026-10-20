@@ -32,7 +32,7 @@ class LyricsOvhProvider(
 
             val request = Request.Builder()
                 .url(url)
-                .header("User-Agent", "Auralis/1.0.6 (Android)")
+                .header("User-Agent", "LyricBar/1.0.6 (Android)")
                 .get()
                 .build()
 

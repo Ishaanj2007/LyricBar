@@ -16,6 +16,7 @@ import com.example.MainActivity
 import com.example.R
 import com.example.data.preferences.ThemePreset
 import com.example.ui.components.MinimalOverlayView
+import com.example.ui.theme.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.combine
 
@@ -190,14 +191,14 @@ class OverlayService : Service() {
                     try {
                         dynamicDarkColorScheme(this@OverlayService).primary.toArgb()
                     } catch (_: Exception) {
-                        android.graphics.Color.rgb(0, 229, 163)
+                        android.graphics.Color.WHITE
                     }
                 } else {
                     when (prefs.themePreset) {
-                        ThemePreset.OBSIDIAN_MINT -> android.graphics.Color.rgb(0, 229, 163)
-                        ThemePreset.MIDNIGHT_AZURE -> android.graphics.Color.rgb(59, 130, 246)
-                        ThemePreset.SUNSET_AMBER -> android.graphics.Color.rgb(245, 158, 11)
-                        ThemePreset.CYBER_VIOLET -> android.graphics.Color.rgb(168, 85, 247)
+                        ThemePreset.OBSIDIAN_MINT -> MintAccent.toArgb()
+                        ThemePreset.MIDNIGHT_AZURE -> AzurePrimary.toArgb()
+                        ThemePreset.SUNSET_AMBER -> AmberPrimary.toArgb()
+                        ThemePreset.CYBER_VIOLET -> VioletPrimary.toArgb()
                     }
                 }
                 view.primaryColor = resolvedPrimary
@@ -322,11 +323,11 @@ class OverlayService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
-        const val CHANNEL_ID = "auralis_overlay_channel"
+        const val CHANNEL_ID = "lyricbar_overlay_channel"
         const val NOTIFICATION_ID = 1001
 
-        const val ACTION_TOGGLE_DRAG_MODE = "com.example.action.TOGGLE_DRAG_MODE"
-        const val ACTION_STOP_OVERLAY = "com.example.action.STOP_OVERLAY"
+        const val ACTION_TOGGLE_DRAG_MODE = "com.aistudio.lyricbar.action.TOGGLE_DRAG_MODE"
+        const val ACTION_STOP_OVERLAY = "com.aistudio.lyricbar.action.STOP_OVERLAY"
 
         fun start(context: Context) {
             val intent = Intent(context, OverlayService::class.java)

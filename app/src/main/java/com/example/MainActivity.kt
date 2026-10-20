@@ -37,7 +37,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        val app = application as AuralisApp
+        val app = application as LyricBarApp
         val playbackManager = app.playbackManager
 
         setContent {

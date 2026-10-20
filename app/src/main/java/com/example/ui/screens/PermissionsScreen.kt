@@ -235,7 +235,7 @@ private fun PermissionCard(
 @Composable
 private fun StatusChip(isGranted: Boolean) {
     Surface(
-        color = if (isGranted) MaterialTheme.colorScheme.primaryContainer else Color(0xFF3D2E1B),
+        color = if (isGranted) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer,
         shape = RoundedCornerShape(20.dp)
     ) {
         Row(
@@ -245,7 +245,7 @@ private fun StatusChip(isGranted: Boolean) {
             Icon(
                 imageVector = if (isGranted) Icons.Default.CheckCircle else Icons.Default.Warning,
                 contentDescription = null,
-                tint = if (isGranted) MaterialTheme.colorScheme.primary else Color(0xFFFFB74D),
+                tint = if (isGranted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
                 modifier = Modifier.size(14.dp)
             )
             Spacer(modifier = Modifier.width(4.dp))
@@ -253,7 +253,7 @@ private fun StatusChip(isGranted: Boolean) {
                 text = if (isGranted) "Granted" else "Required",
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
-                color = if (isGranted) MaterialTheme.colorScheme.primary else Color(0xFFFFB74D)
+                color = if (isGranted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
             )
         }
     }
