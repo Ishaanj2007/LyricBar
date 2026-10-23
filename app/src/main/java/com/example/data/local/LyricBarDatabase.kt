@@ -30,7 +30,7 @@ abstract class LyricBarDatabase : RoomDatabase() {
                     LyricBarDatabase::class.java,
                     "lyricbar_database"
                 )
-                    .fallbackToDestructiveMigration(true)
+                    .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance
                 instance

@@ -6,11 +6,11 @@ plugins {
 }
 
 android {
-    namespace = "com.example.lyricbar"
+    namespace = "com.example"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.example.lyricbar"
+        applicationId = "com.aistudio.lyricbar.zmvpk"
         minSdk = 24
         targetSdk = 35
         versionCode = 2
@@ -23,8 +23,11 @@ android {
     }
 
     signingConfigs {
-        create("release") {
-            // Default signing configuration
+        create("debugConfig") {
+            storeFile = file("${rootDir}/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
         }
     }
 
@@ -37,7 +40,7 @@ android {
             )
         }
         debug {
-            applicationIdSuffix = ""
+            signingConfig = signingConfigs.getByName("debugConfig")
         }
     }
     compileOptions {
@@ -85,4 +88,6 @@ dependencies {
     implementation(libs.okhttp.logging.interceptor)
 
     implementation(libs.kotlinx.coroutines.android)
+
+    testImplementation(libs.junit)
 }

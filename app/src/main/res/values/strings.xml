@@ -34,4 +34,11 @@
     <string name="developer_credits">Developed with AI Studio &amp; Jetpack Compose</string>
     <string name="github_repository">GitHub Repository</string>
     <string name="license_notice">Released under the MIT License</string>
+
+    <!-- Notification & Overlay Strings -->
+    <string name="lyrics_channel_name">Floating Lyrics Service</string>
+    <string name="lyrics_channel_description">Active floating lyrics overlay foreground service</string>
+    <string name="notification_title">LyricBar Overlay</string>
+    <string name="notification_reposition">Reposition</string>
+    <string name="notification_stop">Stop</string>
 </resources>
