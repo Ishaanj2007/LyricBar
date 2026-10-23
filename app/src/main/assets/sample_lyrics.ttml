@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tt xmlns="http://www.w3.org/ns/ttml"
+    xmlns:ttm="http://www.w3.org/ns/ttml#metadata"
+    xmlns:itunes="http://music.apple.com/lyric-ttml">
+  <head>
+    <metadata>
+      <ttm:title>Blinding Lights</ttm:title>
+      <ttm:agent type="person">The Weeknd</ttm:agent>
+      <itunes:album>After Hours</itunes:album>
+    </metadata>
+  </head>
+  <body>
+    <div>
+      <p begin="00:00:00.000" end="00:00:03.500">
+        <span begin="00:00:00.000" end="00:00:00.600">Yeah</span>
+        <span role="translation">Sí</span>
+      </p>
+      <p begin="00:00:03.800" end="00:00:08.200">
+        <span begin="00:00:03.800" end="00:00:04.400">I've</span>
+        <span begin="00:00:04.450" end="00:00:04.900">been</span>
+        <span begin="00:00:04.950" end="00:00:05.400">on</span>
+        <span begin="00:00:05.450" end="00:00:05.800">my</span>
+        <span begin="00:00:05.850" end="00:00:06.600">own</span>
+        <span begin="00:00:06.650" end="00:00:07.100">for</span>
+        <span begin="00:00:07.150" end="00:00:07.400">long</span>
+        <span begin="00:00:07.450" end="00:00:08.200">enough</span>
+        <span role="translation">He estado solo por bastante tiempo</span>
+      </p>
+      <p begin="00:00:08.500" end="00:00:13.500">
+        <span begin="00:00:08.500" end="00:00:09.100">Maybe</span>
+        <span begin="00:00:09.150" end="00:00:09.600">you</span>
+        <span begin="00:00:09.650" end="00:00:10.100">can</span>
+        <span begin="00:00:10.150" end="00:00:10.600">show</span>
+        <span begin="00:00:10.650" end="00:00:11.100">me</span>
+        <span begin="00:00:11.150" end="00:00:11.600">how</span>
+        <span begin="00:00:11.650" end="00:00:12.000">to</span>
+        <span begin="00:00:12.050" end="00:00:13.500">love</span>
+        <span role="translation">Tal vez me puedas enseñar a amar</span>
+      </p>
+      <p begin="00:00:13.800" end="00:00:20.500">
+        <span begin="00:00:13.800" end="00:00:14.400">I'm</span>
+        <span begin="00:00:14.450" end="00:00:15.200">blinded</span>
+        <span begin="00:00:15.250" end="00:00:15.700">by</span>
+        <span begin="00:00:15.750" end="00:00:16.200">the</span>
+        <span begin="00:00:16.250" end="00:00:17.500">lights</span>
+        <span role="translation">Estoy cegado por las luces</span>
+      </p>
+    </div>
+  </body>
+</tt>
