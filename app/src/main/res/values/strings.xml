@@ -1,18 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">LyricBar</string>
-    <string name="lyrics_channel_name">LyricBar Lyrics Overlay</string>
-    <string name="lyrics_channel_description">Shows active lyrics overlay status and controls</string>
-    <string name="notification_title">LyricBar Overlay Active</string>
-    <string name="notification_reposition">Reposition / Drag</string>
-    <string name="notification_stop">Hide Overlay</string>
-    <string name="permission_overlay_title">Display Over Other Apps</string>
-    <string name="permission_overlay_desc">Allows floating lyrics to be drawn over any screen or music player.</string>
-    <string name="permission_listener_title">Media &amp; Notification Access</string>
-    <string name="permission_listener_desc">Used solely to detect currently playing track metadata and playback position.</string>
+    <string name="app_version">1.1.0</string>
+    <string name="app_description">Synchronized floating lyrics overlay for Android music apps.</string>
+    
+    <!-- Navigation -->
+    <string name="nav_lyrics">Lyrics</string>
+    <string name="nav_now_playing">Now Playing</string>
+    <string name="nav_history">History</string>
+    <string name="nav_settings">Settings</string>
+    <string name="nav_permissions">Permissions</string>
+
+    <!-- Overlay Controls -->
+    <string name="overlay_toggle_on">Start Floating Lyrics</string>
+    <string name="overlay_toggle_off">Stop Floating Lyrics</string>
+    <string name="overlay_permission_needed">Overlay permission is required to draw over other apps.</string>
+    <string name="notification_permission_needed">Notification access is required to read current song playback.</string>
+
+    <!-- Search Lyrics -->
+    <string name="search_lyrics">Search Lyrics</string>
+    <string name="search_google">Search Google for Lyrics File</string>
+    <string name="format_selector_label">Desired Format:</string>
+    <string name="no_track_selected">No active track selected. Please start playing music or enter song details.</string>
+
+    <!-- Font Family -->
+    <string name="font_family_style">Font Family Style</string>
     <string name="show_more_fonts">Show more fonts</string>
     <string name="show_less_fonts">Show less</string>
-    <string name="about_title">ABOUT &amp; DEVELOPER</string>
-    <string name="developer_name">Ishaan</string>
-    <string name="made_with_love">Made with ❤️ by Ishaan</string>
-    <string name="open_source_tagline">Open source • AI-assisted development</string>
+    <string name="selected_font_label">Selected: %1$s</string>
+
+    <!-- About Section -->
+    <string name="about_title">About LyricBar</string>
+    <string name="developer_credits">Developed with AI Studio &amp; Jetpack Compose</string>
+    <string name="github_repository">GitHub Repository</string>
+    <string name="license_notice">Released under the MIT License</string>
 </resources>

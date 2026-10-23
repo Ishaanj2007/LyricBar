@@ -1,29 +1,52 @@
-# LyricBar 
+<p align="center">
+  <img src="Screenshots/lyricbarlogo.png" alt="LyricBar Logo" width="128" height="128" />
+</p>
 
-LyricBar is a native Android app that displays synchronized song lyrics in a customizable floating overlay while music plays in another app. It includes a lyrics screen, playback history, local lyric import, animation settings, and wallpaper-based dynamic colour support on compatible Android versions.
+<h1 align="center">LyricBar</h1>
 
-> **Project status:** Under active development. Features and behaviour may change while bugs are being fixed. Please test on your device before relying on timing-sensitive lyrics.
+<p align="center">
+  <b>A native Android app for synchronized floating song lyrics overlay</b>
+</p>
+
+<p align="center">
+  <a href="#features-">Features</a> •
+  <a href="#screenshots-%EF%B8%8F">Screenshots</a> •
+  <a href="#requirements-">Requirements</a> •
+  <a href="#permissions-">Permissions</a> •
+  <a href="#getting-started-">Getting Started</a> •
+  <a href="#license-">License</a>
+</p>
+
+---
+
+> **Project status:** Under active development. Features and behavior may change while improvements and fixes are being made. Please test on your device before relying on timing-sensitive lyrics.
 
 ## A little note about the code 🤖
 
-LyricBar is kinda **vibe-coded** — AI tools helped write and tweak parts of the code. So yeah, some bugs or weird AI moments might slip through  If something breaks, don't roast the app too hard. Open an issue with what happened and how to reproduce it, and I'll check it out and try to fix it ASAP.
+LyricBar is kinda **vibe-coded** — AI tools helped write and tweak parts of the code. So yeah, some bugs or weird AI moments might slip through. If something breaks, don't roast the app too hard! Open an issue describing what happened and how to reproduce it, and I'll check it out and try to fix it ASAP.
 
-AI helped write the whole code, but I'm still the dev maintaining the project. Bug reports, suggestions, and PRs are welcome!
+AI helped write the code, but I'm still the developer maintaining the project. Bug reports, suggestions, and PRs are always welcome!
+
+## Screenshots 📸
+
+| Synchronized Lyrics | Overlay Animation Engine | Material You & Typography | Playback History |
+| :---: | :---: | :---: | :---: |
+| <img src="Screenshots/LyricBar_ss.png" width="200" alt="Synchronized Lyrics View" /> | <img src="Screenshots/LyricBar_ss2.png" width="200" alt="Overlay Animation Engine" /> | <img src="Screenshots/LyricBar_ss3.png" width="200" alt="Material You & Typography" /> | <img src="Screenshots/LyricBar_ss4.png" width="200" alt="Playback History Log" /> |
 
 ## Features ✨
 
-- **Floating Lyrics Overlay** — Display lyrics over other apps while music plays.
-- **Media Detection** — Detect song metadata and playback state through Android's media-session integration.
-- **Online Lyrics** — Fetch synchronized lyrics using LRCLIB, with Lyrics.ovh as a plain-lyrics fallback.
-- **Local Lyrics Import** — Import lyric files using Android's document picker.
-- **Multiple Animations** — Apple-style Karaoke, Smooth Line Transition, Fade In / Fade Out, Blur Reveal, Typewriter, and Instant.
-- **Customizable Overlay** — Adjust text size, opacity, font, alignment, position, dimensions, animation, and single-line mode.
-- **Lyrics Timing Adjustment** — Adjust lyric synchronization with per-track offset support.
-- **Playback History** — Store playback history locally using Room.
-- **Saved Preferences** — Keep app settings between sessions using DataStore.
-- **Dynamic Colours** — Material 3 interface with wallpaper-based colours on supported Android versions and fallback theme presets.
+- **Floating Lyrics Overlay** — Display live synchronized lyrics over any active music or media app.
+- **Automatic Media Detection** — Detect song metadata, playback state, and album art via Android's MediaSession API.
+- **Online Lyrics Lookup** — Fetch synchronized lyrics using LRCLIB, with Lyrics.ovh as a plain-lyrics fallback.
+- **Local Lyrics Import** — Easily import `.lrc` lyric files directly from local storage using Android's document picker.
+- **Multiple Animation Styles** — Choose from Apple-style Karaoke, Smooth Line Transition, Fade In / Fade Out, Blur Reveal, Typewriter, and Instant transitions with real-time preview.
+- **Customizable Overlay Engine** — Fine-tune text size (6sp–24sp), transparency/opacity, custom Google Fonts, text alignment, position, dimensions, and single-line mode.
+- **Lyric Timing Offset** — Adjust synchronization in real-time with per-track offset adjustments (`-0.5s`, `-0.1s`, `+0.1s`, `+0.5s`).
+- **Playback History** — Store playback history locally using Room database.
+- **Saved Preferences** — Retain all app configuration and overlay preferences using DataStore.
+- **Dynamic Material You Theming** — Material 3 interface with wallpaper-based dynamic colors on supported Android versions, alongside curated custom color presets (Obsidian, Midnight, Sunset, Cyber).
 
-> Precise word-by-word karaoke highlighting depends on the lyric source providing word-level timestamps. Standard LRC files usually provide line-level timing only.
+> **Note:** Precise word-by-word karaoke highlighting depends on the lyric source providing word-level timestamps. Standard LRC files usually provide line-level timing only.
 
 ## Requirements 📱
 
@@ -34,26 +57,23 @@ AI helped write the whole code, but I'm still the dev maintaining the project. B
 
 ### Tech Stack
 
-- Kotlin
-- Jetpack Compose
-- Material 3
-- Room Database
-- Jetpack DataStore
-- Kotlin Coroutines
-- Retrofit
-- OkHttp
+- **Kotlin** & **Jetpack Compose**
+- **Material 3** (Dynamic Color / Material You)
+- **Room Database** & **Jetpack DataStore**
+- **Kotlin Coroutines** & **Flow**
+- **Retrofit** & **OkHttp**
 
 ## Permissions 🔐
 
-LyricBar requires certain permissions for its features:
+LyricBar requires the following permissions for its core features:
 
-- **Display over other apps:** Required for the floating lyrics overlay.
-- **Notification listener access:** Used to detect active media sessions and retrieve playback information.
-- **Internet access:** Required for online lyric lookup.
-- **Notifications:** Used for the foreground overlay service on supported Android versions.
-- **Vibration:** Used for interactions where applicable.
+- **Display over other apps (`SYSTEM_ALERT_WINDOW`):** Required for rendering the floating lyrics overlay above other apps.
+- **Notification listener access:** Used to detect active media sessions and synchronize lyrics with currently playing media.
+- **Internet access:** Required for fetching lyrics from online API providers.
+- **Foreground Service & Notifications:** Used to run the persistent overlay service on supported Android versions.
+- **Vibration:** Haptic feedback for control interactions.
 
-You may need to enable overlay permission and notification-listener access manually in Android Settings.
+*Note: Overlay permission and Notification Listener access must be granted manually in Android Settings upon first launch.*
 
 ## Getting Started 🚀
 
@@ -67,21 +87,19 @@ git clone https://github.com/ishaanj2007/LyricBar.git
 
 1. Open Android Studio.
 2. Select **Open**.
-3. Choose the cloned LyricBar project folder.
+3. Choose the cloned `LyricBar` project folder.
 4. Allow Gradle to sync.
-5. Install any Android SDK components requested by Android Studio.
+5. Install any requested Android SDK components.
 
 ### 3. Run the app
 
-Connect an Android device with USB debugging enabled or start an emulator.
+Connect an Android device with USB debugging enabled or launch an emulator.
 
 Select the `app` run configuration and click **Run**.
 
-> The current project ZIP did not include `gradlew` or `gradlew.bat`. Build through Android Studio, or add a Gradle wrapper using a compatible Gradle installation before running the commands below.
-
 ### Command-line build
 
-After adding the Gradle wrapper:
+You can build and test the project using the included Gradle wrapper:
 
 **Linux / macOS**
 ```bash
@@ -97,51 +115,71 @@ gradlew.bat :app:testDebugUnitTest
 
 ## Testing 🧪
 
-Unit tests are included for areas such as:
+Unit tests are included covering key components:
 
-- LRC parsing
+- LRC parser & timestamp synchronization
 - Karaoke highlighting logic
-- Smooth line transition speed
-- Fade and blur reveal animation logic
-- Animation consistency and performance-related logic
+- Smooth line transition speeds & opacity algorithms
+- Fade and blur reveal animation performance
+- Offline storage & repository unit tests
 
-The tests need to be run in a compatible environment to confirm that they pass.
+To run unit tests:
+```bash
+./gradlew :app:testDebugUnitTest
+```
 
 ## Project Structure 📂
 
 ```text
 .
+├── Screenshots/
+│   ├── LyricBar_ss.png
+│   ├── LyricBar_ss2.png
+│   ├── LyricBar_ss3.png
+│   ├── LyricBar_ss4.png
+│   └── lyricbarlogo.png
 ├── app/
-│   ├── src/
-│   │   ├── main/
-│   │   │   ├── java/
-│   │   │   │   ├── data/
-│   │   │   ├── domain/
-│   │   │   ├── service/
-│   │   │   └── ui/
-│   │   ├── res/
-│   │   └── assets/
-│   └── test/
+│   ├── build.gradle.kts
+│   └── src/
+│       ├── androidTest/
+│       ├── main/
+│       │   ├── AndroidManifest.xml
+│       │   ├── assets/
+│       │   ├── java/
+│       │   │   └── com/
+│       │   │       └── example/
+│       │   │           ├── LyricBarApp.kt
+│       │   │           ├── MainActivity.kt
+│       │   │           ├── data/
+│       │   │           ├── domain/
+│       │   │           ├── service/
+│       │   │           └── ui/
+│       │   └── res/
+│       └── test/
 ├── build.gradle.kts
 ├── settings.gradle.kts
+├── gradlew
+├── gradlew.bat
+├── gradle.properties
+├── metadata.json
+├── LICENSE
 ├── gradle/
-│   └── libs.versions.toml
+│   ├── libs.versions.toml
+│   └── wrapper/
+│       ├── gradle-wrapper.jar
+│       └── gradle-wrapper.properties
 └── README.md
 ```
 
-*The exact package names and folder structure may differ in the current source.*
-
 ## Privacy 🔒
 
-- Song titles, artists, and playback information are used to identify lyrics and synchronize them with playback.
-- Online lyric searches send the required song metadata to the selected lyric provider.
+- Song titles, artist names, and playback state are used solely to query lyric providers and synchronize lyrics on your device.
+- Online lyric searches transmit required song metadata to selected providers (e.g. LRCLIB, Lyrics.ovh). No personal user data is collected or tracked.
 
 ## License 📄
 
-No license has been specified yet. If you want others to legally reuse, modify, or distribute this project, add a suitable `LICENSE` file.
-
-Until then, the default copyright restrictions apply.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ---
 
-Made with love, and a bit of vibe coding
+Made with ❤️ and a bit of vibe coding.
