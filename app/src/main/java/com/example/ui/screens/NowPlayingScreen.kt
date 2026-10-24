@@ -3,6 +3,7 @@ package com.example.ui.screens
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -17,6 +18,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -27,7 +31,9 @@ import androidx.compose.ui.unit.sp
 import com.example.data.preferences.UserPreferences
 import com.example.service.MediaPlaybackManager
 import com.example.service.OverlayService
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun NowPlayingScreen(
@@ -41,6 +47,39 @@ fun NowPlayingScreen(
     val state by playbackManager.playbackState.collectAsState()
     val activeLyric by playbackManager.activeLyricLine.collectAsState()
     val track = state.track
+
+    val artworkBitmap by produceState<ImageBitmap?>(
+        initialValue = null,
+        key1 = track?.key,
+        key2 = track?.albumArtUri,
+        key3 = track?.albumArtBitmap
+    ) {
+        value = null
+        val currentTrack = track ?: return@produceState
+
+        if (currentTrack.albumArtBitmap != null) {
+            try {
+                value = currentTrack.albumArtBitmap.asImageBitmap()
+                return@produceState
+            } catch (_: Throwable) {
+                // Fall through to URI or null
+            }
+        }
+
+        val uriStr = currentTrack.albumArtUri
+        if (!uriStr.isNullOrBlank()) {
+            val loaded = withContext(Dispatchers.IO) {
+                loadArtworkBitmapSafely(context, uriStr)
+            }
+            if (loaded != null) {
+                try {
+                    value = loaded.asImageBitmap()
+                } catch (_: Throwable) {
+                    value = null
+                }
+            }
+        }
+    }
 
     Column(
         modifier = modifier
@@ -108,12 +147,23 @@ fun NowPlayingScreen(
             tonalElevation = 6.dp
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    imageVector = Icons.Default.MusicNote,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(80.dp)
-                )
+                if (artworkBitmap != null) {
+                    Image(
+                        bitmap = artworkBitmap!!,
+                        contentDescription = "Album art for ${track?.title ?: "current track"}",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .testTag("now_playing_album_art")
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.MusicNote,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(80.dp)
+                    )
+                }
             }
         }
 
@@ -363,3 +413,54 @@ fun NowPlayingScreen(
         }
     }
 }
+
+private fun loadArtworkBitmapSafely(context: android.content.Context, uriString: String): android.graphics.Bitmap? {
+    return try {
+        val uri = Uri.parse(uriString)
+        val bytes = when (uri.scheme?.lowercase()) {
+            "content", "file", "android.resource" -> {
+                context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+            }
+            "http", "https" -> {
+                val conn = java.net.URL(uriString).openConnection() as java.net.HttpURLConnection
+                conn.connectTimeout = 4000
+                conn.readTimeout = 4000
+                conn.instanceFollowRedirects = true
+                conn.doInput = true
+                conn.connect()
+                if (conn.responseCode in 200..299) {
+                    conn.inputStream.use { it.readBytes() }
+                } else {
+                    null
+                }
+            }
+            else -> {
+                val file = java.io.File(uriString)
+                if (file.exists()) {
+                    file.readBytes()
+                } else {
+                    context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                }
+            }
+        } ?: return null
+
+        val options = android.graphics.BitmapFactory.Options().apply {
+            inJustDecodeBounds = true
+        }
+        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+        var inSampleSize = 1
+        val maxDim = maxOf(options.outWidth, options.outHeight)
+        val reqSize = 512
+        if (maxDim > reqSize) {
+            while ((maxDim / (inSampleSize * 2)) >= reqSize) {
+                inSampleSize *= 2
+            }
+        }
+        options.inJustDecodeBounds = false
+        options.inSampleSize = inSampleSize
+        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+    } catch (_: Throwable) {
+        null
+    }
+}
+

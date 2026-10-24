@@ -9,7 +9,8 @@ data class TrackMetadata(
     val durationSec: Int = 0,
     val sourcePackage: String = "",
     val sourceAppName: String = "",
-    val albumArtUri: String? = null
+    val albumArtUri: String? = null,
+    val albumArtBitmap: android.graphics.Bitmap? = null
 ) {
     val key: String
         get() = "${cleanString(artist)} - ${cleanString(title)}".trim().lowercase()

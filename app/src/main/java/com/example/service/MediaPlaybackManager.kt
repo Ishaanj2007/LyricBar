@@ -154,6 +154,17 @@ class MediaPlaybackManager private constructor(private val context: Context) {
         val durationSec = if (durationMs > 0) (durationMs / 1000).toInt() else 0
         val artUri = metadata.getString(MediaMetadata.METADATA_KEY_ART_URI)
             ?: metadata.getString(MediaMetadata.METADATA_KEY_ALBUM_ART_URI)
+            ?: metadata.getString(MediaMetadata.METADATA_KEY_DISPLAY_ICON_URI)
+            ?: metadata.description?.iconUri?.toString()
+
+        val artBitmap = try {
+            metadata.getBitmap(MediaMetadata.METADATA_KEY_ART)
+                ?: metadata.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
+                ?: metadata.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON)
+                ?: metadata.description?.iconBitmap
+        } catch (_: Throwable) {
+            null
+        }
 
         val pkgName = activeController?.packageName ?: ""
         val appName = TrackMetadata.resolveAppName(pkgName, context.packageManager)
@@ -165,7 +176,8 @@ class MediaPlaybackManager private constructor(private val context: Context) {
             durationSec = durationSec,
             sourcePackage = pkgName,
             sourceAppName = appName,
-            albumArtUri = artUri
+            albumArtUri = artUri,
+            albumArtBitmap = artBitmap
         )
 
         val sessionToken = activeController?.sessionToken
@@ -180,6 +192,11 @@ class MediaPlaybackManager private constructor(private val context: Context) {
                 hasActiveSession = true
             )
             onTrackChanged(track)
+        } else if (currentTrack != track) {
+            _playbackState.value = _playbackState.value.copy(
+                track = track,
+                hasActiveSession = true
+            )
         }
     }
 
