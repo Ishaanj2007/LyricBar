@@ -35,19 +35,6 @@ class CompositeLyricsRepository(
         val key = track.key
         if (key.isBlank()) return@withContext Result.failure(IllegalArgumentException("Invalid track metadata"))
 
-        // Record play history entry
-        try {
-            historyDao.insertHistory(
-                SongHistoryEntity(
-                    key = key,
-                    title = track.title,
-                    artist = track.artist,
-                    albumArtUri = track.albumArtUri,
-                    status = "Playing",
-                    playedAt = System.currentTimeMillis()
-                )
-            )
-        } catch (_: Exception) {}
 
         // Check Room local cache unless force network re-fetch is requested
         if (!forceNetwork) {
@@ -157,6 +144,26 @@ class CompositeLyricsRepository(
 
     suspend fun clearHistory() = withContext(Dispatchers.IO) {
         historyDao.clearHistory()
+    }
+
+    suspend fun recordHistory(
+        track: TrackMetadata,
+        status: String = "Played"
+    ) = withContext(Dispatchers.IO) {
+        val key = track.key
+        if (key.isBlank()) return@withContext
+        try {
+            historyDao.insertHistory(
+                SongHistoryEntity(
+                    key = key,
+                    title = track.title,
+                    artist = track.artist,
+                    albumArtUri = track.albumArtUri,
+                    status = status,
+                    playedAt = System.currentTimeMillis()
+                )
+            )
+        } catch (_: Exception) {}
     }
 
     companion object {

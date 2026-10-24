@@ -44,11 +44,20 @@ data class ParsedLyrics(
 
     fun getActiveLine(currentPositionMs: Long, trackOffsetMs: Long = 0L): String? {
         val idx = findActiveIndex(currentPositionMs, trackOffsetMs)
-        return if (idx in lines.indices) lines[idx].text else null
+        if (idx in lines.indices) return lines[idx].text
+        if (!isSynced && lines.isNotEmpty()) {
+            return lines.firstOrNull { it.text.isNotBlank() }?.text ?: plainText.ifBlank { null }
+        }
+        return null
     }
 
     fun getActiveLyricLine(currentPositionMs: Long, trackOffsetMs: Long = 0L): LyricLine? {
         val idx = findActiveIndex(currentPositionMs, trackOffsetMs)
-        return if (idx in lines.indices) lines[idx] else null
+        if (idx in lines.indices) return lines[idx]
+        if (!isSynced && lines.isNotEmpty()) {
+            val firstNonBlank = lines.firstOrNull { it.text.isNotBlank() }
+            return firstNonBlank ?: if (plainText.isNotBlank()) LyricLine(timeMs = 0L, text = plainText.trim()) else null
+        }
+        return null
     }
 }

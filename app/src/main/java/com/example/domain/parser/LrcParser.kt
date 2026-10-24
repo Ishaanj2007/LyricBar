@@ -76,14 +76,16 @@ object LrcParser {
             // Plain text lyrics fallback
             val plainLines = lines
                 .map { it.trim() }
-                .filter { it.isNotEmpty() && !it.startsWith("[") }
+                .filter { trimmed ->
+                    trimmed.isNotEmpty() && !(trimmed.startsWith("[") && trimmed.contains(":") && !trimmed.contains(TIMESTAMP_REGEX))
+                }
 
             ParsedLyrics(
                 title = title,
                 artist = artist,
                 isSynced = false,
-                lines = plainLines.mapIndexed { idx, txt -> LyricLine(timeMs = idx * 3000L, text = txt) },
-                plainText = content.trim(),
+                lines = plainLines.map { txt -> LyricLine(timeMs = 0L, text = txt) },
+                plainText = if (plainLines.isNotEmpty()) plainLines.joinToString("\n") else content.trim(),
                 source = source,
                 offsetMs = 0L,
                 rawContent = content

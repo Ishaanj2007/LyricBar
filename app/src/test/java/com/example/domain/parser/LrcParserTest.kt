@@ -93,5 +93,57 @@ class LrcParserTest {
         assertFalse(parsed.isSynced)
         assertEquals(3, parsed.lines.size)
         assertEquals("Just a line without timestamp", parsed.lines[0].text)
+
+        // Verify NO fabricated timestamps (each line has timeMs == 0L)
+        assertTrue(parsed.lines.all { it.timeMs == 0L })
+
+        // findActiveIndex must return -1 (no fake playback position)
+        assertEquals(-1, parsed.findActiveIndex(10000L))
+
+        // getActiveLine must return readable static text instead of null/blank
+        assertEquals("Just a line without timestamp", parsed.getActiveLine(10000L))
+
+        // getActiveLyricLine must return readable static LyricLine
+        val activeObj = parsed.getActiveLyricLine(10000L)
+        assertNotNull(activeObj)
+        assertEquals("Just a line without timestamp", activeObj?.text)
+        assertEquals(0L, activeObj?.timeMs)
+    }
+
+    @Test
+    fun testPlainLyricsWithBlankLinesAndSectionHeaders() {
+        val plainText = """
+            [ti:Ignore Tag]
+            [ar:Ignore Artist]
+
+            [Verse 1]
+            First line of verse
+
+            Second line of verse
+            
+            [Chorus]
+            Chorus line
+        """.trimIndent()
+
+        val parsed = LrcParser.parse(plainText)
+
+        assertFalse(parsed.isSynced)
+        assertEquals(5, parsed.lines.size)
+        assertEquals("[Verse 1]", parsed.lines[0].text)
+        assertEquals("First line of verse", parsed.lines[1].text)
+        assertEquals("Second line of verse", parsed.lines[2].text)
+        assertEquals("[Chorus]", parsed.lines[3].text)
+        assertEquals("Chorus line", parsed.lines[4].text)
+        assertTrue(parsed.lines.all { it.timeMs == 0L })
+    }
+
+    @Test
+    fun testEmptyLyricsSafeHandling() {
+        val parsed = LrcParser.parse("")
+        assertFalse(parsed.isSynced)
+        assertTrue(parsed.lines.isEmpty())
+        assertNull(parsed.getActiveLine(0L))
+        assertNull(parsed.getActiveLyricLine(0L))
+        assertEquals(-1, parsed.findActiveIndex(0L))
     }
 }

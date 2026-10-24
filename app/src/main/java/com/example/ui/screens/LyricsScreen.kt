@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import android.content.Intent
 import android.net.Uri
+import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -66,13 +67,27 @@ fun LyricsScreen(
     val listState = rememberLazyListState()
     var showManualSearchDialog by remember { mutableStateOf(false) }
 
-    // SAF File Picker
+    // SAF File Picker (.lrc files only)
     val filePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         if (uri != null) {
             coroutineScope.launch {
                 try {
+                    val fileName = try {
+                        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                            val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                            if (nameIndex != -1 && cursor.moveToFirst()) cursor.getString(nameIndex) else null
+                        }
+                    } catch (_: Exception) {
+                        null
+                    } ?: uri.lastPathSegment ?: ""
+
+                    if (fileName.isNotBlank() && !fileName.endsWith(".lrc", ignoreCase = true)) {
+                        Toast.makeText(context, "Unsupported file format. Please select an .lrc file", Toast.LENGTH_SHORT).show()
+                        return@launch
+                    }
+
                     context.contentResolver.openInputStream(uri)?.use { stream ->
                         val text = BufferedReader(InputStreamReader(stream)).readText()
                         val track = playbackState.track
@@ -86,6 +101,7 @@ fun LyricsScreen(
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
+                    Toast.makeText(context, "Failed to import lyric file", Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -208,7 +224,7 @@ fun LyricsScreen(
                         onClick = { filePicker.launch(arrayOf("text/*", "*/*")) },
                         modifier = Modifier.testTag("upload_lrc_icon_button")
                     ) {
-                        Icon(Icons.Default.UploadFile, contentDescription = "Import TTML/LRC", tint = themeSecondary)
+                        Icon(Icons.Default.UploadFile, contentDescription = "Import LRC", tint = themeSecondary)
                     }
                 }
             }
@@ -361,7 +377,7 @@ fun LyricsScreen(
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                text = "Search for lyrics online or import your own .ttml or .lrc file",
+                                text = "Search for lyrics online or import your own .lrc file",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = TextAlign.Center
@@ -412,6 +428,7 @@ fun LyricsScreen(
                                 val isPast = activeIndex != -1 && index < activeIndex
 
                                 val targetAlpha = when {
+                                    !lyrics.isSynced -> 0.95f
                                     isActive -> 1.0f
                                     isPast -> 0.32f
                                     else -> 0.45f

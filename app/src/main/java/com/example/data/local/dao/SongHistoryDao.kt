@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface SongHistoryDao {
 
-    @Query("SELECT * FROM song_history ORDER BY playedAt DESC LIMIT 100")
+    @Query("SELECT * FROM song_history ORDER BY playedAt DESC, id DESC LIMIT 100")
     fun getRecentHistory(): Flow<List<SongHistoryEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)

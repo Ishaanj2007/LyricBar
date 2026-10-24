@@ -13,9 +13,9 @@ class LyricsSearchQueryBuilderTest {
     }
 
     @Test
-    fun testBuildQueryTtmlFormat() {
-        val query = LyricsSearchQueryBuilder.buildQuery("First Love", "Hikaru Utada", LyricsFileFormat.TTML)
-        assertEquals("First Love Hikaru Utada TTML lyrics file download", query)
+    fun testBuildQueryDefaultLrcFormat() {
+        val query = LyricsSearchQueryBuilder.buildQuery("First Love", "Hikaru Utada")
+        assertEquals("First Love Hikaru Utada LRC lyrics file download", query)
     }
 
     @Test
@@ -59,7 +59,7 @@ class LyricsSearchQueryBuilderTest {
 
     @Test
     fun testBuildGoogleSearchUrlWithJapaneseText() {
-        val query = "First Love 宇多田ヒカル TTML lyrics file download"
+        val query = "First Love 宇多田ヒカル LRC lyrics file download"
         val url = LyricsSearchQueryBuilder.buildGoogleSearchUrl(query)
         assertTrue(url.startsWith("https://www.google.com/search?q="))
     }

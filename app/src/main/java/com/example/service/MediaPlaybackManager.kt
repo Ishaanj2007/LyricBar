@@ -128,6 +128,7 @@ class MediaPlaybackManager private constructor(private val context: Context) {
 
     private fun detachActiveController() {
         detachActiveControllerInternal()
+        lastRecordedTrackKey = null
         // Mark playback as inactive; freeze position and preserve last lyric line & track metadata
         _playbackState.value = _playbackState.value.copy(
             isPlaying = false,
@@ -198,6 +199,14 @@ class MediaPlaybackManager private constructor(private val context: Context) {
         val speed = state.playbackSpeed
         val validPosition = if (position >= 0L) position else _playbackState.value.positionMs
 
+        // If loop/repeat replayed the track from beginning after playing significantly into the track
+        val isReplay = isPlaying &&
+            _playbackState.value.positionMs > 20_000L &&
+            validPosition < 3_000L
+        if (isReplay) {
+            lastRecordedTrackKey = null
+        }
+
         _playbackState.value = _playbackState.value.copy(
             isPlaying = isPlaying,
             hasActiveSession = activeController != null,
@@ -206,10 +215,14 @@ class MediaPlaybackManager private constructor(private val context: Context) {
             lastUpdatedMs = System.currentTimeMillis()
         )
 
+        if (isPlaying) {
+            recordSessionIfPlaying(_playbackState.value.track)
+        }
+
         // Immediately sync active lyric line on playback/seek update so highlight is never stale
         val lyrics = _currentLyrics.value
         val track = _playbackState.value.track
-        if (track != null && lyrics != null) {
+        if (track != null && lyrics != null && lyrics.isSynced) {
             val offset = _trackOffsetMs.value
             val activeObj = lyrics.getActiveLyricLine(validPosition, offset)
             if (activeObj != null && _activeLyricObject.value != activeObj) {
@@ -220,6 +233,21 @@ class MediaPlaybackManager private constructor(private val context: Context) {
     }
 
     private var offsetJob: Job? = null
+    private var lastRecordedTrackKey: String? = null
+
+    private fun recordSessionIfPlaying(track: TrackMetadata?) {
+        if (track == null || track.key.isBlank()) return
+        if (!_playbackState.value.isPlaying) return
+
+        if (lastRecordedTrackKey == track.key) {
+            return
+        }
+
+        lastRecordedTrackKey = track.key
+        scope.launch {
+            lyricsRepository.recordHistory(track)
+        }
+    }
 
     private fun onTrackChanged(track: TrackMetadata) {
         // Cancel any pending stale network requests and offset collectors
@@ -230,6 +258,10 @@ class MediaPlaybackManager private constructor(private val context: Context) {
         _activeLyricObject.value = null
         _activeLyricLine.value = null
         _isLoadingLyrics.value = true
+
+        if (_playbackState.value.isPlaying) {
+            recordSessionIfPlaying(track)
+        }
 
         // Load persisted offset for this specific track
         offsetJob = scope.launch {
@@ -264,8 +296,8 @@ class MediaPlaybackManager private constructor(private val context: Context) {
                 val state = _playbackState.value
                 val lyrics = _currentLyrics.value
 
-                // Only advance active lyric line when playback is actively playing
-                if (state.isPlaying && state.track != null && lyrics != null) {
+                // Only advance active lyric line when playback is actively playing and lyrics are synchronized
+                if (state.isPlaying && state.track != null && lyrics != null && lyrics.isSynced) {
                     val currentPos = state.calculatedPositionMs
                     val offset = _trackOffsetMs.value
                     val activeObj = lyrics.getActiveLyricLine(currentPos, offset)
@@ -303,6 +335,11 @@ class MediaPlaybackManager private constructor(private val context: Context) {
 
     fun setManualLyrics(lyrics: ParsedLyrics) {
         _currentLyrics.value = lyrics
+        val currentPos = _playbackState.value.calculatedPositionMs
+        val offset = _trackOffsetMs.value
+        val initialObj = lyrics.getActiveLyricLine(currentPos, offset)
+        _activeLyricObject.value = initialObj
+        _activeLyricLine.value = initialObj?.text
     }
 
     private fun isControllerControllable(controller: MediaController?): Boolean {

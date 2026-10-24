@@ -8,7 +8,6 @@ enum class LyricsFileFormat(
     val description: String
 ) {
     LRC("LRC", ".lrc", "Timestamped lyrics for synchronised playback"),
-    TTML("TTML", ".ttml", "Timed-text lyrics with word-level sync"),
     SRT("SRT", ".srt", "Subtitle-style timed text"),
     TXT("TXT", ".txt", "Plain text lyrics")
 }

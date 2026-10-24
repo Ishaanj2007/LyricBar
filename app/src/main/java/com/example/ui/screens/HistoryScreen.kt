@@ -104,7 +104,7 @@ fun HistoryScreen(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                items(historyList, key = { it.key }) { entry ->
+                items(historyList, key = { it.id }) { entry ->
                     HistoryItemCard(entry = entry, dateFormat = dateFormat)
                 }
             }

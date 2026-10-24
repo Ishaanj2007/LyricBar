@@ -637,8 +637,13 @@ class MinimalOverlayView(
             return
         }
 
-        var activeLineIdx = 0
         val isWordSynced = activeLyricLine?.isWordSynced == true
+        if (activeLyricLine?.timeMs == 0L && activeLyricLine?.endTimeMs == 0L && !isWordSynced) {
+            targetScrollY = 0f
+            return
+        }
+
+        var activeLineIdx = 0
         if (isWordSynced && activeLyricLine?.words?.isNotEmpty() == true) {
             for ((lineIdx, line) in currentLayoutLines.withIndex()) {
                 val lineStartMs = line.words.firstOrNull()?.startMs ?: 0L
@@ -678,8 +683,13 @@ class MinimalOverlayView(
             return
         }
 
-        val line = currentLayoutLines.firstOrNull() ?: return
         val isWordSynced = activeLyricLine?.isWordSynced == true
+        if (activeLyricLine?.timeMs == 0L && activeLyricLine?.endTimeMs == 0L && !isWordSynced) {
+            targetScrollX = 0f
+            return
+        }
+
+        val line = currentLayoutLines.firstOrNull() ?: return
         val currentStyle = when (animationStyle) {
             "KARAOKE", "APPLE_MUSIC" -> "KARAOKE"
             "SMOOTH_SLIDE", "SMOOTH_SLIDE_UP", "SOFT_FADE", "SCALE_POP" -> "SMOOTH_SLIDE"
@@ -921,8 +931,17 @@ class MinimalOverlayView(
                             }
                         }
                     }
+                } else if (activeLyricLine?.timeMs == 0L && activeLyricLine?.endTimeMs == 0L && !isWordSynced) {
+                    // 2. Untimed / plain lyrics fallback: display clearly as readable static text without fake karaoke sweep
+                    wordActivePaint.alpha = incomingAlpha
+                    for (line in currentLayoutLines) {
+                        val drawY = line.baselineY - currentScrollY + incomingOffsetY
+                        for (w in line.words) {
+                            canvas.drawText(w.word, w.x, drawY, wordActivePaint)
+                        }
+                    }
                 } else {
-                    // 2. Synchronized word timestamps (TTML) unavailable (LRC line-timed or plain):
+                    // 3. Synchronized line-timed LRC:
                     val lineStart = activeLyricLine?.timeMs ?: 0L
                     val lineEnd = activeLyricLine?.endTimeMs ?: (lineStart + 3500L)
                     val rawDuration = (lineEnd - lineStart).coerceIn(1500L, 8000L)
