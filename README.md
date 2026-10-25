@@ -48,6 +48,20 @@ AI helped write the code, but I'm still the developer maintaining the project. B
 
 > **Note:** Precise word-by-word karaoke highlighting depends on the lyric source providing word-level timestamps. Standard LRC files usually provide line-level timing only.
 
+## 📲 Download LyricBar
+
+👉 **[Download the Latest Release](https://github.com/Ishaanj2007/LyricBar/releases/latest)**
+
+1. Open the latest release.
+2. Expand **Assets** and download the APK file.
+3. Open the downloaded APK on your Android phone.
+4. Allow installation from this source if Android asks.
+5. Install LyricBar and grant the required permissions.
+
+### 🛠️ Developers
+
+Want to contribute or build LyricBar from source? Continue to the development requirements and build instructions below.
+
 ## Requirements 📱
 
 - Android Studio with a compatible Android Gradle Plugin and Kotlin toolchain.
