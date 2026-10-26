@@ -146,4 +146,75 @@ class LrcParserTest {
         assertNull(parsed.getActiveLyricLine(0L))
         assertEquals(-1, parsed.findActiveIndex(0L))
     }
+
+    @Test
+    fun testTtmlFormatIsRejectedAsUnsupported() {
+        val ttmlContent = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata">
+              <head>
+                <metadata>
+                  <ttm:title>Unsupported TTML</ttm:title>
+                </metadata>
+              </head>
+              <body>
+                <div>
+                  <p begin="00:00:01.000" end="00:00:04.000">Line One</p>
+                </div>
+              </body>
+            </tt>
+        """.trimIndent()
+
+        assertTrue("isTtml must return true for TTML content", LrcParser.isTtml(ttmlContent))
+
+        try {
+            LrcParser.parse(ttmlContent)
+            fail("Expected IllegalArgumentException when parsing TTML format")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(
+                "Exception message should indicate TTML is unsupported",
+                e.message?.contains("TTML is not supported", ignoreCase = true) == true
+            )
+        }
+    }
+
+    @Test
+    fun testIsTtmlDetector() {
+        val standardLrc = "[00:01.00]Normal line"
+        val plainLyrics = "Just plain text without xml tags"
+        val ttmlSnippet = "<tt xmlns=\"http://www.w3.org/ns/ttml\"><body><p>Hello</p></body></tt>"
+
+        assertFalse(LrcParser.isTtml(standardLrc))
+        assertFalse(LrcParser.isTtml(plainLyrics))
+        assertTrue(LrcParser.isTtml(ttmlSnippet))
+    }
+
+    @Test
+    fun testLrcWithBlankLinesAndFractionalTimestamps() {
+        val lrc = """
+            [ti:Fractional & Blank Lines Test]
+
+            [00:01.5]One digit fraction
+
+            [00:03.25]Two digit fraction
+            
+            [00:05.123]Three digit millisecond fraction
+
+            [00:07.00][00:09.50]Repeated lyric with multi-timestamps
+        """.trimIndent()
+
+        val parsed = LrcParser.parse(lrc)
+        assertTrue(parsed.isSynced)
+        assertEquals(5, parsed.lines.size)
+        assertEquals(1500L, parsed.lines[0].timeMs)
+        assertEquals("One digit fraction", parsed.lines[0].text)
+        assertEquals(3250L, parsed.lines[1].timeMs)
+        assertEquals("Two digit fraction", parsed.lines[1].text)
+        assertEquals(5123L, parsed.lines[2].timeMs)
+        assertEquals("Three digit millisecond fraction", parsed.lines[2].text)
+        assertEquals(7000L, parsed.lines[3].timeMs)
+        assertEquals("Repeated lyric with multi-timestamps", parsed.lines[3].text)
+        assertEquals(9500L, parsed.lines[4].timeMs)
+        assertEquals("Repeated lyric with multi-timestamps", parsed.lines[4].text)
+    }
 }

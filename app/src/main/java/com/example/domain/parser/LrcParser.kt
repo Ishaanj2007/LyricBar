@@ -8,12 +8,22 @@ object LrcParser {
     private val TIMESTAMP_REGEX = Regex("\\[(\\d{1,3}):(\\d{2})(?:[.:](\\d{1,3}))?\\]")
     private val OFFSET_REGEX = Regex("\\[offset:\\s*([+-]?\\d+)\\]", RegexOption.IGNORE_CASE)
 
+    fun isTtml(content: String): Boolean {
+        val trimmed = content.trim()
+        return (trimmed.startsWith("<") && (trimmed.contains("<tt", ignoreCase = true) || trimmed.contains("xmlns", ignoreCase = true))) ||
+                content.contains("http://www.w3.org/ns/ttml", ignoreCase = true) ||
+                content.contains("xmlns:ttm=", ignoreCase = true)
+    }
+
     fun parse(
         content: String,
         title: String = "",
         artist: String = "",
         source: String = "LRC"
     ): ParsedLyrics {
+        if (isTtml(content)) {
+            throw IllegalArgumentException("Unsupported format: TTML is not supported. Please use LRC.")
+        }
         val lines = content.lines()
         val parsedLines = mutableListOf<LyricLine>()
         var offsetMs = 0L

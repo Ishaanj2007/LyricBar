@@ -67,8 +67,29 @@ class MediaPlaybackManager private constructor(private val context: Context) {
         }
     }
 
+    var autoFetchLyrics: Boolean = true
+        private set
+
     init {
         startLyricsTicker()
+        scope.launch {
+            preferencesRepository.userPreferencesFlow.collect { prefs ->
+                val previous = autoFetchLyrics
+                autoFetchLyrics = prefs.autoFetchLyrics
+
+                if (!previous && autoFetchLyrics) {
+                    val currentTrack = _playbackState.value.track
+                    if (currentTrack != null && _currentLyrics.value == null && !_isLoadingLyrics.value) {
+                        fetchLyricsForTrack(currentTrack, forceNetwork = false)
+                    }
+                } else if (previous && !autoFetchLyrics) {
+                    if (_isLoadingLyrics.value && _currentLyrics.value == null) {
+                        fetchJob?.cancel()
+                        _isLoadingLyrics.value = false
+                    }
+                }
+            }
+        }
     }
 
     fun attachMediaController(controller: MediaController?) {
@@ -274,7 +295,6 @@ class MediaPlaybackManager private constructor(private val context: Context) {
         _currentLyrics.value = null
         _activeLyricObject.value = null
         _activeLyricLine.value = null
-        _isLoadingLyrics.value = true
 
         if (_playbackState.value.isPlaying) {
             recordSessionIfPlaying(track)
@@ -287,8 +307,19 @@ class MediaPlaybackManager private constructor(private val context: Context) {
             }
         }
 
+        fetchLyricsForTrack(track, forceNetwork = false)
+    }
+
+    private fun fetchLyricsForTrack(track: TrackMetadata, forceNetwork: Boolean = false) {
+        fetchJob?.cancel()
+        _isLoadingLyrics.value = true
+
         fetchJob = scope.launch {
-            val result = lyricsRepository.getOrFetchLyrics(track)
+            val result = lyricsRepository.getOrFetchLyrics(
+                track = track,
+                forceNetwork = forceNetwork,
+                allowNetwork = autoFetchLyrics || forceNetwork
+            )
             _isLoadingLyrics.value = false
             if (result.isSuccess) {
                 val lyrics = result.getOrNull()
@@ -479,7 +510,7 @@ class MediaPlaybackManager private constructor(private val context: Context) {
             preferencesRepository.setTrackOffset(track.key, 0L)
             if (forceRefresh || _currentLyrics.value == null || _currentLyrics.value?.isSynced != true) {
                 _isLoadingLyrics.value = true
-                val result = lyricsRepository.getOrFetchLyrics(track, forceNetwork = true)
+                val result = lyricsRepository.getOrFetchLyrics(track, forceNetwork = true, allowNetwork = true)
                 _isLoadingLyrics.value = false
                 if (result.isSuccess) {
                     _currentLyrics.value = result.getOrNull()

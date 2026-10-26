@@ -194,13 +194,13 @@ fun LyricsScreen(
                     val lyrics = currentLyrics
                     if (lyrics != null) {
                         Surface(
-                            color = if (lyrics.isWordSynced) themePrimary.copy(alpha = 0.2f) else if (lyrics.isSynced) themeSecondary.copy(alpha = 0.2f) else Color(0x33FFB74D),
+                            color = if (lyrics.isSynced) themeSecondary.copy(alpha = 0.2f) else Color(0x33FFB74D),
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.padding(end = 6.dp)
                         ) {
                             Text(
-                                text = if (lyrics.isWordSynced) "TTML WORD-SYNC" else if (lyrics.isSynced) "LRC LINE-TIMED" else "PLAIN",
-                                color = if (lyrics.isWordSynced) themePrimary else if (lyrics.isSynced) themeSecondary else Color(0xFFFFB74D),
+                                text = if (lyrics.isSynced) "LRC LINE-TIMED" else "PLAIN",
+                                color = if (lyrics.isSynced) themeSecondary else Color(0xFFFFB74D),
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
@@ -535,7 +535,7 @@ fun LyricsScreen(
                                             }
                                         }
 
-                                        // Translation line if available from TTML metadata
+                                        // Translation line if available from lyric metadata
                                         if (line.translation != null) {
                                             Spacer(modifier = Modifier.height(4.dp))
                                             Text(

@@ -25,7 +25,7 @@ data class ParsedLyrics(
     val source: String,
     val offsetMs: Long = 0L,
     val isWordSynced: Boolean = lines.any { it.isWordSynced },
-    val format: String = if (isWordSynced) "TTML" else "LRC",
+    val format: String = if (isSynced) "LRC" else "PLAIN",
     val rawContent: String = ""
 ) {
     fun findActiveIndex(currentPositionMs: Long, trackOffsetMs: Long = 0L): Int {

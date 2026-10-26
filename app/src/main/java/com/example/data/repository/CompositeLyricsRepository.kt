@@ -15,22 +15,33 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 
-class CompositeLyricsRepository(
-    private val database: LyricBarDatabase,
+class CompositeLyricsRepository internal constructor(
+    private val lyricsDao: com.example.data.local.dao.LyricsDao,
+    private val historyDao: com.example.data.local.dao.SongHistoryDao,
     private val providers: List<LyricsProvider> = listOf(
         LrcLibProvider(),
         LyricsOvhProvider()
     )
 ) {
 
-    private val lyricsDao = database.lyricsDao()
-    private val historyDao = database.songHistoryDao()
+    constructor(
+        database: LyricBarDatabase,
+        providers: List<LyricsProvider> = listOf(
+            LrcLibProvider(),
+            LyricsOvhProvider()
+        )
+    ) : this(
+        lyricsDao = database.lyricsDao(),
+        historyDao = database.songHistoryDao(),
+        providers = providers
+    )
 
     val songHistory: Flow<List<SongHistoryEntity>> = historyDao.getRecentHistory()
 
     suspend fun getOrFetchLyrics(
         track: TrackMetadata,
-        forceNetwork: Boolean = false
+        forceNetwork: Boolean = false,
+        allowNetwork: Boolean = true
     ): Result<ParsedLyrics> = withContext(Dispatchers.IO) {
         val key = track.key
         if (key.isBlank()) return@withContext Result.failure(IllegalArgumentException("Invalid track metadata"))
@@ -41,28 +52,24 @@ class CompositeLyricsRepository(
             val cached = lyricsDao.getLyricsByKey(key)
             if (cached != null) {
                 val content = cached.syncedLrc ?: cached.plainLyrics ?: ""
-                if (content.isNotBlank()) {
-                    val parsed = if (content.trim().startsWith("<") || content.contains("<tt", ignoreCase = true)) {
-                        com.example.domain.lyricsengine.TtmlParser.parse(
-                            content = content,
-                            defaultTitle = cached.title,
-                            defaultArtist = cached.artist,
-                            source = "${cached.source} (Cached TTML)"
-                        )
-                    } else {
-                        LrcParser.parse(
-                            content = content,
-                            title = cached.title,
-                            artist = cached.artist,
-                            source = "${cached.source} (Cached)"
-                        )
-                    }
+                if (content.isNotBlank() && !LrcParser.isTtml(content)) {
+                    val parsed = LrcParser.parse(
+                        content = content,
+                        title = cached.title,
+                        artist = cached.artist,
+                        source = "${cached.source} (Cached)"
+                    )
                     // Only return cached if valid or if remote network is not strictly needed
                     if (parsed.isSynced || !cached.isSynced) {
                         return@withContext Result.success(parsed)
                     }
                 }
             }
+        }
+
+        // If network fetching is disabled, do not perform remote provider queries
+        if (!allowNetwork) {
+            return@withContext Result.failure(Exception("Automatic lyric fetching is disabled"))
         }
 
         // Clean title & artist for web queries (strip (Official Video), [Remastered], etc.)
@@ -74,6 +81,10 @@ class CompositeLyricsRepository(
                 val result = provider.fetchLyrics(cleanTitle, cleanArtist, track.durationSec)
                 if (result.isSuccess) {
                     val lyrics = result.getOrThrow()
+                    // Reject unsupported TTML content if returned by any provider
+                    if (LrcParser.isTtml(lyrics.rawContent) || LrcParser.isTtml(lyrics.plainText)) {
+                        continue
+                    }
                     // Cache in database with raw timed content preserved
                     val rawToCache = if (lyrics.rawContent.isNotBlank()) lyrics.rawContent else lyrics.plainText
                     lyricsDao.insertLyrics(
@@ -106,21 +117,12 @@ class CompositeLyricsRepository(
         content: String,
         source: String = "Imported"
     ): ParsedLyrics = withContext(Dispatchers.IO) {
-        val parsed = if (content.trim().startsWith("<") || content.contains("<tt", ignoreCase = true)) {
-            com.example.domain.lyricsengine.TtmlParser.parse(
-                content = content,
-                defaultTitle = track.title,
-                defaultArtist = track.artist,
-                source = source
-            )
-        } else {
-            LrcParser.parse(
-                content = content,
-                title = track.title,
-                artist = track.artist,
-                source = source
-            )
-        }
+        val parsed = LrcParser.parse(
+            content = content,
+            title = track.title,
+            artist = track.artist,
+            source = source
+        )
 
         lyricsDao.insertLyrics(
             LyricsEntity(

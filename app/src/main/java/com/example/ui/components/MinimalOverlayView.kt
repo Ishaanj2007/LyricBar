@@ -517,7 +517,7 @@ class MinimalOverlayView(
         val availableWidth = (contentRight - contentLeft).coerceAtLeast(60f)
         val spaceWidth = wordActivePaint.measureText(" ")
 
-        // 1. Prepare raw word list (either with TTML timestamps or single-word fallback)
+        // 1. Prepare raw word list (either with word-level timestamps or single-word fallback)
         val wordsToWrap: List<LayoutWord>
         if (currentLine != null && currentLine.isWordSynced && currentLine.words.isNotEmpty()) {
             wordsToWrap = currentLine.words.map { wt ->
@@ -703,7 +703,7 @@ class MinimalOverlayView(
         val availableWidth = (width - paddingHorizontal * 2).coerceAtLeast(60f)
 
         if (currentStyle == "KARAOKE" && isWordSynced && line.words.isNotEmpty()) {
-            // Apple-style Karaoke with TTML words: follow active singing focus point smoothly
+            // Apple-style Karaoke with word-level timing: follow active singing focus point smoothly
             val firstWordStart = line.words.first().startMs
             val lastWordEnd = line.words.last().endMs.coerceAtLeast(firstWordStart + 1L)
 
@@ -880,7 +880,7 @@ class MinimalOverlayView(
         when (currentStyle) {
             "KARAOKE" -> {
                 if (isWordSynced && activeLyricLine?.words?.isNotEmpty() == true) {
-                    // 1. TTML Word-synchronized lyrics: Apple-style progressive highlight
+                    // 1. Word-synchronized lyrics: Apple-style progressive highlight
                     wordInactivePaint.alpha = (incomingAlpha * 0.35f).toInt().coerceIn(0, 255)
                     wordActivePaint.alpha = incomingAlpha
                     wordGlowPaint.alpha = incomingAlpha
