@@ -223,6 +223,89 @@ fun SettingsScreen(
                     )
                 }
 
+                if (userPreferences.singleLineLyrics) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .animateContentSize()
+                            .padding(start = 12.dp, top = 8.dp, bottom = 4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Adaptive Lyric Scrolling",
+                                    fontWeight = FontWeight.Medium,
+                                    fontSize = 14.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Scroll overflowing lyrics based on playback interval to next lyric",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = userPreferences.adaptiveLyricScrolling,
+                                onCheckedChange = { enabled ->
+                                    coroutineScope.launch {
+                                        playbackManager.preferencesRepository.setAdaptiveLyricScrolling(enabled)
+                                    }
+                                },
+                                modifier = Modifier.testTag("settings_adaptive_scrolling_switch")
+                            )
+                        }
+
+                        if (userPreferences.adaptiveLyricScrolling) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            val speedMultiplier = userPreferences.lyricScrollSpeedMultiplier
+                            val speedLabel = when {
+                                speedMultiplier >= 1.4f -> "Fast"
+                                speedMultiplier >= 1.15f -> "Brisk"
+                                else -> "Standard"
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Scroll Speed Multiplier",
+                                    fontSize = 13.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "${String.format(java.util.Locale.US, "%.1f×", speedMultiplier)} ($speedLabel)",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+
+                            var localScrollSpeed by remember(userPreferences.lyricScrollSpeedMultiplier) {
+                                mutableFloatStateOf(userPreferences.lyricScrollSpeedMultiplier)
+                            }
+                            Slider(
+                                value = localScrollSpeed,
+                                onValueChange = { localScrollSpeed = it },
+                                onValueChangeFinished = {
+                                    coroutineScope.launch {
+                                        playbackManager.preferencesRepository.setLyricScrollSpeedMultiplier(localScrollSpeed)
+                                    }
+                                },
+                                valueRange = 1.0f..1.5f,
+                                steps = 4,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("settings_scroll_speed_slider")
+                            )
+                        }
+                    }
+                }
+
                 HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 
                 // Dedicated Resync Timeline Row & Button
@@ -340,6 +423,122 @@ fun SettingsScreen(
                                     fontSize = 11.sp,
                                     color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                            }
+                        }
+                    }
+                }
+
+                // Apple-style Karaoke Glow Sweep Speed (Appears ONLY when Apple Karaoke style is selected)
+                if (userPreferences.animationStyle == "KARAOKE") {
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        Icons.Default.Speed,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Glow Sweep Speed",
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 13.sp,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                val speedLabel = when {
+                                    userPreferences.karaokeGlowSpeed <= 0.6f -> "0.5× — Slow"
+                                    userPreferences.karaokeGlowSpeed <= 0.85f -> "0.7× — Relaxed"
+                                    userPreferences.karaokeGlowSpeed in 0.86f..1.25f -> "1.0× — Normal"
+                                    else -> "1.5× — Fast"
+                                }
+                                Text(
+                                    text = speedLabel,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            Text(
+                                text = "Adjust the speed of the white glowing highlight sweep across lyric text",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+
+                            var localKaraokeSpeed by remember(userPreferences.karaokeGlowSpeed) {
+                                mutableFloatStateOf(userPreferences.karaokeGlowSpeed)
+                            }
+
+                            Slider(
+                                value = localKaraokeSpeed,
+                                onValueChange = { localKaraokeSpeed = it },
+                                onValueChangeFinished = {
+                                    coroutineScope.launch {
+                                        playbackManager.preferencesRepository.setKaraokeGlowSpeed(localKaraokeSpeed)
+                                    }
+                                },
+                                valueRange = 0.5f..1.5f,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("karaoke_glow_speed_slider")
+                                    .testTag("karaoke_speed_slider")
+                            )
+
+                            // Quick speed preset buttons
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                listOf(
+                                    "0.5× — Slow" to 0.5f,
+                                    "0.7× — Relaxed" to 0.7f,
+                                    "1.0× — Normal" to 1.0f,
+                                    "1.5× — Fast" to 1.5f
+                                ).forEach { (label, speedVal) ->
+                                    val isSelected = abs(userPreferences.karaokeGlowSpeed - speedVal) < 0.08f
+                                    val tagKey = when (speedVal) {
+                                        0.5f -> "0_5"
+                                        0.7f -> "0_7"
+                                        1.0f -> "1_0"
+                                        else -> "1_5"
+                                    }
+                                    FilledTonalButton(
+                                        onClick = {
+                                            coroutineScope.launch {
+                                                playbackManager.preferencesRepository.setKaraokeGlowSpeed(speedVal)
+                                            }
+                                        },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .testTag("karaoke_glow_speed_preset_$tagKey")
+                                            .testTag("karaoke_speed_preset_$tagKey"),
+                                        contentPadding = PaddingValues(horizontal = 2.dp, vertical = 6.dp),
+                                        colors = ButtonDefaults.filledTonalButtonColors(
+                                            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                                            contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                        ),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Text(
+                                            text = label,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            textAlign = TextAlign.Center
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -787,7 +986,8 @@ fun SettingsScreen(
                     typewriterSpeed = userPreferences.typewriterSpeed,
                     smoothTransitionSpeed = userPreferences.smoothTransitionSpeed,
                     fadeSpeed = userPreferences.fadeSpeed,
-                    blurRevealSpeed = userPreferences.blurRevealSpeed
+                    blurRevealSpeed = userPreferences.blurRevealSpeed,
+                    karaokeSpeed = userPreferences.karaokeSpeed
                 )
             }
         }
@@ -1708,7 +1908,7 @@ fun SettingsScreen(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "Version 1.5.0",
+                    text = "Version 1.9.0",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1766,12 +1966,14 @@ private fun AnimationStylePreview(
     typewriterSpeed: Float = 1.0f,
     smoothTransitionSpeed: Float = 1.0f,
     fadeSpeed: Float = 1.0f,
-    blurRevealSpeed: Float = 1.0f
+    blurRevealSpeed: Float = 1.0f,
+    karaokeSpeed: Float = 1.0f
 ) {
     var previewTick by remember { mutableIntStateOf(0) }
-    LaunchedEffect(styleName, typewriterSpeed) {
+    LaunchedEffect(styleName, typewriterSpeed, karaokeSpeed) {
         val baseDelay = when (styleName) {
             "TYPEWRITER" -> (120 / typewriterSpeed.coerceIn(0.3f, 3.0f)).toLong()
+            "KARAOKE" -> (120 / karaokeSpeed.coerceIn(0.3f, 3.0f)).toLong()
             else -> 120L
         }
         while (true) {

@@ -144,7 +144,7 @@ class MinimalOverlayView(
             }
 
             // Update smooth horizontal auto-scroll for single-line mode
-            if (singleLineMode && maxScrollX > 0f) {
+            if (singleLineMode && maxScrollX > 0f && adaptiveScrollingEnabled) {
                 updateHorizontalScrollTarget(posMs)
                 val diffX = targetScrollX - currentScrollX
                 if (abs(diffX) > 0.3f) {
@@ -152,6 +152,9 @@ class MinimalOverlayView(
                 } else {
                     currentScrollX = targetScrollX
                 }
+            } else {
+                currentScrollX = 0f
+                targetScrollX = 0f
             }
 
             invalidate()
@@ -285,6 +288,21 @@ class MinimalOverlayView(
             }
         }
 
+    var karaokeGlowSpeed: Float = 1.0f
+        set(value) {
+            val clamped = value.coerceIn(0.5f, 1.5f)
+            if (field != clamped) {
+                field = clamped
+                invalidate()
+            }
+        }
+
+    var karaokeSpeed: Float
+        get() = karaokeGlowSpeed
+        set(value) {
+            karaokeGlowSpeed = value
+        }
+
     var textSizeSp: Float = 14f
         set(value) {
             if (field != value) {
@@ -338,7 +356,48 @@ class MinimalOverlayView(
         set(value) {
             if (field != value) {
                 field = value
+                if (!value) {
+                    targetScrollX = 0f
+                    currentScrollX = 0f
+                }
                 recalculateLayout()
+            }
+        }
+
+    var adaptiveScrollingEnabled: Boolean = true
+        set(value) {
+            if (field != value) {
+                field = value
+                if (!value) {
+                    targetScrollX = 0f
+                    currentScrollX = 0f
+                }
+                recalculateLayout()
+            }
+        }
+
+    var scrollSpeedMultiplier: Float = 1.0f
+        set(value) {
+            val clamped = value.coerceIn(1.0f, 1.5f)
+            if (field != clamped) {
+                field = clamped
+                invalidate()
+            }
+        }
+
+    var nextLyricTimestampMs: Long? = null
+        set(value) {
+            if (field != value) {
+                field = value
+                invalidate()
+            }
+        }
+
+    var trackDurationMs: Long? = null
+        set(value) {
+            if (field != value) {
+                field = value
+                invalidate()
             }
         }
 
@@ -410,6 +469,7 @@ class MinimalOverlayView(
         speed: Float,
         updatedTimestamp: Long
     ) {
+        val wasPlaying = isPlaying
         val posDiff = abs(positionMs - lastPositionMs)
         val isSeeking = posDiff > 1500L
 
@@ -418,7 +478,14 @@ class MinimalOverlayView(
         playbackSpeed = if (speed > 0f) speed else 1.0f
         lastUpdatedTimestamp = updatedTimestamp
 
-        if (isSeeking) {
+        if (!playing) {
+            transitionAnimator?.cancel()
+            stopLoop()
+            invalidate()
+            return
+        }
+
+        if (!wasPlaying || isSeeking) {
             transitionAnimator?.cancel()
             previousLayoutLines = emptyList()
             animProgress = 1f
@@ -433,12 +500,7 @@ class MinimalOverlayView(
             }
         }
 
-        if (isPlaying) {
-            startLoopIfNeeded()
-        } else {
-            stopLoop()
-            invalidate()
-        }
+        startLoopIfNeeded()
     }
 
     fun setScreenOn(screenOn: Boolean) {
@@ -474,12 +536,14 @@ class MinimalOverlayView(
         animProgress = 0f
         transitionAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
             val baseDuration = when (currentStyle) {
+                "KARAOKE" -> 240L
                 "SMOOTH_SLIDE" -> 300L
                 "FADE" -> 360L
                 "BLUR_REVEAL" -> 400L
                 else -> 240L
             }
             val speed = when (currentStyle) {
+                "KARAOKE" -> 1.0f // Keep fade-in/fade-out transition timing unchanged for KARAOKE
                 "SMOOTH_SLIDE" -> smoothTransitionSpeed.coerceIn(0.3f, 3.0f)
                 "FADE" -> fadeSpeed.coerceIn(0.3f, 3.0f)
                 "BLUR_REVEAL" -> blurRevealSpeed.coerceIn(0.3f, 3.0f)
@@ -531,7 +595,14 @@ class MinimalOverlayView(
         } else {
             val tokens = rawText.trim().split(Regex("\\s+"))
             val lineStart = currentLine?.timeMs ?: 0L
-            val lineEnd = currentLine?.endTimeMs ?: (lineStart + 3500L)
+            val rawEnd = currentLine?.endTimeMs ?: 0L
+            val lineEnd = if (rawEnd > lineStart) {
+                rawEnd
+            } else if (nextLyricTimestampMs != null && nextLyricTimestampMs!! > lineStart) {
+                nextLyricTimestampMs!!
+            } else {
+                lineStart + 3500L
+            }
             wordsToWrap = tokens.map { token ->
                 LayoutWord(
                     word = token,
@@ -555,7 +626,11 @@ class MinimalOverlayView(
                 curLineWidth += w.width + (if (idx > 0) spaceWidth else 0f)
             }
             lineList.add(LayoutLine(wordsToWrap.toMutableList(), curLineWidth))
-            maxScrollX = (curLineWidth - availableWidth + 24f).coerceAtLeast(0f)
+            maxScrollX = if (adaptiveScrollingEnabled && curLineWidth > availableWidth) {
+                (curLineWidth - availableWidth + 24f).coerceAtLeast(0f)
+            } else {
+                0f
+            }
         } else {
             var curLineWords = mutableListOf<LayoutWord>()
             var curLineWidth = 0f
@@ -580,8 +655,8 @@ class MinimalOverlayView(
         // 3. Compute paragraph alignment (LEFT, CENTER / CENTRE, RIGHT) for each line
         val alignUpper = textAlignMode.trim().uppercase()
         for (line in lineList) {
-            val startX = if (singleLineMode && line.lineWidth > availableWidth) {
-                // When single line exceeds width, start at contentLeft so scrolling from right to left smoothly reveals the rest
+            val startX = if (singleLineMode && line.lineWidth > availableWidth && adaptiveScrollingEnabled) {
+                // When single line exceeds width and scrolling is enabled, start at contentLeft
                 contentLeft
             } else {
                 when (alignUpper) {
@@ -653,8 +728,15 @@ class MinimalOverlayView(
             }
         } else {
             val lineStart = activeLyricLine?.timeMs ?: 0L
-            val lineEnd = activeLyricLine?.endTimeMs ?: (lineStart + 3500L)
-            val rawDuration = (lineEnd - lineStart).coerceIn(1500L, 8000L)
+            val rawEnd = activeLyricLine?.endTimeMs ?: 0L
+            val lineEnd = if (rawEnd > lineStart) {
+                rawEnd
+            } else if (nextLyricTimestampMs != null && nextLyricTimestampMs!! > lineStart) {
+                nextLyricTimestampMs!!
+            } else {
+                lineStart + 3500L
+            }
+            val rawDuration = (lineEnd - lineStart).coerceIn(1200L, 12000L)
             val totalChars = currentLayoutLines.sumOf { l -> l.words.sumOf { it.word.length } }.coerceAtLeast(1)
             var charAcc = 0
             for ((lineIdx, line) in currentLayoutLines.withIndex()) {
@@ -678,7 +760,7 @@ class MinimalOverlayView(
     }
 
     private fun updateHorizontalScrollTarget(posMs: Long) {
-        if (maxScrollX <= 0f || currentLayoutLines.isEmpty()) {
+        if (!singleLineMode || !adaptiveScrollingEnabled || maxScrollX <= 0f || currentLayoutLines.isEmpty()) {
             targetScrollX = 0f
             return
         }
@@ -723,21 +805,32 @@ class MinimalOverlayView(
                 } else if (posMs >= w.endMs) {
                     focusX = w.x + w.width
                 } else {
-                    val wDuration = (w.endMs - w.startMs).coerceAtLeast(1L)
-                    val wProg = ((posMs - w.startMs).toFloat() / wDuration).coerceIn(0f, 1f)
+                    val wProg = com.example.domain.lyricsengine.LyricsTimingEngine.calculateWordGlowProgress(
+                        startMs = w.startMs,
+                        endMs = w.endMs,
+                        currentPositionMs = posMs,
+                        speedMultiplier = karaokeGlowSpeed
+                    )
                     focusX = w.x + (w.width * wProg)
                     break
                 }
             }
 
-            val desiredOffset = focusX - (contentLeft + availableWidth * 0.45f)
+            val desiredOffset = (focusX - (contentLeft + availableWidth * 0.45f)) * scrollSpeedMultiplier.coerceIn(1.0f, 1.5f)
             targetScrollX = desiredOffset.coerceIn(0f, maxScrollX)
         } else if (currentStyle == "TYPEWRITER") {
             // Coordinate horizontal scrolling with typewriter character reveal
-            val speed = typewriterSpeed.coerceIn(0.3f, 3.0f)
+            val speed = (typewriterSpeed * scrollSpeedMultiplier).coerceIn(0.3f, 4.5f)
             val lineStart = activeLyricLine?.timeMs ?: 0L
-            val lineEnd = activeLyricLine?.endTimeMs ?: (lineStart + 3500L)
-            val baseDuration = (lineEnd - lineStart).coerceIn(1200L, 4000L)
+            val rawEnd = activeLyricLine?.endTimeMs ?: 0L
+            val lineEnd = if (rawEnd > lineStart) {
+                rawEnd
+            } else if (nextLyricTimestampMs != null && nextLyricTimestampMs!! > lineStart) {
+                nextLyricTimestampMs!!
+            } else {
+                lineStart + 3500L
+            }
+            val baseDuration = (lineEnd - lineStart).coerceIn(1200L, 8000L)
             val duration = (baseDuration / speed).toLong().coerceIn(600L, 12000L)
 
             val frac = if (posMs < lineStart) 0f
@@ -748,23 +841,16 @@ class MinimalOverlayView(
             val desiredOffset = (contentLeft + revealedWidth) - (contentLeft + availableWidth * 0.55f)
             targetScrollX = desiredOffset.coerceIn(0f, maxScrollX)
         } else {
-            // SMOOTH_SLIDE, INSTANT, or LRC line-timed KARAOKE:
-            // Proportional smooth scroll from start to end of line duration
+            // Playback-synchronized adaptive horizontal scroll based on current and next lyric timestamps
             val lineStart = activeLyricLine?.timeMs ?: 0L
-            val lineEnd = activeLyricLine?.endTimeMs ?: (lineStart + 3500L)
-            val duration = (lineEnd - lineStart).coerceIn(1500L, 8000L)
-
-            val leadIn = (duration * 0.12f).toLong().coerceIn(200L, 800L)
-            val activeDuration = (duration - leadIn).coerceAtLeast(500L)
-
-            val frac = if (posMs <= lineStart + leadIn) {
-                0f
-            } else if (posMs >= lineStart + duration) {
-                1f
-            } else {
-                ((posMs - (lineStart + leadIn)).toFloat() / activeDuration).coerceIn(0f, 1f)
-            }
-            targetScrollX = (maxScrollX * frac).coerceIn(0f, maxScrollX)
+            val progress = com.example.domain.lyricsengine.LyricsTimingEngine.calculateAdaptiveScrollProgress(
+                currentLineStartMs = lineStart,
+                nextTimestampMs = nextLyricTimestampMs,
+                trackDurationMs = trackDurationMs,
+                currentPositionMs = posMs,
+                speedMultiplier = scrollSpeedMultiplier
+            )
+            targetScrollX = (maxScrollX * progress).coerceIn(0f, maxScrollX)
         }
     }
 
@@ -777,6 +863,7 @@ class MinimalOverlayView(
 
     fun stopLoop() {
         removeCallbacks(frameRunnable)
+        transitionAnimator?.cancel()
         isLoopRunning = false
     }
 
@@ -819,6 +906,10 @@ class MinimalOverlayView(
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+
+        if (visibility != VISIBLE || alpha <= 0f) {
+            return
+        }
 
         val paddingHorizontal = 24f
 
@@ -914,8 +1005,12 @@ class MinimalOverlayView(
                                     canvas.drawText(w.word, w.x, drawY, wordActivePaint)
                                 } else {
                                     // Word actively being sung on active line: progressive fill from left to right
-                                    val duration = (w.endMs - w.startMs).coerceAtLeast(1L)
-                                    val progress = ((posMs - w.startMs).toFloat() / duration).coerceIn(0f, 1f)
+                                    val progress = com.example.domain.lyricsengine.LyricsTimingEngine.calculateWordGlowProgress(
+                                        startMs = w.startMs,
+                                        endMs = w.endMs,
+                                        currentPositionMs = posMs,
+                                        speedMultiplier = karaokeGlowSpeed
+                                    )
 
                                     // Low opacity below
                                     canvas.drawText(w.word, w.x, drawY, wordInactivePaint)
@@ -943,8 +1038,15 @@ class MinimalOverlayView(
                 } else {
                     // 3. Synchronized line-timed LRC:
                     val lineStart = activeLyricLine?.timeMs ?: 0L
-                    val lineEnd = activeLyricLine?.endTimeMs ?: (lineStart + 3500L)
-                    val rawDuration = (lineEnd - lineStart).coerceIn(1500L, 8000L)
+                    val rawEnd = activeLyricLine?.endTimeMs ?: 0L
+                    val lineEnd = if (rawEnd > lineStart) {
+                        rawEnd
+                    } else if (nextLyricTimestampMs != null && nextLyricTimestampMs!! > lineStart) {
+                        nextLyricTimestampMs!!
+                    } else {
+                        lineStart + 3500L
+                    }
+                    val totalDuration = (lineEnd - lineStart).coerceIn(1200L, 12000L)
 
                     // A: Always display ALL lines with low opacity below (inactive/base layer)
                     wordInactivePaint.alpha = (incomingAlpha * 0.35f).toInt().coerceIn(0, 255)
@@ -955,22 +1057,22 @@ class MinimalOverlayView(
                         }
                     }
 
-                    // B: Show high-opacity glowing text above that fades in slowly left to right
-                    // CRITICAL: Only the single active visual line receives the highlight sweep!
+                    // B: Show high-opacity glowing text above that sweeps across the text
+                    // Visual lines that have already been sung remain fully glowing and visible
                     if (currentLayoutLines.isNotEmpty()) {
                         val totalChars = currentLayoutLines.sumOf { l -> l.words.sumOf { it.word.length } }.coerceAtLeast(1)
 
                         var activeLineIdx = 0
                         var activeLineStart = lineStart
-                        var activeLineDuration = rawDuration
+                        var activeLineDuration = totalDuration
                         var charAccumulator = 0
 
                         for ((idx, line) in currentLayoutLines.withIndex()) {
                             val lineChars = line.words.sumOf { it.word.length }.coerceAtLeast(1)
                             val startFrac = charAccumulator.toFloat() / totalChars
                             val endFrac = (charAccumulator + lineChars).toFloat() / totalChars
-                            val lStart = lineStart + (rawDuration * startFrac).toLong()
-                            val lEnd = lineStart + (rawDuration * endFrac).toLong()
+                            val lStart = lineStart + (totalDuration * startFrac).toLong()
+                            val lEnd = lineStart + (totalDuration * endFrac).toLong()
 
                             if (posMs >= lStart && (idx == currentLayoutLines.lastIndex || posMs < lEnd)) {
                                 activeLineIdx = idx
@@ -985,18 +1087,33 @@ class MinimalOverlayView(
                             charAccumulator += lineChars
                         }
 
+                        wordActivePaint.alpha = incomingAlpha
+                        wordGlowPaint.alpha = incomingAlpha
+
+                        // Draw prior completed visual lines (0 until activeLineIdx) fully highlighted and glowing
+                        for (prevIdx in 0 until activeLineIdx) {
+                            val prevLine = currentLayoutLines[prevIdx]
+                            val drawY = prevLine.baselineY - currentScrollY + incomingOffsetY
+                            for (w in prevLine.words) {
+                                canvas.drawText(w.word, w.x, drawY, wordGlowPaint)
+                                canvas.drawText(w.word, w.x, drawY, wordActivePaint)
+                            }
+                        }
+
                         val lineProgress = if (posMs < activeLineStart) {
-                            if (activeLineStart == 0L) 1f else 0f
+                            0f
                         } else if (posMs >= activeLineStart + activeLineDuration) {
                             1f
                         } else {
-                            ((posMs - activeLineStart).toFloat() / activeLineDuration).coerceIn(0f, 1f)
+                            com.example.domain.lyricsengine.LyricsTimingEngine.calculateWordGlowProgress(
+                                startMs = activeLineStart,
+                                endMs = activeLineStart + activeLineDuration,
+                                currentPositionMs = posMs,
+                                speedMultiplier = karaokeGlowSpeed
+                            )
                         }
 
                         if (lineProgress > 0f) {
-                            wordActivePaint.alpha = incomingAlpha
-                            wordGlowPaint.alpha = incomingAlpha
-
                             val activeLine = currentLayoutLines[activeLineIdx]
                             val lineLeft = activeLine.words.firstOrNull()?.x ?: paddingHorizontal
                             val lineRight = (activeLine.words.lastOrNull()?.let { it.x + it.width }) ?: (width - paddingHorizontal)

@@ -52,6 +52,8 @@ data class UserPreferences(
     val smoothTransitionSpeed: Float = 1.0f, // 0.5x (Slow) to 1.5x (Fast)
     val fadeSpeed: Float = 1.0f, // 0.5x (Slow) to 1.5x (Fast)
     val blurRevealSpeed: Float = 1.0f, // 0.5x (Slow) to 1.5x (Fast)
+    val karaokeSpeed: Float = 1.0f, // 0.5x to 1.5x (Glow Sweep Speed)
+    val karaokeGlowSpeed: Float = 1.0f, // 0.5x to 1.5x (Glow Sweep Speed)
     val textShadowEnabled: Boolean = true,
     val overlayYPosition: Int = 180, // Full range
     val overlayXPosition: Int = 0, // Full range
@@ -68,6 +70,8 @@ data class UserPreferences(
     val selectedFont: FontOption = FontOption.POPPINS,
     val appleMusicStyle: Boolean = true,
     val singleLineLyrics: Boolean = false,
+    val adaptiveLyricScrolling: Boolean = true,
+    val lyricScrollSpeedMultiplier: Float = 1.0f, // 1.0x to 1.5x
     val globalOffsetMs: Long = 0L
 )
 
@@ -81,6 +85,8 @@ class UserPreferencesRepository(private val context: Context) {
         val SMOOTH_TRANSITION_SPEED = floatPreferencesKey("smooth_transition_speed")
         val FADE_SPEED = floatPreferencesKey("fade_speed")
         val BLUR_REVEAL_SPEED = floatPreferencesKey("blur_reveal_speed")
+        val KARAOKE_SPEED = floatPreferencesKey("karaoke_speed")
+        val KARAOKE_GLOW_SPEED = floatPreferencesKey("karaoke_glow_speed")
         val OVERLAY_TEXT_SHADOW = booleanPreferencesKey("overlay_text_shadow")
         val OVERLAY_Y_POS = intPreferencesKey("overlay_y_position")
         val OVERLAY_X_POS = intPreferencesKey("overlay_x_position")
@@ -98,6 +104,8 @@ class UserPreferencesRepository(private val context: Context) {
         val SELECTED_FONT = stringPreferencesKey("selected_font")
         val APPLE_MUSIC_STYLE = booleanPreferencesKey("apple_music_style")
         val SINGLE_LINE_LYRICS = booleanPreferencesKey("single_line_lyrics")
+        val ADAPTIVE_LYRIC_SCROLLING = booleanPreferencesKey("adaptive_lyric_scrolling")
+        val LYRIC_SCROLL_SPEED_MULTIPLIER = floatPreferencesKey("lyric_scroll_speed_multiplier")
         val GLOBAL_OFFSET_MS = longPreferencesKey("global_offset_ms")
     }
 
@@ -152,6 +160,8 @@ class UserPreferencesRepository(private val context: Context) {
                 smoothTransitionSpeed = (preferences[PreferencesKeys.SMOOTH_TRANSITION_SPEED] ?: 1.0f).coerceIn(0.3f, 3.0f),
                 fadeSpeed = (preferences[PreferencesKeys.FADE_SPEED] ?: 1.0f).coerceIn(0.3f, 3.0f),
                 blurRevealSpeed = (preferences[PreferencesKeys.BLUR_REVEAL_SPEED] ?: 1.0f).coerceIn(0.3f, 3.0f),
+                karaokeSpeed = (preferences[PreferencesKeys.KARAOKE_GLOW_SPEED] ?: preferences[PreferencesKeys.KARAOKE_SPEED] ?: 1.0f).coerceIn(0.5f, 1.5f),
+                karaokeGlowSpeed = (preferences[PreferencesKeys.KARAOKE_GLOW_SPEED] ?: preferences[PreferencesKeys.KARAOKE_SPEED] ?: 1.0f).coerceIn(0.5f, 1.5f),
                 textShadowEnabled = preferences[PreferencesKeys.OVERLAY_TEXT_SHADOW] ?: true,
                 overlayYPosition = clampedY,
                 overlayXPosition = clampedX,
@@ -168,6 +178,8 @@ class UserPreferencesRepository(private val context: Context) {
                 selectedFont = font,
                 appleMusicStyle = preferences[PreferencesKeys.APPLE_MUSIC_STYLE] ?: true,
                 singleLineLyrics = preferences[PreferencesKeys.SINGLE_LINE_LYRICS] ?: false,
+                adaptiveLyricScrolling = preferences[PreferencesKeys.ADAPTIVE_LYRIC_SCROLLING] ?: true,
+                lyricScrollSpeedMultiplier = (preferences[PreferencesKeys.LYRIC_SCROLL_SPEED_MULTIPLIER] ?: 1.0f).coerceIn(1.0f, 1.5f),
                 globalOffsetMs = preferences[PreferencesKeys.GLOBAL_OFFSET_MS] ?: 0L
             )
         }
@@ -201,12 +213,33 @@ class UserPreferencesRepository(private val context: Context) {
         context.dataStore.edit { it[PreferencesKeys.BLUR_REVEAL_SPEED] = bounded }
     }
 
+    suspend fun setKaraokeSpeed(speed: Float) {
+        val bounded = speed.coerceIn(0.5f, 1.5f)
+        context.dataStore.edit {
+            it[PreferencesKeys.KARAOKE_SPEED] = bounded
+            it[PreferencesKeys.KARAOKE_GLOW_SPEED] = bounded
+        }
+    }
+
+    suspend fun setKaraokeGlowSpeed(speed: Float) {
+        setKaraokeSpeed(speed)
+    }
+
     suspend fun setAppleMusicStyle(enabled: Boolean) {
         context.dataStore.edit { it[PreferencesKeys.APPLE_MUSIC_STYLE] = enabled }
     }
 
     suspend fun setSingleLineLyrics(enabled: Boolean) {
         context.dataStore.edit { it[PreferencesKeys.SINGLE_LINE_LYRICS] = enabled }
+    }
+
+    suspend fun setAdaptiveLyricScrolling(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.ADAPTIVE_LYRIC_SCROLLING] = enabled }
+    }
+
+    suspend fun setLyricScrollSpeedMultiplier(multiplier: Float) {
+        val bounded = multiplier.coerceIn(1.0f, 1.5f)
+        context.dataStore.edit { it[PreferencesKeys.LYRIC_SCROLL_SPEED_MULTIPLIER] = bounded }
     }
 
     suspend fun setOverlayEnabled(enabled: Boolean) {

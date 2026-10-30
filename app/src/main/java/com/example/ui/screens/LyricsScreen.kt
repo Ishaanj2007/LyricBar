@@ -43,6 +43,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.model.TrackMetadata
 import com.example.domain.parser.LrcParser
 import com.example.service.MediaPlaybackManager
 import kotlinx.coroutines.isActive
@@ -88,20 +89,30 @@ fun LyricsScreen(
                         return@launch
                     }
 
-                    context.contentResolver.openInputStream(uri)?.use { stream ->
-                        val text = BufferedReader(InputStreamReader(stream)).readText()
-                        val track = playbackState.track
-                        val parsed = LrcParser.parse(
-                            content = text,
-                            title = track?.title ?: "Imported Track",
-                            artist = track?.artist ?: "Local File",
-                            source = "Local .lrc"
-                        )
-                        playbackManager.setManualLyrics(parsed)
+                    val text = context.contentResolver.openInputStream(uri)?.use { stream ->
+                        BufferedReader(InputStreamReader(stream)).readText()
+                    } ?: ""
+
+                    if (text.isBlank()) {
+                        Toast.makeText(context, "Lyric file is empty", Toast.LENGTH_SHORT).show()
+                        return@launch
                     }
+
+                    val track = playbackState.track ?: run {
+                        val ti = Regex("\\[ti:\\s*(.*?)\\]", RegexOption.IGNORE_CASE).find(text)?.groupValues?.get(1)?.trim()
+                        val ar = Regex("\\[ar:\\s*(.*?)\\]", RegexOption.IGNORE_CASE).find(text)?.groupValues?.get(1)?.trim()
+                        TrackMetadata(
+                            title = if (!ti.isNullOrBlank()) ti else "Imported Track",
+                            artist = if (!ar.isNullOrBlank()) ar else "Local File"
+                        )
+                    }
+
+                    playbackManager.saveImportedLyrics(track, text, "Local .lrc")
+                    Toast.makeText(context, "Lyrics imported successfully", Toast.LENGTH_SHORT).show()
                 } catch (e: Exception) {
                     e.printStackTrace()
-                    Toast.makeText(context, "Failed to import lyric file", Toast.LENGTH_SHORT).show()
+                    val errorMsg = e.localizedMessage?.takeIf { it.isNotBlank() } ?: "Failed to import lyric file"
+                    Toast.makeText(context, errorMsg, Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -476,7 +487,11 @@ fun LyricsScreen(
                                                 // Apple Music Word-Level Synchronized Progressive Highlighting
                                                 val annotatedString = androidx.compose.ui.text.buildAnnotatedString {
                                                     line.words.forEachIndexed { wordIdx, word ->
-                                                        val wordProg = com.example.domain.lyricsengine.LyricsTimingEngine.calculateWordProgress(word, currentPos)
+                                                        val wordProg = com.example.domain.lyricsengine.LyricsTimingEngine.calculateWordProgress(
+                                                            word = word,
+                                                            currentPositionMs = currentPos,
+                                                            speedMultiplier = userPreferences.karaokeGlowSpeed
+                                                        )
                                                         val wordColor = if (wordProg >= 1f) {
                                                             Color.White
                                                         } else if (wordProg <= 0f) {

@@ -57,7 +57,7 @@ class CompositeLyricsRepository internal constructor(
                         content = content,
                         title = cached.title,
                         artist = cached.artist,
-                        source = "${cached.source} (Cached)"
+                        source = if (cached.source.endsWith("(Cached)")) cached.source else "${cached.source} (Cached)"
                     )
                     // Only return cached if valid or if remote network is not strictly needed
                     if (parsed.isSynced || !cached.isSynced) {
@@ -117,6 +117,17 @@ class CompositeLyricsRepository internal constructor(
         content: String,
         source: String = "Imported"
     ): ParsedLyrics = withContext(Dispatchers.IO) {
+        if (content.isBlank()) {
+            throw IllegalArgumentException("Lyric file is empty")
+        }
+        if (content.contains('\u0000')) {
+            throw IllegalArgumentException("Unsupported file: binary files are not supported.")
+        }
+        val key = track.key
+        if (key.isBlank()) {
+            throw IllegalArgumentException("Invalid track metadata")
+        }
+
         val parsed = LrcParser.parse(
             content = content,
             title = track.title,
@@ -124,9 +135,13 @@ class CompositeLyricsRepository internal constructor(
             source = source
         )
 
+        if (parsed.lines.isEmpty() || parsed.lines.all { it.text.isBlank() }) {
+            throw IllegalArgumentException("No valid lyrics found in file")
+        }
+
         lyricsDao.insertLyrics(
             LyricsEntity(
-                key = track.key,
+                key = key,
                 title = track.title,
                 artist = track.artist,
                 syncedLrc = if (parsed.isSynced) content else null,

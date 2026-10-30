@@ -12,6 +12,8 @@ import android.view.WindowManager
 import androidx.core.app.NotificationCompat
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.ui.graphics.toArgb
+import android.animation.ValueAnimator
+import android.view.animation.DecelerateInterpolator
 import com.example.MainActivity
 import com.example.R
 import com.example.data.preferences.ThemePreset
@@ -32,6 +34,7 @@ class OverlayService : Service() {
     private var currentX = 0
     private var currentY = 140
     private var isDragMode = false
+    private var currentPrefs = com.example.data.preferences.UserPreferences()
 
     private val screenReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -73,6 +76,7 @@ class OverlayService : Service() {
                 }
                 updateOverlayFlags()
                 updateNotification()
+                updateOverlayVisibility(playbackManager.playbackState.value, true)
             }
             ACTION_STOP_OVERLAY -> {
                 serviceScope.launch {
@@ -127,10 +131,171 @@ class OverlayService : Service() {
         )
         overlayView = view
 
+        val currentPb = playbackManager.playbackState.value
+        val shouldInitiallyShow = isDragMode || (currentPb.isPlaying && currentPb.hasActiveSession && currentPb.track != null)
+        view.visibility = if (shouldInitiallyShow) android.view.View.VISIBLE else android.view.View.GONE
+        view.alpha = if (shouldInitiallyShow) 1.0f else 0.0f
+        view.scaleX = if (shouldInitiallyShow) 1.0f else 0.97f
+        view.scaleY = if (shouldInitiallyShow) 1.0f else 0.97f
+        lastTargetVisible = shouldInitiallyShow
+
         try {
             wm.addView(view, params)
         } catch (e: Exception) {
             e.printStackTrace()
+        }
+    }
+
+    private var visibilityAnimator: ValueAnimator? = null
+    private var lastTargetVisible: Boolean? = null
+    private var isFadingIn = false
+    private var isFadingOut = false
+
+    private fun cancelVisibilityAnimation() {
+        visibilityAnimator?.cancel()
+        visibilityAnimator = null
+        isFadingIn = false
+        isFadingOut = false
+    }
+
+    private fun updateOverlayVisibility(playbackState: com.example.data.model.PlaybackStateInfo, overlayEnabled: Boolean) {
+        val view = overlayView ?: return
+        if (!overlayEnabled) {
+            cancelVisibilityAnimation()
+            view.visibility = android.view.View.GONE
+            view.alpha = 0f
+            view.scaleX = 0.97f
+            view.scaleY = 0.97f
+            view.stopLoop()
+            lastTargetVisible = false
+            return
+        }
+
+        val shouldShow = isDragMode || (playbackState.isPlaying && playbackState.hasActiveSession && playbackState.track != null)
+
+        if (shouldShow) {
+            if (lastTargetVisible == true && view.visibility == android.view.View.VISIBLE && !isFadingOut && view.alpha >= 1f) {
+                return
+            }
+            lastTargetVisible = true
+
+            // Cancel any exit animation safely
+            if (isFadingOut) {
+                visibilityAnimator?.cancel()
+                isFadingOut = false
+            } else if (isFadingIn) {
+                return // already fading in
+            }
+
+            val startAlpha = if (view.visibility == android.view.View.VISIBLE) view.alpha.coerceIn(0f, 1f) else 0f
+            val startScale = if (view.visibility == android.view.View.VISIBLE) view.scaleX.coerceIn(0.97f, 1.0f) else 0.97f
+
+            view.visibility = android.view.View.VISIBLE
+            val pivotW = if (view.width > 0) view.width else (layoutParams?.width ?: 0)
+            val pivotH = if (view.height > 0) view.height else (layoutParams?.height ?: 0)
+            view.pivotX = pivotW / 2f
+            view.pivotY = pivotH / 2f
+            view.alpha = startAlpha
+            view.scaleX = startScale
+            view.scaleY = startScale
+
+            val remaining = (1f - startAlpha).coerceIn(0f, 1f)
+            val animDuration = kotlin.math.round(FADE_IN_DURATION_MS.toDouble() * remaining.toDouble()).toLong().coerceIn(30L, FADE_IN_DURATION_MS)
+
+            isFadingIn = true
+            val anim = ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = animDuration
+                interpolator = DecelerateInterpolator(1.5f)
+                addUpdateListener { va ->
+                    val frac = va.animatedFraction
+                    val currentA = startAlpha + (1.0f - startAlpha) * frac
+                    val currentS = startScale + (1.0f - startScale) * frac
+                    view.alpha = currentA
+                    view.scaleX = currentS
+                    view.scaleY = currentS
+                }
+                addListener(object : android.animation.AnimatorListenerAdapter() {
+                    override fun onAnimationEnd(animation: android.animation.Animator) {
+                        if (isFadingIn) {
+                            view.alpha = 1.0f
+                            view.scaleX = 1.0f
+                            view.scaleY = 1.0f
+                            isFadingIn = false
+                        }
+                    }
+                    override fun onAnimationCancel(animation: android.animation.Animator) {
+                        isFadingIn = false
+                    }
+                })
+            }
+            visibilityAnimator = anim
+            anim.start()
+        } else {
+            if (lastTargetVisible == false && view.visibility == android.view.View.GONE && !isFadingIn) {
+                view.stopLoop()
+                return
+            }
+            lastTargetVisible = false
+
+            // Ensure lyric scrolling and playback-dependent animations stop immediately when playback is inactive
+            view.stopLoop()
+
+            // Cancel any entrance animation safely
+            if (isFadingIn) {
+                visibilityAnimator?.cancel()
+                isFadingIn = false
+            } else if (isFadingOut) {
+                return // already fading out
+            }
+
+            if (view.visibility != android.view.View.VISIBLE || view.alpha <= 0.01f) {
+                view.visibility = android.view.View.GONE
+                view.alpha = 0f
+                view.scaleX = 0.97f
+                view.scaleY = 0.97f
+                return
+            }
+
+            val startAlpha = view.alpha.coerceIn(0f, 1f)
+            val startScale = view.scaleX.coerceIn(0.97f, 1.0f)
+
+            val pivotW = if (view.width > 0) view.width else (layoutParams?.width ?: 0)
+            val pivotH = if (view.height > 0) view.height else (layoutParams?.height ?: 0)
+            view.pivotX = pivotW / 2f
+            view.pivotY = pivotH / 2f
+
+            val animDuration = kotlin.math.round(FADE_OUT_DURATION_MS.toDouble() * startAlpha.toDouble()).toLong().coerceIn(30L, FADE_OUT_DURATION_MS)
+
+            isFadingOut = true
+            val anim = ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = animDuration
+                interpolator = DecelerateInterpolator(1.5f)
+                addUpdateListener { va ->
+                    val frac = va.animatedFraction
+                    val currentA = startAlpha + (0.0f - startAlpha) * frac
+                    val currentS = startScale + (0.97f - startScale) * frac
+                    view.alpha = currentA
+                    view.scaleX = currentS
+                    view.scaleY = currentS
+                }
+                addListener(object : android.animation.AnimatorListenerAdapter() {
+                    override fun onAnimationEnd(animation: android.animation.Animator) {
+                        if (isFadingOut) {
+                            view.visibility = android.view.View.GONE
+                            view.alpha = 0f
+                            view.scaleX = 0.97f
+                            view.scaleY = 0.97f
+                            view.stopLoop()
+                            isFadingOut = false
+                        }
+                    }
+                    override fun onAnimationCancel(animation: android.animation.Animator) {
+                        isFadingOut = false
+                    }
+                })
+            }
+            visibilityAnimator = anim
+            anim.start()
         }
     }
 
@@ -157,34 +322,57 @@ class OverlayService : Service() {
     }
 
     private fun observeState() {
-        // Observe lyrics and preferences
+        // Observe lyrics, playback state, and preferences
         serviceScope.launch {
             combine(
                 playbackManager.activeLyricObject,
+                playbackManager.currentLyrics,
+                playbackManager.playbackState,
                 playbackManager.preferencesRepository.userPreferencesFlow
-            ) { lineObj, prefs ->
-                Pair(lineObj, prefs)
-            }.collect { (lineObj, prefs) ->
+            ) { lineObj, lyrics, playbackState, prefs ->
+                OverlayStateBundle(lineObj, lyrics, playbackState, prefs)
+            }.collect { bundle ->
                 val view = overlayView ?: return@collect
                 val params = layoutParams ?: return@collect
+                val prefs = bundle.prefs
+                val lineObj = bundle.lineObj
+                val lyrics = bundle.lyrics
+                val playbackState = bundle.playbackState
 
+                currentPrefs = prefs
                 if (!prefs.overlayEnabled) {
                     stopSelf()
                     return@collect
                 }
 
+                updateOverlayVisibility(playbackState, prefs.overlayEnabled)
+
+                // Compute next valid lyric timestamp after the current line
+                val nextTimestampMs = if (lineObj != null && lyrics != null) {
+                    lyrics.lines.firstOrNull { it.timeMs > lineObj.timeMs }?.timeMs
+                } else null
+
+                val trackDurationSec = playbackState.track?.durationSec ?: 0
+                val trackDurationMs = if (trackDurationSec > 0) trackDurationSec * 1000L else null
+
                 // Update text and word-level data
                 view.activeLyricLine = lineObj
+                view.nextLyricTimestampMs = nextTimestampMs
+                view.trackDurationMs = trackDurationMs
                 view.textSizeSp = prefs.overlayTextSizeSp
                 view.textOpacity = prefs.overlayTextOpacity
                 view.typewriterSpeed = prefs.typewriterSpeed
                 view.smoothTransitionSpeed = prefs.smoothTransitionSpeed
                 view.fadeSpeed = prefs.fadeSpeed
                 view.blurRevealSpeed = prefs.blurRevealSpeed
+                view.karaokeSpeed = prefs.karaokeSpeed
+                view.karaokeGlowSpeed = prefs.karaokeGlowSpeed
                 view.textShadowEnabled = prefs.textShadowEnabled
                 view.textAlignMode = prefs.overlayTextAlign
                 view.animationStyle = prefs.animationStyle
                 view.singleLineMode = prefs.singleLineLyrics
+                view.adaptiveScrollingEnabled = prefs.adaptiveLyricScrolling
+                view.scrollSpeedMultiplier = prefs.lyricScrollSpeedMultiplier
                 view.fontResId = prefs.selectedFont.fontResId
 
                 val resolvedPrimary = if (prefs.useWallpaperDynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -208,6 +396,7 @@ class OverlayService : Service() {
                     isDragMode = prefs.isDragRepositionMode
                     updateOverlayFlags()
                     updateNotification()
+                    updateOverlayVisibility(playbackState, prefs.overlayEnabled)
                 }
 
                 // Update bounds coordinates & size
@@ -240,6 +429,7 @@ class OverlayService : Service() {
         serviceScope.launch {
             playbackManager.playbackState.collect { state ->
                 val view = overlayView ?: return@collect
+                updateOverlayVisibility(state, currentPrefs.overlayEnabled)
                 view.updatePlaybackState(
                     playing = state.isPlaying,
                     positionMs = state.positionMs,
@@ -308,6 +498,7 @@ class OverlayService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        cancelVisibilityAnimation()
         serviceScope.cancel()
         try {
             unregisterReceiver(screenReceiver)
@@ -326,6 +517,9 @@ class OverlayService : Service() {
         const val CHANNEL_ID = "lyricbar_overlay_channel"
         const val NOTIFICATION_ID = 1001
 
+        const val FADE_IN_DURATION_MS = 1000L
+        const val FADE_OUT_DURATION_MS = 1000L
+
         const val ACTION_TOGGLE_DRAG_MODE = "com.aistudio.lyricbar.action.TOGGLE_DRAG_MODE"
         const val ACTION_STOP_OVERLAY = "com.aistudio.lyricbar.action.STOP_OVERLAY"
 
@@ -339,4 +533,11 @@ class OverlayService : Service() {
             context.stopService(intent)
         }
     }
+
+    private data class OverlayStateBundle(
+        val lineObj: com.example.data.model.LyricLine?,
+        val lyrics: com.example.data.model.ParsedLyrics?,
+        val playbackState: com.example.data.model.PlaybackStateInfo,
+        val prefs: com.example.data.preferences.UserPreferences
+    )
 }

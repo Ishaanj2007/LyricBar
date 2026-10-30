@@ -113,7 +113,7 @@ class MediaPlaybackManager private constructor(private val context: Context) {
         currentSessionToken = controller.sessionToken
 
         try {
-            controller.registerCallback(controllerCallback)
+            controller.registerCallback(controllerCallback, android.os.Handler(android.os.Looper.getMainLooper()))
         } catch (e: Exception) {
             Log.w("MediaPlaybackManager", "Error registering controller callback: ${e.message}")
         }
@@ -221,20 +221,38 @@ class MediaPlaybackManager private constructor(private val context: Context) {
         }
     }
 
-    private fun updateFromPlaybackState(state: PlaybackState?) {
+    fun updateFromPlaybackState(state: PlaybackState?) {
         if (state == null) {
-            if (_playbackState.value.isPlaying) {
+            if (_playbackState.value.isPlaying || _playbackState.value.hasActiveSession) {
                 _playbackState.value = _playbackState.value.copy(
                     isPlaying = false,
+                    hasActiveSession = false,
                     lastUpdatedMs = System.currentTimeMillis()
                 )
             }
             return
         }
 
-        val isPlaying = state.state == PlaybackState.STATE_PLAYING
+        val rawState = state.state
+        val isExplicitStoppedOrNone = rawState == PlaybackState.STATE_STOPPED ||
+            rawState == PlaybackState.STATE_NONE ||
+            rawState == PlaybackState.STATE_ERROR
+
+        val isPlaying = when (rawState) {
+            PlaybackState.STATE_PLAYING -> true
+            PlaybackState.STATE_BUFFERING, PlaybackState.STATE_CONNECTING -> {
+                // Prevent UI and floating overlay flicker during temporary audio/network buffering while playing
+                _playbackState.value.isPlaying
+            }
+            else -> false
+        }
+
         val position = state.position
-        val speed = state.playbackSpeed
+        val speed = if (rawState == PlaybackState.STATE_BUFFERING || rawState == PlaybackState.STATE_CONNECTING) {
+            0.0f
+        } else {
+            state.playbackSpeed
+        }
         val validPosition = if (position >= 0L) position else _playbackState.value.positionMs
 
         // If loop/repeat replayed the track from beginning after playing significantly into the track
@@ -245,13 +263,20 @@ class MediaPlaybackManager private constructor(private val context: Context) {
             lastRecordedTrackKey = null
         }
 
+        val hasSession = activeController != null && !isExplicitStoppedOrNone
+
         _playbackState.value = _playbackState.value.copy(
             isPlaying = isPlaying,
-            hasActiveSession = activeController != null,
+            hasActiveSession = hasSession,
             positionMs = validPosition,
             playbackSpeed = if (speed > 0f) speed else 1.0f,
             lastUpdatedMs = System.currentTimeMillis()
         )
+
+        if (isExplicitStoppedOrNone) {
+            detachActiveController()
+            return
+        }
 
         if (isPlaying) {
             recordSessionIfPlaying(_playbackState.value.track)
@@ -263,9 +288,9 @@ class MediaPlaybackManager private constructor(private val context: Context) {
         if (track != null && lyrics != null && lyrics.isSynced) {
             val offset = _trackOffsetMs.value
             val activeObj = lyrics.getActiveLyricLine(validPosition, offset)
-            if (activeObj != null && _activeLyricObject.value != activeObj) {
+            if (_activeLyricObject.value != activeObj) {
                 _activeLyricObject.value = activeObj
-                _activeLyricLine.value = activeObj.text
+                _activeLyricLine.value = activeObj?.text
             }
         }
     }
@@ -328,10 +353,8 @@ class MediaPlaybackManager private constructor(private val context: Context) {
                     val currentPos = _playbackState.value.calculatedPositionMs
                     val offset = _trackOffsetMs.value
                     val initialObj = lyrics.getActiveLyricLine(currentPos, offset)
-                    if (initialObj != null) {
-                        _activeLyricObject.value = initialObj
-                        _activeLyricLine.value = initialObj.text
-                    }
+                    _activeLyricObject.value = initialObj
+                    _activeLyricLine.value = initialObj?.text
                 }
             }
         }
@@ -341,6 +364,19 @@ class MediaPlaybackManager private constructor(private val context: Context) {
         tickerJob?.cancel()
         tickerJob = scope.launch {
             while (isActive) {
+                // Periodically verify controller playback state to prevent any state desync
+                try {
+                    val controller = activeController
+                    val realState = controller?.playbackState
+                    if (realState != null) {
+                        val realPlaying = realState.state == PlaybackState.STATE_PLAYING
+                        if (realPlaying != _playbackState.value.isPlaying ||
+                            (realState.state == PlaybackState.STATE_STOPPED && _playbackState.value.hasActiveSession)) {
+                            updateFromPlaybackState(realState)
+                        }
+                    }
+                } catch (_: Exception) {}
+
                 val state = _playbackState.value
                 val lyrics = _currentLyrics.value
 
@@ -349,9 +385,9 @@ class MediaPlaybackManager private constructor(private val context: Context) {
                     val currentPos = state.calculatedPositionMs
                     val offset = _trackOffsetMs.value
                     val activeObj = lyrics.getActiveLyricLine(currentPos, offset)
-                    if (activeObj != null && _activeLyricObject.value != activeObj) {
+                    if (_activeLyricObject.value != activeObj) {
                         _activeLyricObject.value = activeObj
-                        _activeLyricLine.value = activeObj.text
+                        _activeLyricLine.value = activeObj?.text
                     }
                 }
 
@@ -371,6 +407,15 @@ class MediaPlaybackManager private constructor(private val context: Context) {
         scope.launch {
             preferencesRepository.setTrackOffset(currentTrack.key, newOffset)
         }
+        val lyrics = _currentLyrics.value
+        if (lyrics != null && lyrics.isSynced) {
+            val currentPos = _playbackState.value.calculatedPositionMs
+            val activeObj = lyrics.getActiveLyricLine(currentPos, newOffset)
+            if (_activeLyricObject.value != activeObj) {
+                _activeLyricObject.value = activeObj
+                _activeLyricLine.value = activeObj?.text
+            }
+        }
     }
 
     fun setExplicitOffset(offsetMs: Long) {
@@ -379,6 +424,25 @@ class MediaPlaybackManager private constructor(private val context: Context) {
         scope.launch {
             preferencesRepository.setTrackOffset(currentTrack.key, offsetMs)
         }
+        val lyrics = _currentLyrics.value
+        if (lyrics != null && lyrics.isSynced) {
+            val currentPos = _playbackState.value.calculatedPositionMs
+            val activeObj = lyrics.getActiveLyricLine(currentPos, offsetMs)
+            if (_activeLyricObject.value != activeObj) {
+                _activeLyricObject.value = activeObj
+                _activeLyricLine.value = activeObj?.text
+            }
+        }
+    }
+
+    suspend fun saveImportedLyrics(
+        track: TrackMetadata,
+        content: String,
+        source: String = "Local .lrc"
+    ): ParsedLyrics {
+        val parsed = lyricsRepository.saveImportedLyrics(track, content, source)
+        setManualLyrics(parsed)
+        return parsed
     }
 
     fun setManualLyrics(lyrics: ParsedLyrics) {
@@ -393,7 +457,7 @@ class MediaPlaybackManager private constructor(private val context: Context) {
     private fun isControllerControllable(controller: MediaController?): Boolean {
         if (controller == null) return false
         return try {
-            controller.playbackInfo != null
+            controller.playbackState != null || controller.metadata != null
         } catch (_: Exception) {
             false
         }
@@ -429,6 +493,13 @@ class MediaPlaybackManager private constructor(private val context: Context) {
                     controls.play()
                 }
             }
+
+            scope.launch {
+                delay(80)
+                activeController?.playbackState?.let { updateFromPlaybackState(it) }
+                delay(180)
+                activeController?.playbackState?.let { updateFromPlaybackState(it) }
+            }
         } catch (e: Exception) {
             Log.w("MediaPlaybackManager", "Error in togglePlayPause: ${e.message}")
             handleSessionUnavailable()
@@ -449,6 +520,13 @@ class MediaPlaybackManager private constructor(private val context: Context) {
                 return
             }
             controls.skipToNext()
+            scope.launch {
+                delay(100)
+                activeController?.let {
+                    updateFromMetadata(it.metadata, force = false)
+                    updateFromPlaybackState(it.playbackState)
+                }
+            }
         } catch (e: Exception) {
             Log.w("MediaPlaybackManager", "Error in next: ${e.message}")
             handleSessionUnavailable()
@@ -467,6 +545,13 @@ class MediaPlaybackManager private constructor(private val context: Context) {
                 return
             }
             controls.skipToPrevious()
+            scope.launch {
+                delay(100)
+                activeController?.let {
+                    updateFromMetadata(it.metadata, force = false)
+                    updateFromPlaybackState(it.playbackState)
+                }
+            }
         } catch (e: Exception) {
             Log.w("MediaPlaybackManager", "Error in previous: ${e.message}")
             handleSessionUnavailable()
@@ -485,6 +570,23 @@ class MediaPlaybackManager private constructor(private val context: Context) {
                 return
             }
             controls.seekTo(positionMs)
+            // Immediately reflect seeked position in local state
+            _playbackState.value = _playbackState.value.copy(
+                positionMs = positionMs,
+                lastUpdatedMs = System.currentTimeMillis()
+            )
+            val lyrics = _currentLyrics.value
+            if (lyrics != null && lyrics.isSynced) {
+                val activeObj = lyrics.getActiveLyricLine(positionMs, _trackOffsetMs.value)
+                if (_activeLyricObject.value != activeObj) {
+                    _activeLyricObject.value = activeObj
+                    _activeLyricLine.value = activeObj?.text
+                }
+            }
+            scope.launch {
+                delay(80)
+                activeController?.playbackState?.let { updateFromPlaybackState(it) }
+            }
         } catch (e: Exception) {
             Log.w("MediaPlaybackManager", "Error in seekTo: ${e.message}")
             handleSessionUnavailable()

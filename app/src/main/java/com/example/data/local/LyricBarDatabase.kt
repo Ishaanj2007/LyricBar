@@ -28,6 +28,24 @@ abstract class LyricBarDatabase : RoomDatabase() {
 
         val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
+                // Ensure lyrics table exists with proper schema and is preserved
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `lyrics` (
+                        `key` TEXT NOT NULL,
+                        `title` TEXT NOT NULL,
+                        `artist` TEXT NOT NULL,
+                        `syncedLrc` TEXT,
+                        `plainLyrics` TEXT,
+                        `isSynced` INTEGER NOT NULL,
+                        `durationSec` INTEGER,
+                        `source` TEXT NOT NULL,
+                        `cachedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`key`)
+                    )
+                    """.trimIndent()
+                )
+
                 db.execSQL(
                     """
                     CREATE TABLE IF NOT EXISTS `song_history_new` (
@@ -41,13 +59,18 @@ abstract class LyricBarDatabase : RoomDatabase() {
                     )
                     """.trimIndent()
                 )
-                db.execSQL(
-                    """
-                    INSERT INTO `song_history_new` (`key`, `title`, `artist`, `albumArtUri`, `status`, `playedAt`)
-                    SELECT `key`, `title`, `artist`, `albumArtUri`, `status`, `playedAt` FROM `song_history`
-                    """.trimIndent()
-                )
-                db.execSQL("DROP TABLE `song_history`")
+
+                val cursor = db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='song_history'")
+                val hasOldHistoryTable = cursor.use { it.moveToFirst() }
+                if (hasOldHistoryTable) {
+                    db.execSQL(
+                        """
+                        INSERT INTO `song_history_new` (`key`, `title`, `artist`, `albumArtUri`, `status`, `playedAt`)
+                        SELECT `key`, `title`, `artist`, `albumArtUri`, `status`, `playedAt` FROM `song_history`
+                        """.trimIndent()
+                    )
+                    db.execSQL("DROP TABLE `song_history`")
+                }
                 db.execSQL("ALTER TABLE `song_history_new` RENAME TO `song_history`")
             }
         }
@@ -60,7 +83,6 @@ abstract class LyricBarDatabase : RoomDatabase() {
                     "lyricbar_database"
                 )
                     .addMigrations(MIGRATION_1_2)
-                    .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance
                 instance
