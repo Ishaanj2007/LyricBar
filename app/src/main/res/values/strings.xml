@@ -31,7 +31,7 @@
 
     <!-- About Section -->
     <string name="about_title">About LyricBar</string>
-    <string name="developer_credits">Developed with AI Studio &amp; Jetpack Compose</string>
+    <string name="developer_credits">Developed with Kotlin &amp; Jetpack Compose</string>
     <string name="github_repository">GitHub Repository</string>
     <string name="license_notice">Released under the MIT License</string>
 
