@@ -61,6 +61,7 @@ class AutoFetchLyricsPreferenceTest {
         val fakeHistoryDao = object : SongHistoryDao {
             override fun getRecentHistory(): Flow<List<SongHistoryEntity>> = flowOf(emptyList())
             override suspend fun insertHistory(entry: SongHistoryEntity) {}
+            override suspend fun deleteHistoryById(id: Long) {}
             override suspend fun clearHistory() {}
         }
 
@@ -132,6 +133,7 @@ class AutoFetchLyricsPreferenceTest {
         val fakeHistoryDao = object : SongHistoryDao {
             override fun getRecentHistory(): Flow<List<SongHistoryEntity>> = flowOf(emptyList())
             override suspend fun insertHistory(entry: SongHistoryEntity) {}
+            override suspend fun deleteHistoryById(id: Long) {}
             override suspend fun clearHistory() {}
         }
 
@@ -193,6 +195,7 @@ class AutoFetchLyricsPreferenceTest {
         val fakeHistoryDao = object : SongHistoryDao {
             override fun getRecentHistory(): Flow<List<SongHistoryEntity>> = flowOf(emptyList())
             override suspend fun insertHistory(entry: SongHistoryEntity) {}
+            override suspend fun deleteHistoryById(id: Long) {}
             override suspend fun clearHistory() {}
         }
 
@@ -274,6 +277,7 @@ class AutoFetchLyricsPreferenceTest {
         val fakeHistoryDao = object : SongHistoryDao {
             override fun getRecentHistory(): Flow<List<SongHistoryEntity>> = flowOf(emptyList())
             override suspend fun insertHistory(entry: SongHistoryEntity) {}
+            override suspend fun deleteHistoryById(id: Long) {}
             override suspend fun clearHistory() {}
         }
 

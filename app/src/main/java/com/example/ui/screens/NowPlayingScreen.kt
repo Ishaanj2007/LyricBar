@@ -1,10 +1,20 @@
 package com.example.ui.screens
 
+import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.Settings
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -13,13 +23,21 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -28,9 +46,18 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.data.preferences.UserPreferences
 import com.example.service.MediaPlaybackManager
 import com.example.service.OverlayService
+import com.example.ui.components.CinematicArtworkBackground
+import com.example.ui.components.FrostedCard
+import com.example.ui.components.LocalHazeState
+import com.example.ui.components.extractDominantColor
+import com.example.ui.components.rememberArtworkBitmap
+import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -46,421 +73,799 @@ fun NowPlayingScreen(
     val coroutineScope = rememberCoroutineScope()
     val state by playbackManager.playbackState.collectAsState()
     val activeLyric by playbackManager.activeLyricLine.collectAsState()
+    val activeLyricObj by playbackManager.activeLyricObject.collectAsState()
+    val currentLyrics by playbackManager.currentLyrics.collectAsState()
+    val isLoadingLyrics by playbackManager.isLoadingLyrics.collectAsState()
+    val trackOffset by playbackManager.trackOffsetMs.collectAsState()
     val track = state.track
 
-    val artworkBitmap by produceState<ImageBitmap?>(
-        initialValue = null,
-        key1 = track?.key,
-        key2 = track?.albumArtUri,
-        key3 = track?.albumArtBitmap
-    ) {
-        value = null
-        val currentTrack = track ?: return@produceState
+    val activeIdx = remember(activeLyricObj, currentLyrics) {
+        val lines = currentLyrics?.lines
+        if (lines != null && activeLyricObj != null) {
+            lines.indexOfFirst { it == activeLyricObj }
+        } else -1
+    }
 
-        if (currentTrack.albumArtBitmap != null) {
-            try {
-                value = currentTrack.albumArtBitmap.asImageBitmap()
-                return@produceState
-            } catch (_: Throwable) {
-                // Fall through to URI or null
-            }
-        }
+    // Determine preceding and upcoming lyrics for polished 3-line contextual display
+    val prevLyric = remember(activeIdx, currentLyrics) {
+        val lines = currentLyrics?.lines
+        if (lines != null && activeIdx > 0 && activeIdx < lines.size) {
+            lines[activeIdx - 1].text.takeIf { it.isNotBlank() }
+        } else null
+    }
 
-        val uriStr = currentTrack.albumArtUri
-        if (!uriStr.isNullOrBlank()) {
-            val loaded = withContext(Dispatchers.IO) {
-                loadArtworkBitmapSafely(context, uriStr)
-            }
-            if (loaded != null) {
-                try {
-                    value = loaded.asImageBitmap()
-                } catch (_: Throwable) {
-                    value = null
-                }
-            }
+    val nextLyric = remember(activeIdx, currentLyrics) {
+        val lines = currentLyrics?.lines
+        if (lines != null && activeIdx in 0 until lines.size - 1) {
+            lines[activeIdx + 1].text.takeIf { it.isNotBlank() }
+        } else null
+    }
+
+    // Shared lifecycle-safe artwork decoding
+    val rawArtworkBitmap = rememberArtworkBitmap(track)
+
+    val artworkImageBitmap = remember(rawArtworkBitmap) {
+        try {
+            rawArtworkBitmap?.takeIf { !it.isRecycled }?.asImageBitmap()
+        } catch (_: Throwable) {
+            null
         }
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp, vertical = 20.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        // Top Header
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "LyricBar",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onBackground
-            )
-
-            // Quick toggle for overlay
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = if (userPreferences.overlayEnabled) "HUD On" else "HUD Off",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (userPreferences.overlayEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Switch(
-                    checked = userPreferences.overlayEnabled,
-                    onCheckedChange = { enabled ->
-                        coroutineScope.launch {
-                            playbackManager.preferencesRepository.setOverlayEnabled(enabled)
-                            if (enabled) {
-                                if (Settings.canDrawOverlays(context)) {
-                                    OverlayService.start(context)
-                                } else {
-                                    val intent = Intent(
-                                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                        Uri.parse("package:${context.packageName}")
-                                    )
-                                    context.startActivity(intent)
-                                }
-                            } else {
-                                OverlayService.stop(context)
-                            }
-                        }
-                    },
-                    modifier = Modifier.testTag("now_playing_overlay_switch")
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(32.dp))
-
-        // Center Album Art or Vinyl Placeholder
-        Surface(
-            modifier = Modifier
-                .size(240.dp)
-                .clip(RoundedCornerShape(24.dp)),
-            color = MaterialTheme.colorScheme.surfaceVariant,
-            tonalElevation = 6.dp
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                if (artworkBitmap != null) {
-                    Image(
-                        bitmap = artworkBitmap!!,
-                        contentDescription = "Album art for ${track?.title ?: "current track"}",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .testTag("now_playing_album_art")
-                    )
-                } else {
-                    Icon(
-                        imageVector = Icons.Default.MusicNote,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(80.dp)
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(28.dp))
-
-        // Track Title & Artist
-        Text(
-            text = track?.title ?: "No Music Playing",
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface,
-            textAlign = TextAlign.Center,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(modifier = Modifier.height(6.dp))
-
-        Text(
-            text = track?.artist ?: "Play music on Spotify, YouTube Music, or any media player",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        if (state.hasActiveSession && track != null && track.sourceAppName.isNotBlank()) {
-            Spacer(modifier = Modifier.height(10.dp))
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                modifier = Modifier.testTag("now_playing_source_badge")
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.PlayCircle,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Text(
-                        text = track.sourceAppName,
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                }
-            }
-            Spacer(modifier = Modifier.height(14.dp))
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val ambientGlowColor = remember(rawArtworkBitmap, track?.key, primaryColor) {
+        if (rawArtworkBitmap != null && !rawArtworkBitmap.isRecycled) {
+            val extracted = extractDominantColor(rawArtworkBitmap)
+            if (extracted.isSpecified) extracted else primaryColor
         } else {
-            Spacer(modifier = Modifier.height(24.dp))
+            primaryColor
         }
+    }
 
-        // Active Lyric Snippet Box
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp)),
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
-        ) {
+    var isDelayExpanded by rememberSaveable { mutableStateOf(false) }
+    var pendingOverlayEnable by rememberSaveable { mutableStateOf(false) }
+    val parentHazeState = LocalHazeState.current
+    val fallbackHazeState = remember { HazeState() }
+
+    // Reconcile overlay permission state upon returning from system settings
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                val hasPermission = Settings.canDrawOverlays(context)
+                if (pendingOverlayEnable) {
+                    pendingOverlayEnable = false
+                    if (hasPermission) {
+                        coroutineScope.launch {
+                            playbackManager.preferencesRepository.setOverlayEnabled(true)
+                            OverlayService.start(context)
+                        }
+                    }
+                } else if (userPreferences.overlayEnabled && !hasPermission) {
+                    coroutineScope.launch {
+                        playbackManager.preferencesRepository.setOverlayEnabled(false)
+                        OverlayService.stop(context)
+                    }
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    val hasSession = state.hasActiveSession
+    val isPlaying = state.isPlaying
+    val lyrics = currentLyrics
+    val isSynced = lyrics?.isSynced == true
+
+    // Resolve semantic presentation states for the Live Lyrics card
+    val lyricsBadgeText: String
+    val lyricsBadgeColor: Color
+    val prevLyricLine: String?
+    val primaryLyricLine: String
+    val secondaryLyricLine: String?
+
+    when {
+        !hasSession && track == null -> {
+            lyricsBadgeText = "NO SESSION"
+            lyricsBadgeColor = MaterialTheme.colorScheme.outline
+            prevLyricLine = null
+            primaryLyricLine = "No active music session"
+            secondaryLyricLine = "Play music on Spotify, YouTube Music, or any media player"
+        }
+        !hasSession && track != null -> {
+            lyricsBadgeText = "SESSION PAUSED"
+            lyricsBadgeColor = MaterialTheme.colorScheme.outline
+            prevLyricLine = null
+            primaryLyricLine = activeLyric ?: track.title
+            secondaryLyricLine = "Media player was closed or disconnected"
+        }
+        isLoadingLyrics -> {
+            lyricsBadgeText = "SEARCHING LYRICS"
+            lyricsBadgeColor = MaterialTheme.colorScheme.primary
+            prevLyricLine = null
+            primaryLyricLine = "Finding synchronized lyrics..."
+            secondaryLyricLine = listOfNotNull(track?.artist, track?.title).filter { it.isNotBlank() }.joinToString(" — ")
+        }
+        lyrics == null -> {
+            lyricsBadgeText = "NO LYRICS"
+            lyricsBadgeColor = MaterialTheme.colorScheme.onSurfaceVariant
+            prevLyricLine = null
+            primaryLyricLine = "No lyrics found for this track"
+            secondaryLyricLine = "Tap Full Lyrics to search or import .lrc"
+        }
+        isSynced -> {
+            lyricsBadgeText = if (isPlaying) "LIVE LYRICS" else "LYRICS (PAUSED)"
+            lyricsBadgeColor = MaterialTheme.colorScheme.primary
+            if (!activeLyric.isNullOrBlank()) {
+                prevLyricLine = prevLyric
+                primaryLyricLine = activeLyric!!
+                secondaryLyricLine = nextLyric
+            } else {
+                prevLyricLine = null
+                primaryLyricLine = "♪ Instrumental ♪"
+                secondaryLyricLine = nextLyric?.let { "Up next: $it" } ?: "Lyrics will resume with vocals..."
+            }
+        }
+        else -> {
+            lyricsBadgeText = "PLAIN LYRICS"
+            lyricsBadgeColor = MaterialTheme.colorScheme.primary
+            prevLyricLine = null
+            primaryLyricLine = lyrics.lines.firstOrNull { it.text.isNotBlank() }?.text
+                ?: lyrics.plainText.lineSequence().firstOrNull { it.isNotBlank() }
+                ?: "Unsynchronized lyrics available"
+            secondaryLyricLine = "Tap Full Lyrics to read all lines"
+        }
+    }
+
+    val content: @Composable () -> Unit = {
+            // Centered scrollable foreground content with bottom clearance for floating nav pill
             Column(
-                modifier = Modifier.padding(16.dp),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .windowInsetsPadding(WindowInsets.statusBars)
+                    .padding(horizontal = 20.dp, vertical = 8.dp)
+                    .padding(bottom = 100.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                // Adaptive container width limiter for larger windows
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .widthIn(max = 520.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(
-                        text = "LIVE LYRIC",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    TextButton(
-                        onClick = onNavigateToLyrics,
-                        contentPadding = PaddingValues(0.dp)
+                    // Top Header: Branding + HUD Toggle
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Full Lyrics", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
-                    }
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = activeLyric ?: "Lyrics will sync automatically with audio...",
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Medium,
-                    color = Color.White,
-                    textAlign = TextAlign.Center,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Lyrics Timing Delay / Offset Adjustment Card
-        val trackOffset by playbackManager.trackOffsetMs.collectAsState()
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .testTag("now_playing_delay_card"),
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
-        ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "LYRICS TIMING DELAY",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    val offsetSec = trackOffset / 1000.0
-                    val formattedOffset = if (trackOffset > 0) "+%.1fs".format(offsetSec) else if (trackOffset < 0) "%.1fs".format(offsetSec) else "0.0s (In Sync)"
-                    Text(
-                        text = formattedOffset,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (trackOffset != 0L) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.testTag("now_playing_delay_display")
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    FilledTonalButton(
-                        onClick = { playbackManager.adjustTrackOffset(-500L) },
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                        modifier = Modifier.weight(1f).height(32.dp).testTag("now_playing_delay_minus_500")
-                    ) {
-                        Text("-0.5s", fontSize = 11.sp)
-                    }
-                    FilledTonalButton(
-                        onClick = { playbackManager.adjustTrackOffset(-100L) },
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                        modifier = Modifier.weight(1f).height(32.dp).testTag("now_playing_delay_minus_100")
-                    ) {
-                        Text("-0.1s", fontSize = 11.sp)
-                    }
-                    if (trackOffset != 0L) {
-                        Button(
-                            onClick = { playbackManager.setExplicitOffset(0L) },
-                            shape = RoundedCornerShape(8.dp),
-                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.primary,
-                                contentColor = MaterialTheme.colorScheme.onPrimary
-                            ),
-                            modifier = Modifier.weight(1f).height(32.dp).testTag("now_playing_delay_reset")
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Text("Reset", fontSize = 11.sp, color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold)
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.22f),
+                                modifier = Modifier.size(34.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.PlayArrow,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier
+                                            .size(18.dp)
+                                            .graphicsLayer { translationX = 1.dp.toPx() }
+                                    )
+                                }
+                            }
+                            Text(
+                                text = "LyricBar",
+                                style = MaterialTheme.typography.titleLarge.copy(fontSize = 18.sp),
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        // Quick toggle for overlay HUD with safe permission reconciliation
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = if (userPreferences.overlayEnabled) "HUD On" else "HUD Off",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (userPreferences.overlayEnabled) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Switch(
+                                checked = userPreferences.overlayEnabled,
+                                onCheckedChange = { enabled ->
+                                    coroutineScope.launch {
+                                        if (enabled) {
+                                            if (Settings.canDrawOverlays(context)) {
+                                                playbackManager.preferencesRepository.setOverlayEnabled(true)
+                                                OverlayService.start(context)
+                                            } else {
+                                                pendingOverlayEnable = true
+                                                val intent = Intent(
+                                                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                                    Uri.parse("package:${context.packageName}")
+                                                )
+                                                context.startActivity(intent)
+                                            }
+                                        } else {
+                                            pendingOverlayEnable = false
+                                            playbackManager.preferencesRepository.setOverlayEnabled(false)
+                                            OverlayService.stop(context)
+                                        }
+                                    }
+                                },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                    uncheckedThumbColor = MaterialTheme.colorScheme.outline,
+                                    uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant,
+                                    checkedBorderColor = Color.Transparent,
+                                    uncheckedBorderColor = Color.Transparent
+                                ),
+                                modifier = Modifier.testTag("now_playing_overlay_switch")
+                            )
                         }
                     }
-                    FilledTonalButton(
-                        onClick = { playbackManager.adjustTrackOffset(100L) },
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                        modifier = Modifier.weight(1f).height(32.dp).testTag("now_playing_delay_plus_100")
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Foreground Album Artwork with smooth radial ambient bloom halo
+                    // Uses a mathematically circular radialGradient drawBehind with zero rectangular edges
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.72f)
+                            .widthIn(max = 280.dp)
+                            .aspectRatio(1f)
+                            .drawBehind {
+                                if (ambientGlowColor.isSpecified) {
+                                    drawCircle(
+                                        brush = Brush.radialGradient(
+                                            colors = listOf(
+                                                ambientGlowColor.copy(alpha = 0.32f),
+                                                ambientGlowColor.copy(alpha = 0.15f),
+                                                ambientGlowColor.copy(alpha = 0.04f),
+                                                Color.Transparent
+                                            ),
+                                            center = center,
+                                            radius = size.maxDimension * 0.78f
+                                        ),
+                                        radius = size.maxDimension * 0.78f,
+                                        center = center
+                                    )
+                                }
+                            },
+                        contentAlignment = Alignment.Center
                     ) {
-                        Text("+0.1s", fontSize = 11.sp)
+                        // Sharp foreground album artwork container
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .shadow(
+                                    elevation = 12.dp,
+                                    shape = RoundedCornerShape(26.dp),
+                                    clip = false
+                                )
+                                .clip(RoundedCornerShape(26.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.40f))
+                                .border(
+                                    width = 1.dp,
+                                    color = Color.White.copy(alpha = 0.12f),
+                                    shape = RoundedCornerShape(26.dp)
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Crossfade(
+                                targetState = track?.key ?: "",
+                                animationSpec = tween(durationMillis = 220),
+                                label = "artwork_crossfade"
+                            ) { _ ->
+                                if (artworkImageBitmap != null) {
+                                    Image(
+                                        bitmap = artworkImageBitmap,
+                                        contentDescription = "Album art for ${track?.title ?: "current track"}",
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .testTag("now_playing_album_art")
+                                    )
+                                } else {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.Center,
+                                        modifier = Modifier.fillMaxSize()
+                                    ) {
+                                        Surface(
+                                            shape = CircleShape,
+                                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                                            modifier = Modifier.size(64.dp)
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(
+                                                    imageVector = Icons.Default.MusicNote,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(32.dp)
+                                                )
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Text(
+                                            text = if (hasSession) "Loading Art..." else "Ready to Sync",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
-                    FilledTonalButton(
-                        onClick = { playbackManager.adjustTrackOffset(500L) },
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                        modifier = Modifier.weight(1f).height(32.dp).testTag("now_playing_delay_plus_500")
-                    ) {
-                        Text("+0.5s", fontSize = 11.sp)
-                    }
-                }
-            }
-        }
 
-        Spacer(modifier = Modifier.height(24.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
 
-        // Media Action Controls
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(
-                onClick = { playbackManager.previous() },
-                modifier = Modifier.size(52.dp)
-            ) {
-                Icon(
-                    Icons.Default.SkipPrevious,
-                    contentDescription = "Previous Track",
-                    tint = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.size(32.dp)
-                )
-            }
-
-            Surface(
-                onClick = { playbackManager.playPause() },
-                modifier = Modifier.size(68.dp),
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.primary,
-                tonalElevation = 4.dp
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = if (state.isPlaying) "Pause" else "Play",
-                        tint = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier.size(36.dp)
+                    // Track Title & Artist
+                    Text(
+                        text = track?.title ?: "No Music Playing",
+                        style = MaterialTheme.typography.titleLarge.copy(fontSize = 20.sp),
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.fillMaxWidth()
                     )
+
+                    Spacer(modifier = Modifier.height(3.dp))
+
+                    Text(
+                        text = track?.artist ?: "Play music on Spotify, YouTube Music, or any media player",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    if (hasSession && track != null && track.sourceAppName.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f),
+                            border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
+                            modifier = Modifier.testTag("now_playing_source_badge")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PlayCircle,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(12.dp)
+                                )
+                                Text(
+                                    text = track.sourceAppName,
+                                    style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.sp),
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                    } else {
+                        Spacer(modifier = Modifier.height(14.dp))
+                    }
+
+                    // Live Lyrics Card (Unified frosted glass card)
+                    // Live Lyrics Card (Unified frosted glass card with 3-line contextual lyrics)
+                    FrostedCard(
+                        shape = RoundedCornerShape(20.dp),
+                        backgroundAlpha = 0.20f,
+                        blurRadius = 22.dp,
+                        borderWidth = 0.75.dp,
+                        shadowElevation = 0.dp,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 18.dp, vertical = 14.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = lyricsBadgeColor,
+                                        modifier = Modifier.size(6.dp)
+                                    ) {}
+                                    Text(
+                                        text = lyricsBadgeText,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 1.2.sp,
+                                        color = lyricsBadgeColor
+                                    )
+                                }
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable { onNavigateToLyrics() }
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = "Full Lyrics",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(modifier = Modifier.width(3.dp))
+                                    Icon(
+                                        imageVector = Icons.Default.FormatQuote,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            // Preceding lyric line (subtle & dimmed for contextual continuity)
+                            if (!prevLyricLine.isNullOrBlank()) {
+                                Text(
+                                    text = prevLyricLine,
+                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                                    fontWeight = FontWeight.Normal,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                                    textAlign = TextAlign.Center,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Spacer(modifier = Modifier.height(3.dp))
+                            }
+
+                            // Primary active lyric line
+                            Text(
+                                text = primaryLyricLine,
+                                style = MaterialTheme.typography.titleLarge.copy(fontSize = 18.sp),
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                textAlign = TextAlign.Center,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            // Upcoming lyric preview line
+                            if (!secondaryLyricLine.isNullOrBlank()) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = secondaryLyricLine,
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                                    fontWeight = FontWeight.Normal,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.70f),
+                                    textAlign = TextAlign.Center,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Compact Expandable Timing-Delay Card
+                    val offsetSec = trackOffset / 1000.0
+                    val formattedOffset = if (trackOffset > 0) "+%.1fs".format(offsetSec) else if (trackOffset < 0) "%.1fs".format(offsetSec) else "0.0s (In Sync)"
+
+                    FrostedCard(
+                        shape = RoundedCornerShape(18.dp),
+                        backgroundAlpha = 0.18f,
+                        blurRadius = 18.dp,
+                        borderWidth = 0.75.dp,
+                        shadowElevation = 0.dp,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("now_playing_delay_card")
+                            .animateContentSize(animationSpec = tween(durationMillis = 200))
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 10.dp)
+                        ) {
+                            // Header row acting as expandable chip
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable { isDelayExpanded = !isDelayExpanded }
+                                    .padding(vertical = 2.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Timer,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                    Text(
+                                        text = "TIMING OFFSET",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 1.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+                                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                                    ) {
+                                        Text(
+                                            text = formattedOffset,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = if (trackOffset != 0L) {
+                                                MaterialTheme.colorScheme.primary
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurface
+                                            },
+                                            modifier = Modifier.testTag("now_playing_delay_display")
+                                        )
+                                    }
+                                    Icon(
+                                        imageVector = if (isDelayExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                        contentDescription = if (isDelayExpanded) "Collapse offset controls" else "Expand offset controls",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+
+                            // Compact expanded adjustment controls with accessible 48dp touch targets
+                            if (isDelayExpanded) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    TimingAdjustPill(
+                                        text = "-0.5s",
+                                        onClick = { playbackManager.adjustTrackOffset(-500L) },
+                                        modifier = Modifier.weight(1f).testTag("now_playing_delay_minus_500")
+                                    )
+                                    TimingAdjustPill(
+                                        text = "-0.1s",
+                                        onClick = { playbackManager.adjustTrackOffset(-100L) },
+                                        modifier = Modifier.weight(1f).testTag("now_playing_delay_minus_100")
+                                    )
+                                    if (trackOffset != 0L) {
+                                        TimingAdjustPill(
+                                            text = "Reset",
+                                            isPrimary = true,
+                                            onClick = { playbackManager.setExplicitOffset(0L) },
+                                            modifier = Modifier.weight(1f).testTag("now_playing_delay_reset")
+                                        )
+                                    }
+                                    TimingAdjustPill(
+                                        text = "+0.1s",
+                                        onClick = { playbackManager.adjustTrackOffset(100L) },
+                                        modifier = Modifier.weight(1f).testTag("now_playing_delay_plus_100")
+                                    )
+                                    TimingAdjustPill(
+                                        text = "+0.5s",
+                                        onClick = { playbackManager.adjustTrackOffset(500L) },
+                                        modifier = Modifier.weight(1f).testTag("now_playing_delay_plus_500")
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Tactile Hero Playback Controls with state indication
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(
+                            onClick = { playbackManager.previous() },
+                            enabled = hasSession,
+                            modifier = Modifier.size(52.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.SkipPrevious,
+                                contentDescription = "Previous Track",
+                                tint = MaterialTheme.colorScheme.onSurface.copy(
+                                    alpha = if (hasSession) 0.90f else 0.38f
+                                ),
+                                modifier = Modifier.size(30.dp)
+                            )
+                        }
+
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier.size(96.dp)
+                        ) {
+                            // Ambient halo outer ring (96dp)
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.primary.copy(
+                                    alpha = if (isPlaying) 0.20f else 0.08f
+                                ),
+                                modifier = Modifier.size(96.dp)
+                            ) {}
+
+                            // Center play/pause action button (82dp)
+                            Surface(
+                                onClick = { playbackManager.playPause() },
+                                enabled = hasSession || track != null,
+                                modifier = Modifier.size(82.dp),
+                                shape = CircleShape,
+                                color = if (hasSession || track != null) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceVariant
+                                },
+                                shadowElevation = if (isPlaying) 8.dp else 3.dp
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                        contentDescription = if (isPlaying) "Pause" else "Play",
+                                        tint = if (hasSession || track != null) {
+                                            MaterialTheme.colorScheme.onPrimary
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        },
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .graphicsLayer {
+                                                translationX = if (!isPlaying) 2.dp.toPx() else 0f
+                                            }
+                                    )
+                                }
+                            }
+                        }
+
+                        IconButton(
+                            onClick = { playbackManager.next() },
+                            enabled = hasSession,
+                            modifier = Modifier.size(52.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.SkipNext,
+                                contentDescription = "Next Track",
+                                tint = MaterialTheme.colorScheme.onSurface.copy(
+                                    alpha = if (hasSession) 0.90f else 0.38f
+                                ),
+                                modifier = Modifier.size(30.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
                 }
             }
+    }
 
-            IconButton(
-                onClick = { playbackManager.next() },
-                modifier = Modifier.size(52.dp)
-            ) {
-                Icon(
-                    Icons.Default.SkipNext,
-                    contentDescription = "Next Track",
-                    tint = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.size(32.dp)
-                )
+    if (parentHazeState != null) {
+        Box(
+            modifier = modifier.fillMaxSize(),
+            contentAlignment = Alignment.TopCenter
+        ) {
+            content()
+        }
+    } else {
+        CinematicArtworkBackground(
+            artworkBitmap = rawArtworkBitmap,
+            trackKey = track?.key ?: "",
+            hazeState = fallbackHazeState,
+            modifier = modifier.fillMaxSize()
+        ) {
+            CompositionLocalProvider(LocalHazeState provides fallbackHazeState) {
+                content()
             }
         }
     }
 }
 
-private fun loadArtworkBitmapSafely(context: android.content.Context, uriString: String): android.graphics.Bitmap? {
-    return try {
-        val uri = Uri.parse(uriString)
-        val bytes = when (uri.scheme?.lowercase()) {
-            "content", "file", "android.resource" -> {
-                context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-            }
-            "http", "https" -> {
-                val conn = java.net.URL(uriString).openConnection() as java.net.HttpURLConnection
-                conn.connectTimeout = 4000
-                conn.readTimeout = 4000
-                conn.instanceFollowRedirects = true
-                conn.doInput = true
-                conn.connect()
-                if (conn.responseCode in 200..299) {
-                    conn.inputStream.use { it.readBytes() }
-                } else {
-                    null
-                }
-            }
-            else -> {
-                val file = java.io.File(uriString)
-                if (file.exists()) {
-                    file.readBytes()
-                } else {
-                    context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                }
-            }
-        } ?: return null
+@Composable
+private fun TimingAdjustPill(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    isPrimary: Boolean = false,
+    enabled: Boolean = true
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val backgroundColor = if (isPrimary) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+    }
+    val textColor = if (isPrimary) {
+        MaterialTheme.colorScheme.onPrimary
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
 
-        val options = android.graphics.BitmapFactory.Options().apply {
-            inJustDecodeBounds = true
+    Box(
+        modifier = modifier
+            .defaultMinSize(minHeight = 48.dp)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = ripple(bounded = true, radius = 22.dp),
+                enabled = enabled,
+                onClick = onClick
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(30.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(backgroundColor),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = text,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = textColor,
+                maxLines = 1
+            )
         }
-        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
-        var inSampleSize = 1
-        val maxDim = maxOf(options.outWidth, options.outHeight)
-        val reqSize = 512
-        if (maxDim > reqSize) {
-            while ((maxDim / (inSampleSize * 2)) >= reqSize) {
-                inSampleSize *= 2
-            }
-        }
-        options.inJustDecodeBounds = false
-        options.inSampleSize = inSampleSize
-        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
-    } catch (_: Throwable) {
-        null
     }
 }
 
+/**
+ * Safe artwork bitmap loader delegating to the shared GlassSurface implementation.
+ */
+private fun loadArtworkBitmapSafely(context: Context, uriString: String): Bitmap? =
+    com.example.ui.components.loadArtworkBitmapSafely(context, uriString)

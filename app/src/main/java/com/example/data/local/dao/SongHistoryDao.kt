@@ -16,6 +16,10 @@ interface SongHistoryDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertHistory(entry: SongHistoryEntity)
 
+    @Query("DELETE FROM song_history WHERE id = :id")
+    suspend fun deleteHistoryById(id: Long)
+
     @Query("DELETE FROM song_history")
     suspend fun clearHistory()
 }
+

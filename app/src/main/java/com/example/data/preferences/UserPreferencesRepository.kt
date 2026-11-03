@@ -13,10 +13,22 @@ import java.io.IOException
 val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "lyricbar_prefs")
 
 enum class ThemePreset(val title: String) {
-    OBSIDIAN_MINT("Obsidian Mint"),
-    MIDNIGHT_AZURE("Midnight Azure"),
-    SUNSET_AMBER("Sunset Amber"),
-    CYBER_VIOLET("Cyber Violet")
+    ROSE_QUARTZ("Rose Quartz"),
+    LAVENDER_MIST("Lavender Mist"),
+    PEACH_EMBER("Peach Ember"),
+    SAGE_SERENITY("Sage Serenity"),
+
+    // Legacy aliases mapped for backwards compatibility
+    OBSIDIAN_MINT("Rose Quartz"),
+    MIDNIGHT_AZURE("Lavender Mist"),
+    SUNSET_AMBER("Peach Ember"),
+    CYBER_VIOLET("Sage Serenity")
+}
+
+enum class ThemeMode(val title: String) {
+    FOLLOW_SYSTEM("Follow System"),
+    LIGHT("Light"),
+    DARK("Dark")
 }
 
 enum class FontOption(val title: String, val fontResId: Int?) {
@@ -66,7 +78,8 @@ data class UserPreferences(
     val autoShowOnPlayback: Boolean = true,
     val autoFetchLyrics: Boolean = true,
     val useWallpaperDynamicColor: Boolean = true,
-    val themePreset: ThemePreset = ThemePreset.OBSIDIAN_MINT,
+    val themeMode: ThemeMode = ThemeMode.FOLLOW_SYSTEM,
+    val themePreset: ThemePreset = ThemePreset.ROSE_QUARTZ,
     val selectedFont: FontOption = FontOption.POPPINS,
     val appleMusicStyle: Boolean = true,
     val singleLineLyrics: Boolean = false,
@@ -100,6 +113,7 @@ class UserPreferencesRepository(private val context: Context) {
         val AUTO_SHOW_ON_PLAYBACK = booleanPreferencesKey("auto_show_on_playback")
         val AUTO_FETCH_LYRICS = booleanPreferencesKey("auto_fetch_lyrics")
         val USE_WALLPAPER_DYNAMIC_COLOR = booleanPreferencesKey("use_wallpaper_dynamic_color")
+        val THEME_MODE = stringPreferencesKey("theme_mode")
         val THEME_PRESET = stringPreferencesKey("theme_preset")
         val SELECTED_FONT = stringPreferencesKey("selected_font")
         val APPLE_MUSIC_STYLE = booleanPreferencesKey("apple_music_style")
@@ -118,11 +132,23 @@ class UserPreferencesRepository(private val context: Context) {
             }
         }
         .map { preferences ->
-            val presetName = preferences[PreferencesKeys.THEME_PRESET] ?: ThemePreset.OBSIDIAN_MINT.name
-            val preset = try {
-                ThemePreset.valueOf(presetName)
+            val themeModeName = preferences[PreferencesKeys.THEME_MODE] ?: ThemeMode.FOLLOW_SYSTEM.name
+            val themeMode = try {
+                ThemeMode.valueOf(themeModeName)
             } catch (_: Exception) {
-                ThemePreset.OBSIDIAN_MINT
+                ThemeMode.FOLLOW_SYSTEM
+            }
+
+            val presetName = preferences[PreferencesKeys.THEME_PRESET] ?: ThemePreset.ROSE_QUARTZ.name
+            val preset = try {
+                when (ThemePreset.valueOf(presetName)) {
+                    ThemePreset.ROSE_QUARTZ, ThemePreset.OBSIDIAN_MINT -> ThemePreset.ROSE_QUARTZ
+                    ThemePreset.LAVENDER_MIST, ThemePreset.MIDNIGHT_AZURE -> ThemePreset.LAVENDER_MIST
+                    ThemePreset.PEACH_EMBER, ThemePreset.SUNSET_AMBER -> ThemePreset.PEACH_EMBER
+                    ThemePreset.SAGE_SERENITY, ThemePreset.CYBER_VIOLET -> ThemePreset.SAGE_SERENITY
+                }
+            } catch (_: Exception) {
+                ThemePreset.ROSE_QUARTZ
             }
 
             val fontName = preferences[PreferencesKeys.SELECTED_FONT] ?: FontOption.POPPINS.name
@@ -174,6 +200,7 @@ class UserPreferencesRepository(private val context: Context) {
                 autoShowOnPlayback = preferences[PreferencesKeys.AUTO_SHOW_ON_PLAYBACK] ?: true,
                 autoFetchLyrics = preferences[PreferencesKeys.AUTO_FETCH_LYRICS] ?: true,
                 useWallpaperDynamicColor = preferences[PreferencesKeys.USE_WALLPAPER_DYNAMIC_COLOR] ?: true,
+                themeMode = themeMode,
                 themePreset = preset,
                 selectedFont = font,
                 appleMusicStyle = preferences[PreferencesKeys.APPLE_MUSIC_STYLE] ?: true,
@@ -325,6 +352,10 @@ class UserPreferencesRepository(private val context: Context) {
 
     suspend fun setThemePreset(preset: ThemePreset) {
         context.dataStore.edit { it[PreferencesKeys.THEME_PRESET] = preset.name }
+    }
+
+    suspend fun setThemeMode(mode: ThemeMode) {
+        context.dataStore.edit { it[PreferencesKeys.THEME_MODE] = mode.name }
     }
 
     suspend fun setSelectedFont(font: FontOption) {

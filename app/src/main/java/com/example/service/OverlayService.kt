@@ -383,10 +383,10 @@ class OverlayService : Service() {
                     }
                 } else {
                     when (prefs.themePreset) {
-                        ThemePreset.OBSIDIAN_MINT -> MintAccent.toArgb()
-                        ThemePreset.MIDNIGHT_AZURE -> AzurePrimary.toArgb()
-                        ThemePreset.SUNSET_AMBER -> AmberPrimary.toArgb()
-                        ThemePreset.CYBER_VIOLET -> VioletPrimary.toArgb()
+                        ThemePreset.ROSE_QUARTZ, ThemePreset.OBSIDIAN_MINT -> RoseQuartzPrimary.toArgb()
+                        ThemePreset.LAVENDER_MIST, ThemePreset.MIDNIGHT_AZURE -> LavenderMistPrimary.toArgb()
+                        ThemePreset.PEACH_EMBER, ThemePreset.SUNSET_AMBER -> PeachEmberPrimary.toArgb()
+                        ThemePreset.SAGE_SERENITY, ThemePreset.CYBER_VIOLET -> SageSerenityPrimary.toArgb()
                     }
                 }
                 view.primaryColor = resolvedPrimary

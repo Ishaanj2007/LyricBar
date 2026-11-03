@@ -88,6 +88,7 @@ dependencies {
     implementation(libs.okhttp.logging.interceptor)
 
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.haze)
 
     testImplementation(libs.junit)
 }

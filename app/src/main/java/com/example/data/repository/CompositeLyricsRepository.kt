@@ -163,6 +163,10 @@ class CompositeLyricsRepository internal constructor(
         historyDao.clearHistory()
     }
 
+    suspend fun deleteHistory(id: Long) = withContext(Dispatchers.IO) {
+        historyDao.deleteHistoryById(id)
+    }
+
     suspend fun recordHistory(
         track: TrackMetadata,
         status: String = "Played"

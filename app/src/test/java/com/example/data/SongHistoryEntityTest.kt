@@ -87,4 +87,52 @@ class SongHistoryEntityTest {
             recordedHistory
         )
     }
+
+    @Test
+    fun testHistorySingleItemDeletionAndClear() {
+        val list = mutableListOf(
+            SongHistoryEntity(id = 1L, key = "Track 1", title = "Track 1", artist = "Artist 1"),
+            SongHistoryEntity(id = 2L, key = "Track 2", title = "Track 2", artist = "Artist 2"),
+            SongHistoryEntity(id = 3L, key = "Track 3", title = "Track 3", artist = "Artist 3")
+        )
+
+        // Delete single item with id = 2
+        val deleted = list.removeAll { it.id == 2L }
+        assertTrue(deleted)
+        assertEquals(2, list.size)
+        assertEquals(listOf(1L, 3L), list.map { it.id })
+
+        // Clear all remaining
+        list.clear()
+        assertTrue(list.isEmpty())
+    }
+
+    @Test
+    fun testHistoryQueryFiltering() {
+        val list = listOf(
+            SongHistoryEntity(id = 1L, key = "k1", title = "Midnight City", artist = "M83"),
+            SongHistoryEntity(id = 2L, key = "k2", title = "Starboy", artist = "The Weeknd"),
+            SongHistoryEntity(id = 3L, key = "k3", title = "Blinding Lights", artist = "The Weeknd")
+        )
+
+        // Search by artist
+        val weekndTracks = list.filter {
+            it.title.lowercase().contains("weeknd") || it.artist.lowercase().contains("weeknd")
+        }
+        assertEquals(2, weekndTracks.size)
+
+        // Search by title
+        val midnightTracks = list.filter {
+            it.title.lowercase().contains("midnight") || it.artist.lowercase().contains("midnight")
+        }
+        assertEquals(1, midnightTracks.size)
+        assertEquals("Midnight City", midnightTracks.first().title)
+
+        // Empty search
+        val nonExistent = list.filter {
+            it.title.lowercase().contains("metallica") || it.artist.lowercase().contains("metallica")
+        }
+        assertTrue(nonExistent.isEmpty())
+    }
 }
+

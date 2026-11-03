@@ -259,6 +259,10 @@ class ImportedLyricsPersistenceTest {
             list.add(entry)
         }
 
+        override suspend fun deleteHistoryById(id: Long) {
+            list.removeAll { it.id == id }
+        }
+
         override suspend fun clearHistory() {
             list.clear()
         }

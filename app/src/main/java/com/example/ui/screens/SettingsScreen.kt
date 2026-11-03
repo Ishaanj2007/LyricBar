@@ -25,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -37,13 +38,18 @@ import androidx.compose.ui.unit.sp
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import com.example.data.preferences.OverlayAnimationStyle
+import com.example.data.preferences.ThemeMode
 import com.example.data.preferences.ThemePreset
 import com.example.data.preferences.UserPreferences
 import com.example.data.repository.CompositeLyricsRepository
 import com.example.service.MediaPlaybackManager
 import com.example.service.OverlayService
+import com.example.ui.components.CalmThemedBackground
+import com.example.ui.components.FrostedCard
+import com.example.ui.components.LocalHazeState
 import com.example.ui.theme.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.launch
 
 @Composable
@@ -57,37 +63,92 @@ fun SettingsScreen(
     var showCacheClearedToast by remember { mutableStateOf(false) }
     var isFontListExpanded by rememberSaveable { mutableStateOf(false) }
 
-    Column(
+    val allSectionKeys = remember {
+        listOf("overlay", "animation", "size_align", "position", "theme", "typography", "data", "about")
+    }
+    var expandedSections by rememberSaveable {
+        mutableStateOf(setOf("overlay", "theme"))
+    }
+    val toggleSection: (String) -> Unit = { key ->
+        expandedSections = if (expandedSections.contains(key)) {
+            expandedSections - key
+        } else {
+            expandedSections + key
+        }
+    }
+
+    Box(
         modifier = modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 16.dp)
+            .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.06f))
     ) {
-        Text(
-            text = "Settings",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onBackground
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        val configuration = LocalConfiguration.current
-        val screenWidthDp = configuration.screenWidthDp
-        val screenHeightDp = configuration.screenHeightDp
-        val density = LocalDensity.current.density
-
-        // SECTION 1: FLOATING OVERLAY & TIMELINE
-        SettingsSectionHeader(title = "FLOATING OVERLAY & TIMELINE")
-
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = MaterialTheme.colorScheme.surface,
-            shape = RoundedCornerShape(16.dp),
-            tonalElevation = 2.dp
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.statusBars)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 12.dp)
+                .padding(bottom = 120.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Column(modifier = Modifier.padding(18.dp)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = 680.dp)
+            ) {
+                // Header with title, subtitle, and Expand/Collapse All
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp, bottom = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "Settings",
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Preferences, appearance & overlays",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    TextButton(
+                        onClick = {
+                            expandedSections = if (expandedSections.size == allSectionKeys.size) {
+                                emptySet()
+                            } else {
+                                allSectionKeys.toSet()
+                            }
+                        }
+                    ) {
+                        Text(
+                            text = if (expandedSections.size == allSectionKeys.size) "Collapse All" else "Expand All",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+
+                val configuration = LocalConfiguration.current
+                val screenWidthDp = configuration.screenWidthDp
+                val screenHeightDp = configuration.screenHeightDp
+                val density = LocalDensity.current.density
+
+                // SECTION 1: FLOATING OVERLAY & TIMELINE
+                SettingsAccordionCard(
+                    title = "Floating Overlay & Timeline",
+                    subtitle = if (userPreferences.overlayEnabled) "Active • Pure white lyrics ON" else "Off • Floating overlay disabled",
+                    icon = Icons.Default.Layers,
+                    isExpanded = "overlay" in expandedSections,
+                    onToggle = { toggleSection("overlay") }
+                ) {
+                    Column(modifier = Modifier.padding(18.dp)) {
                 // Toggle: Overlay Enabled
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -357,16 +418,15 @@ fun SettingsScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
         // SECTION 2: LYRICS ANIMATION STYLE
-        SettingsSectionHeader(title = "LYRICS ANIMATION STYLE")
-
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = MaterialTheme.colorScheme.surface,
-            shape = RoundedCornerShape(16.dp),
-            tonalElevation = 2.dp
+        SettingsAccordionCard(
+            title = "Lyrics Animation Style",
+            subtitle = "${userPreferences.animationStyle.replace('_', ' ')} • Transition engine",
+            icon = Icons.Default.Animation,
+            isExpanded = "animation" in expandedSections,
+            onToggle = { toggleSection("animation") }
         ) {
             Column(modifier = Modifier.padding(18.dp)) {
                 Text(
@@ -992,16 +1052,15 @@ fun SettingsScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
         // SECTION 3: OVERLAY SIZE & ALIGNMENT
-        SettingsSectionHeader(title = "OVERLAY SIZE & ALIGNMENT")
-
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = MaterialTheme.colorScheme.surface,
-            shape = RoundedCornerShape(16.dp),
-            tonalElevation = 2.dp
+        SettingsAccordionCard(
+            title = "Overlay Size & Alignment",
+            subtitle = "${(userPreferences.overlayWidthPx / density).roundToInt()} × ${(userPreferences.overlayHeightPx / density).roundToInt()} dp • ${userPreferences.overlayTextAlign.lowercase().replaceFirstChar { it.uppercase() }}",
+            icon = Icons.Default.AspectRatio,
+            isExpanded = "size_align" in expandedSections,
+            onToggle = { toggleSection("size_align") }
         ) {
             Column(modifier = Modifier.padding(18.dp)) {
                 val currentWidthDp = (userPreferences.overlayWidthPx / density).roundToInt()
@@ -1172,16 +1231,15 @@ fun SettingsScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
         // SECTION 4: OVERLAY POSITION (RESPONSIVE 2-ROW CONTROLLER WITH SLIDERS AND MICRO-NUDGES)
-        SettingsSectionHeader(title = "OVERLAY POSITION")
-
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = MaterialTheme.colorScheme.surface,
-            shape = RoundedCornerShape(16.dp),
-            tonalElevation = 2.dp
+        SettingsAccordionCard(
+            title = "Overlay Position",
+            subtitle = "X: ${(userPreferences.overlayXPosition / density).roundToInt()} dp • Y: ${(userPreferences.overlayYPosition / density).roundToInt()} dp",
+            icon = Icons.Default.OpenWith,
+            isExpanded = "position" in expandedSections,
+            onToggle = { toggleSection("position") }
         ) {
             Column(modifier = Modifier.padding(18.dp)) {
                 val overlayWidthPx = userPreferences.overlayWidthPx
@@ -1350,18 +1408,60 @@ fun SettingsScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
         // SECTION 5: THEME & MATERIAL STYLE
-        SettingsSectionHeader(title = "THEME & MATERIAL STYLE")
-
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = MaterialTheme.colorScheme.surface,
-            shape = RoundedCornerShape(16.dp),
-            tonalElevation = 2.dp
+        SettingsAccordionCard(
+            title = "Theme & Material Style",
+            subtitle = if (userPreferences.useWallpaperDynamicColor) "Material You (Wallpaper)" else userPreferences.themePreset.title,
+            icon = Icons.Default.Palette,
+            isExpanded = "theme" in expandedSections,
+            onToggle = { toggleSection("theme") }
         ) {
             Column(modifier = Modifier.padding(18.dp)) {
+                // Appearance Mode: Dark-Only Experience
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
+                        .padding(horizontal = 14.dp, vertical = 12.dp)
+                        .testTag("theme_mode_dark"),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.16f), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DarkMode,
+                            contentDescription = "Dark Mode",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(14.dp))
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Appearance: Dark Experience",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "LyricBar is crafted for an immersive cinematic dark visual experience",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 14.dp))
+
                 // Toggle: Wallpaper Dynamic Color (Material You)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1394,7 +1494,7 @@ fun SettingsScreen(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Text(
-                    text = "Curated Custom Palettes",
+                    text = "Curated Pastel Palettes",
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onSurface
@@ -1407,63 +1507,81 @@ fun SettingsScreen(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // 4 Curated Themes Grid
+                val arePalettesEnabled = !userPreferences.useWallpaperDynamicColor
+
+                // 2-Column Curated Themes Swatch Grid
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     ThemePresetCard(
-                        title = "Obsidian",
-                        subtitle = "Mint",
-                        primaryColor = MintAccent,
-                        surfaceColor = DarkBackground,
-                        isSelected = userPreferences.themePreset == ThemePreset.OBSIDIAN_MINT,
+                        title = "Rose Quartz",
+                        subtitle = "Signature Theme",
+                        primaryColor = RoseQuartzPrimary,
+                        secondaryColor = RoseQuartzSecondary,
+                        surfaceColor = RoseQuartzDarkSurface,
+                        isSelected = arePalettesEnabled && (userPreferences.themePreset == ThemePreset.ROSE_QUARTZ || userPreferences.themePreset == ThemePreset.OBSIDIAN_MINT),
+                        isEnabled = arePalettesEnabled,
                         modifier = Modifier.weight(1f),
                         onClick = {
                             coroutineScope.launch {
-                                playbackManager.preferencesRepository.setThemePreset(ThemePreset.OBSIDIAN_MINT)
+                                playbackManager.preferencesRepository.setThemePreset(ThemePreset.ROSE_QUARTZ)
                                 playbackManager.preferencesRepository.setUseWallpaperDynamicColor(false)
                             }
                         }
                     )
                     ThemePresetCard(
-                        title = "Midnight",
-                        subtitle = "Azure",
-                        primaryColor = AzurePrimary,
-                        surfaceColor = AzureBackground,
-                        isSelected = userPreferences.themePreset == ThemePreset.MIDNIGHT_AZURE,
+                        title = "Lavender Mist",
+                        subtitle = "Dreamy & Elegant",
+                        primaryColor = LavenderMistPrimary,
+                        secondaryColor = LavenderMistSecondary,
+                        surfaceColor = LavenderMistDarkSurface,
+                        isSelected = arePalettesEnabled && (userPreferences.themePreset == ThemePreset.LAVENDER_MIST || userPreferences.themePreset == ThemePreset.MIDNIGHT_AZURE),
+                        isEnabled = arePalettesEnabled,
                         modifier = Modifier.weight(1f),
                         onClick = {
                             coroutineScope.launch {
-                                playbackManager.preferencesRepository.setThemePreset(ThemePreset.MIDNIGHT_AZURE)
+                                playbackManager.preferencesRepository.setThemePreset(ThemePreset.LAVENDER_MIST)
+                                playbackManager.preferencesRepository.setUseWallpaperDynamicColor(false)
+                            }
+                        }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    ThemePresetCard(
+                        title = "Peach Ember",
+                        subtitle = "Warm Cinematic",
+                        primaryColor = PeachEmberPrimary,
+                        secondaryColor = PeachEmberSecondary,
+                        surfaceColor = PeachEmberDarkSurface,
+                        isSelected = arePalettesEnabled && (userPreferences.themePreset == ThemePreset.PEACH_EMBER || userPreferences.themePreset == ThemePreset.SUNSET_AMBER),
+                        isEnabled = arePalettesEnabled,
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            coroutineScope.launch {
+                                playbackManager.preferencesRepository.setThemePreset(ThemePreset.PEACH_EMBER)
                                 playbackManager.preferencesRepository.setUseWallpaperDynamicColor(false)
                             }
                         }
                     )
                     ThemePresetCard(
-                        title = "Sunset",
-                        subtitle = "Amber",
-                        primaryColor = AmberPrimary,
-                        surfaceColor = AmberBackground,
-                        isSelected = userPreferences.themePreset == ThemePreset.SUNSET_AMBER,
+                        title = "Sage Serenity",
+                        subtitle = "Calm Understated",
+                        primaryColor = SageSerenityPrimary,
+                        secondaryColor = SageSerenitySecondary,
+                        surfaceColor = SageSerenityDarkSurface,
+                        isSelected = arePalettesEnabled && (userPreferences.themePreset == ThemePreset.SAGE_SERENITY || userPreferences.themePreset == ThemePreset.CYBER_VIOLET),
+                        isEnabled = arePalettesEnabled,
                         modifier = Modifier.weight(1f),
                         onClick = {
                             coroutineScope.launch {
-                                playbackManager.preferencesRepository.setThemePreset(ThemePreset.SUNSET_AMBER)
-                                playbackManager.preferencesRepository.setUseWallpaperDynamicColor(false)
-                            }
-                        }
-                    )
-                    ThemePresetCard(
-                        title = "Cyber",
-                        subtitle = "Violet",
-                        primaryColor = VioletPrimary,
-                        surfaceColor = VioletBackground,
-                        isSelected = userPreferences.themePreset == ThemePreset.CYBER_VIOLET,
-                        modifier = Modifier.weight(1f),
-                        onClick = {
-                            coroutineScope.launch {
-                                playbackManager.preferencesRepository.setThemePreset(ThemePreset.CYBER_VIOLET)
+                                playbackManager.preferencesRepository.setThemePreset(ThemePreset.SAGE_SERENITY)
                                 playbackManager.preferencesRepository.setUseWallpaperDynamicColor(false)
                             }
                         }
@@ -1472,16 +1590,15 @@ fun SettingsScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
         // SECTION 6: TYPOGRAPHY
-        SettingsSectionHeader(title = "TYPOGRAPHY")
-
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = MaterialTheme.colorScheme.surface,
-            shape = RoundedCornerShape(16.dp),
-            tonalElevation = 2.dp
+        SettingsAccordionCard(
+            title = "Typography",
+            subtitle = "${userPreferences.selectedFont.title} • ${userPreferences.overlayTextSizeSp.toInt()} sp",
+            icon = Icons.Default.FontDownload,
+            isExpanded = "typography" in expandedSections,
+            onToggle = { toggleSection("typography") }
         ) {
             Column(modifier = Modifier.padding(18.dp)) {
                 Text(
@@ -1760,16 +1877,15 @@ fun SettingsScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
         // SECTION 7: PLAYBACK & DATA MANAGEMENT
-        SettingsSectionHeader(title = "AUTOMATION & CACHE")
-
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = MaterialTheme.colorScheme.surface,
-            shape = RoundedCornerShape(16.dp),
-            tonalElevation = 2.dp
+        SettingsAccordionCard(
+            title = "Automation & Cache",
+            subtitle = "Auto-sync, cache & storage",
+            icon = Icons.Default.Storage,
+            isExpanded = "data" in expandedSections,
+            onToggle = { toggleSection("data") }
         ) {
             Column(modifier = Modifier.padding(18.dp)) {
                 Row(
@@ -1878,16 +1994,15 @@ fun SettingsScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
         // SECTION 8: ABOUT & DEVELOPER
-        SettingsSectionHeader(title = "ABOUT & DEVELOPER")
-
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = MaterialTheme.colorScheme.surface,
-            shape = RoundedCornerShape(16.dp),
-            tonalElevation = 2.dp
+        SettingsAccordionCard(
+            title = "About & Developer",
+            subtitle = "Version ${com.example.BuildConfig.VERSION_NAME} • By ${DeveloperConfig.DEVELOPER_NAME}",
+            icon = Icons.Default.Info,
+            isExpanded = "about" in expandedSections,
+            onToggle = { toggleSection("about") }
         ) {
             Column(
                 modifier = Modifier
@@ -1908,7 +2023,7 @@ fun SettingsScreen(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "Version 1.9.0",
+                    text = "Version ${com.example.BuildConfig.VERSION_NAME}",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1938,7 +2053,7 @@ fun SettingsScreen(
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(10.dp)
                     ) {
-                        Text("Developer GitHub", fontSize = 12.sp, maxLines = 1)
+                        Text("Developer", fontSize = 12.sp, maxLines = 1)
                     }
 
                     Button(
@@ -1952,10 +2067,32 @@ fun SettingsScreen(
                         Text("Source Code", fontSize = 12.sp, maxLines = 1)
                     }
                 }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedButton(
+                    onClick = {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("${DeveloperConfig.SOURCE_CODE_URL}/releases"))
+                        context.startActivity(intent)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.SystemUpdate,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Check for Updates (GitHub Releases)", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                }
             }
         }
 
-        Spacer(modifier = Modifier.height(84.dp))
+                Spacer(modifier = Modifier.height(32.dp))
+            }
+        }
     }
 }
 
@@ -2302,44 +2439,172 @@ private fun ThemePresetCard(
     title: String,
     subtitle: String,
     primaryColor: Color,
+    secondaryColor: Color = primaryColor,
     surfaceColor: Color,
     isSelected: Boolean,
+    isEnabled: Boolean = true,
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
+    val cardAlpha = if (isEnabled) 1.0f else 0.45f
     Surface(
         modifier = modifier
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(enabled = isEnabled, onClick = onClick)
             .border(
-                width = if (isSelected) 2.dp else 1.dp,
-                color = if (isSelected) primaryColor else MaterialTheme.colorScheme.outlineVariant,
-                shape = RoundedCornerShape(12.dp)
+                width = if (isSelected && isEnabled) 2.dp else 1.dp,
+                color = if (isSelected && isEnabled) primaryColor else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                shape = RoundedCornerShape(14.dp)
             ),
-        color = surfaceColor,
-        shape = RoundedCornerShape(12.dp)
+        color = surfaceColor.copy(alpha = 0.88f),
+        shape = RoundedCornerShape(14.dp)
     ) {
         Column(
-            modifier = Modifier.padding(vertical = 12.dp, horizontal = 4.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .size(22.dp)
-                    .background(primaryColor, CircleShape)
-            )
-            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(24.dp)
+                            .background(primaryColor.copy(alpha = cardAlpha), CircleShape)
+                    )
+                    Box(
+                        modifier = Modifier
+                            .size(18.dp)
+                            .background(secondaryColor.copy(alpha = cardAlpha), CircleShape)
+                    )
+                }
+
+                if (isSelected && isEnabled) {
+                    Box(
+                        modifier = Modifier
+                            .size(22.dp)
+                            .background(primaryColor, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = "Selected",
+                            tint = Color.Black,
+                            modifier = Modifier.size(13.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
             Text(
                 text = title,
-                fontSize = 11.sp,
+                fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color.White
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = cardAlpha)
             )
             Text(
                 text = subtitle,
-                fontSize = 9.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = cardAlpha)
             )
+        }
+    }
+}
+
+@Composable
+private fun SettingsAccordionCard(
+    title: String,
+    subtitle: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    isExpanded: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    FrostedCard(
+        modifier = modifier
+            .fillMaxWidth()
+            .animateContentSize(animationSpec = androidx.compose.animation.core.tween(220)),
+        shape = RoundedCornerShape(18.dp),
+        backgroundAlpha = 0.28f,
+        shadowElevation = 3.dp
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onToggle)
+                    .padding(horizontal = 18.dp, vertical = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .background(
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
+                            CircleShape
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(14.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    if (subtitle.isNotEmpty()) {
+                        Text(
+                            text = subtitle,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                val rotation by androidx.compose.animation.core.animateFloatAsState(
+                    targetValue = if (isExpanded) 180f else 0f,
+                    animationSpec = androidx.compose.animation.core.tween(220),
+                    label = "accordion_chevron"
+                )
+                IconButton(
+                    onClick = onToggle,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.KeyboardArrowDown,
+                        contentDescription = if (isExpanded) "Collapse" else "Expand",
+                        modifier = Modifier.rotate(rotation),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            if (isExpanded) {
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 18.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                )
+                content()
+            }
         }
     }
 }

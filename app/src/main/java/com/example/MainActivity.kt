@@ -15,14 +15,20 @@ import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.example.data.preferences.UserPreferences
 import com.example.service.OverlayService
+import com.example.ui.components.AdaptiveNavRail
+import com.example.ui.components.FloatingBottomNavPill
+import com.example.ui.components.LocalHazeState
 import com.example.ui.screens.*
 import com.example.ui.theme.MyApplicationTheme
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.hazeSource
 
 enum class AppTab(val title: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
     NOW_PLAYING("Now Playing", Icons.Default.PlayCircle),
@@ -49,6 +55,7 @@ class MainActivity : ComponentActivity() {
             MyApplicationTheme(
                 useWallpaperDynamicColor = prefs.useWallpaperDynamicColor,
                 themePreset = prefs.themePreset,
+                themeMode = prefs.themeMode,
                 fontOption = prefs.selectedFont
             ) {
 
@@ -90,62 +97,129 @@ fun MainAppScaffold(
     userPreferences: UserPreferences
 ) {
     var currentTab by remember { mutableStateOf(AppTab.NOW_PLAYING) }
+    val navHazeState = remember { HazeState() }
+    val playbackState by playbackManager.playbackState.collectAsState()
+    val artworkBitmap = com.example.ui.components.rememberArtworkBitmap(playbackState.track)
 
     // Intercept back button when on sub-tabs to return to Now Playing
     BackHandler(enabled = currentTab != AppTab.NOW_PLAYING) {
         currentTab = AppTab.NOW_PLAYING
     }
 
-    Scaffold(
-        modifier = Modifier.fillMaxSize(),
-        bottomBar = {
-            NavigationBar(
-                containerColor = MaterialTheme.colorScheme.surface,
-                tonalElevation = 8.dp,
-                modifier = Modifier
-                    .windowInsetsPadding(WindowInsets.navigationBars)
-                    .testTag("main_navigation_bar")
-            ) {
-                AppTab.entries.forEach { tab ->
-                    NavigationBarItem(
-                        selected = currentTab == tab,
-                        onClick = { currentTab = tab },
-                        icon = { Icon(tab.icon, contentDescription = tab.title) },
-                        label = { Text(tab.title) },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = MaterialTheme.colorScheme.onPrimary,
-                            indicatorColor = MaterialTheme.colorScheme.primary,
-                            selectedTextColor = MaterialTheme.colorScheme.primary
-                        ),
-                        modifier = Modifier.testTag("nav_tab_${tab.name.lowercase()}")
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val isExpanded = maxWidth >= 600.dp
+
+        // Root Edge-to-Edge Ambient Background (covers entire window: status bar to gesture nav)
+        if (currentTab == AppTab.NOW_PLAYING || currentTab == AppTab.LYRICS || currentTab == AppTab.SETTINGS || currentTab == AppTab.HISTORY) {
+            com.example.ui.components.CinematicArtworkBackground(
+                artworkBitmap = artworkBitmap,
+                trackKey = playbackState.track?.key ?: "",
+                hazeState = navHazeState,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            com.example.ui.components.CalmThemedBackground(
+                hazeState = navHazeState,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        CompositionLocalProvider(LocalHazeState provides navHazeState) {
+            if (isExpanded) {
+                // Adaptive Navigation Rail for Expanded / Tablet / Landscape mode
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .windowInsetsPadding(WindowInsets.statusBars)
+                        .windowInsetsPadding(WindowInsets.displayCutout)
+                ) {
+                    AdaptiveNavRail(
+                        currentTab = currentTab,
+                        onTabSelected = { currentTab = it },
+                        hazeState = navHazeState
                     )
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                    ) {
+                        TabContent(
+                            currentTab = currentTab,
+                            playbackManager = playbackManager,
+                            userPreferences = userPreferences,
+                            onNavigateToLyrics = { currentTab = AppTab.LYRICS }
+                        )
+                    }
+                }
+            } else {
+                // Compact / Phone layout: true edge-to-edge ambient container
+                Box(modifier = Modifier.fillMaxSize()) {
+                    // Content area: NowPlaying, Lyrics, Settings, and History handle status bars internally for seamless background
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .then(
+                                if (currentTab == AppTab.NOW_PLAYING || currentTab == AppTab.LYRICS || currentTab == AppTab.SETTINGS || currentTab == AppTab.HISTORY) {
+                                    Modifier
+                                } else {
+                                    Modifier
+                                        .windowInsetsPadding(WindowInsets.statusBars)
+                                        .windowInsetsPadding(WindowInsets.navigationBars)
+                                        .padding(bottom = 76.dp)
+                                }
+                            )
+                    ) {
+                        TabContent(
+                            currentTab = currentTab,
+                            playbackManager = playbackManager,
+                            userPreferences = userPreferences,
+                            onNavigateToLyrics = { currentTab = AppTab.LYRICS }
+                        )
+                    }
+
+                    // Floating Frosted Navigation Pill anchored above gesture bar over continuous ambient artwork
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .windowInsetsPadding(WindowInsets.navigationBars)
+                            .padding(horizontal = 20.dp, vertical = 8.dp)
+                    ) {
+                        FloatingBottomNavPill(
+                            currentTab = currentTab,
+                            onTabSelected = { currentTab = it },
+                            hazeState = navHazeState
+                        )
+                    }
                 }
             }
         }
-    ) { innerPadding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-        ) {
-            AnimatedContent(targetState = currentTab, label = "tab_animation") { target ->
-                when (target) {
-                    AppTab.NOW_PLAYING -> NowPlayingScreen(
-                        playbackManager = playbackManager,
-                        userPreferences = userPreferences,
-                        onNavigateToLyrics = { currentTab = AppTab.LYRICS }
-                    )
-                    AppTab.LYRICS -> LyricsScreen(
-                        playbackManager = playbackManager,
-                        userPreferences = userPreferences
-                    )
-                    AppTab.SETTINGS -> SettingsScreen(
-                        playbackManager = playbackManager,
-                        userPreferences = userPreferences
-                    )
-                    AppTab.HISTORY -> HistoryScreen()
-                }
-            }
+    }
+}
+
+@Composable
+private fun TabContent(
+    currentTab: AppTab,
+    playbackManager: com.example.service.MediaPlaybackManager,
+    userPreferences: UserPreferences,
+    onNavigateToLyrics: () -> Unit
+) {
+    AnimatedContent(targetState = currentTab, label = "tab_animation") { target ->
+        when (target) {
+            AppTab.NOW_PLAYING -> NowPlayingScreen(
+                playbackManager = playbackManager,
+                userPreferences = userPreferences,
+                onNavigateToLyrics = onNavigateToLyrics
+            )
+            AppTab.LYRICS -> LyricsScreen(
+                playbackManager = playbackManager,
+                userPreferences = userPreferences
+            )
+            AppTab.SETTINGS -> SettingsScreen(
+                playbackManager = playbackManager,
+                userPreferences = userPreferences
+            )
+            AppTab.HISTORY -> HistoryScreen()
         }
     }
 }
