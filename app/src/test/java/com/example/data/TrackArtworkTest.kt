@@ -40,4 +40,21 @@ class TrackArtworkTest {
         )
         assertEquals(webUri, track.albumArtUri)
     }
+
+    @Test
+    fun testArtworkCacheKeyGeneration() {
+        val key = com.example.ui.components.buildArtworkCacheKey("artist - title", "content://art/1", "full_512")
+        assertEquals("artist - title::content://art/1::full_512", key)
+    }
+
+    @Test
+    fun testArtworkCacheKeyDifferentiatesUrisAndVariants() {
+        val keyFull = com.example.ui.components.buildArtworkCacheKey("artist - title", "content://art/1", "full_512")
+        val keyThumb = com.example.ui.components.buildArtworkCacheKey("artist - title", "content://art/1", "thumb_144")
+        val keyDifferentUri = com.example.ui.components.buildArtworkCacheKey("artist - title", "content://art/2", "full_512")
+
+        org.junit.Assert.assertNotEquals(keyFull, keyThumb)
+        org.junit.Assert.assertNotEquals(keyFull, keyDifferentUri)
+    }
 }
+

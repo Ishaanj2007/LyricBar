@@ -35,6 +35,9 @@ class MediaPlaybackManager private constructor(private val context: Context) {
     private val _activeLyricObject = MutableStateFlow<com.example.data.model.LyricLine?>(null)
     val activeLyricObject: StateFlow<com.example.data.model.LyricLine?> = _activeLyricObject.asStateFlow()
 
+    private val _activeLyricIndex = MutableStateFlow(-1)
+    val activeLyricIndex: StateFlow<Int> = _activeLyricIndex.asStateFlow()
+
     private val _trackOffsetMs = MutableStateFlow(0L)
     val trackOffsetMs: StateFlow<Long> = _trackOffsetMs.asStateFlow()
 
@@ -283,15 +286,37 @@ class MediaPlaybackManager private constructor(private val context: Context) {
         }
 
         // Immediately sync active lyric line on playback/seek update so highlight is never stale
-        val lyrics = _currentLyrics.value
         val track = _playbackState.value.track
-        if (track != null && lyrics != null && lyrics.isSynced) {
-            val offset = _trackOffsetMs.value
-            val activeObj = lyrics.getActiveLyricLine(validPosition, offset)
+        if (track != null) {
+            updateActiveLyrics(validPosition, _trackOffsetMs.value)
+        }
+    }
+
+    private fun updateActiveLyrics(currentPos: Long, offset: Long) {
+        val lyrics = _currentLyrics.value
+        if (lyrics != null && lyrics.isSynced) {
+            val activeIdx = lyrics.findActiveIndex(currentPos, offset)
+            val activeObj = if (activeIdx in lyrics.lines.indices) lyrics.lines[activeIdx] else null
+            if (_activeLyricIndex.value != activeIdx) {
+                _activeLyricIndex.value = activeIdx
+            }
             if (_activeLyricObject.value != activeObj) {
                 _activeLyricObject.value = activeObj
                 _activeLyricLine.value = activeObj?.text
             }
+        } else if (lyrics != null && !lyrics.isSynced) {
+            if (_activeLyricIndex.value != 0 && lyrics.lines.isNotEmpty()) {
+                _activeLyricIndex.value = 0
+            }
+            val activeObj = lyrics.getActiveLyricLine(currentPos, offset)
+            if (_activeLyricObject.value != activeObj) {
+                _activeLyricObject.value = activeObj
+                _activeLyricLine.value = activeObj?.text
+            }
+        } else {
+            if (_activeLyricIndex.value != -1) _activeLyricIndex.value = -1
+            if (_activeLyricObject.value != null) _activeLyricObject.value = null
+            if (_activeLyricLine.value != null) _activeLyricLine.value = null
         }
     }
 
@@ -318,6 +343,7 @@ class MediaPlaybackManager private constructor(private val context: Context) {
         offsetJob?.cancel()
 
         _currentLyrics.value = null
+        _activeLyricIndex.value = -1
         _activeLyricObject.value = null
         _activeLyricLine.value = null
 
@@ -352,9 +378,7 @@ class MediaPlaybackManager private constructor(private val context: Context) {
                 if (lyrics != null) {
                     val currentPos = _playbackState.value.calculatedPositionMs
                     val offset = _trackOffsetMs.value
-                    val initialObj = lyrics.getActiveLyricLine(currentPos, offset)
-                    _activeLyricObject.value = initialObj
-                    _activeLyricLine.value = initialObj?.text
+                    updateActiveLyrics(currentPos, offset)
                 }
             }
         }
@@ -384,11 +408,7 @@ class MediaPlaybackManager private constructor(private val context: Context) {
                 if (state.isPlaying && state.track != null && lyrics != null && lyrics.isSynced) {
                     val currentPos = state.calculatedPositionMs
                     val offset = _trackOffsetMs.value
-                    val activeObj = lyrics.getActiveLyricLine(currentPos, offset)
-                    if (_activeLyricObject.value != activeObj) {
-                        _activeLyricObject.value = activeObj
-                        _activeLyricLine.value = activeObj?.text
-                    }
+                    updateActiveLyrics(currentPos, offset)
                 }
 
                 if (!state.isPlaying) {
@@ -410,11 +430,7 @@ class MediaPlaybackManager private constructor(private val context: Context) {
         val lyrics = _currentLyrics.value
         if (lyrics != null && lyrics.isSynced) {
             val currentPos = _playbackState.value.calculatedPositionMs
-            val activeObj = lyrics.getActiveLyricLine(currentPos, newOffset)
-            if (_activeLyricObject.value != activeObj) {
-                _activeLyricObject.value = activeObj
-                _activeLyricLine.value = activeObj?.text
-            }
+            updateActiveLyrics(currentPos, newOffset)
         }
     }
 
@@ -427,11 +443,7 @@ class MediaPlaybackManager private constructor(private val context: Context) {
         val lyrics = _currentLyrics.value
         if (lyrics != null && lyrics.isSynced) {
             val currentPos = _playbackState.value.calculatedPositionMs
-            val activeObj = lyrics.getActiveLyricLine(currentPos, offsetMs)
-            if (_activeLyricObject.value != activeObj) {
-                _activeLyricObject.value = activeObj
-                _activeLyricLine.value = activeObj?.text
-            }
+            updateActiveLyrics(currentPos, offsetMs)
         }
     }
 
@@ -449,9 +461,7 @@ class MediaPlaybackManager private constructor(private val context: Context) {
         _currentLyrics.value = lyrics
         val currentPos = _playbackState.value.calculatedPositionMs
         val offset = _trackOffsetMs.value
-        val initialObj = lyrics.getActiveLyricLine(currentPos, offset)
-        _activeLyricObject.value = initialObj
-        _activeLyricLine.value = initialObj?.text
+        updateActiveLyrics(currentPos, offset)
     }
 
     private fun isControllerControllable(controller: MediaController?): Boolean {
@@ -577,11 +587,7 @@ class MediaPlaybackManager private constructor(private val context: Context) {
             )
             val lyrics = _currentLyrics.value
             if (lyrics != null && lyrics.isSynced) {
-                val activeObj = lyrics.getActiveLyricLine(positionMs, _trackOffsetMs.value)
-                if (_activeLyricObject.value != activeObj) {
-                    _activeLyricObject.value = activeObj
-                    _activeLyricLine.value = activeObj?.text
-                }
+                updateActiveLyrics(positionMs, _trackOffsetMs.value)
             }
             scope.launch {
                 delay(80)

@@ -28,17 +28,46 @@ data class ParsedLyrics(
     val format: String = if (isSynced) "LRC" else "PLAIN",
     val rawContent: String = ""
 ) {
+    private val isSorted: Boolean = if (lines.size <= 1) {
+        true
+    } else {
+        var sorted = true
+        for (i in 0 until lines.size - 1) {
+            if (lines[i].timeMs > lines[i + 1].timeMs) {
+                sorted = false
+                break
+            }
+        }
+        sorted
+    }
+
     fun findActiveIndex(currentPositionMs: Long, trackOffsetMs: Long = 0L): Int {
         if (!isSynced || lines.isEmpty()) return -1
         val adjustedPos = currentPositionMs + offsetMs + trackOffsetMs
         var activeIndex = -1
-        for (i in lines.indices) {
-            if (lines[i].timeMs <= adjustedPos) {
-                activeIndex = i
-            } else {
-                break
+
+        if (isSorted) {
+            var low = 0
+            var high = lines.size - 1
+            while (low <= high) {
+                val mid = (low + high) ushr 1
+                if (lines[mid].timeMs <= adjustedPos) {
+                    activeIndex = mid
+                    low = mid + 1
+                } else {
+                    high = mid - 1
+                }
+            }
+        } else {
+            for (i in lines.indices) {
+                if (lines[i].timeMs <= adjustedPos) {
+                    activeIndex = i
+                } else {
+                    break
+                }
             }
         }
+
         if (activeIndex != -1) {
             val line = lines[activeIndex]
             if (line.text.isBlank()) return -1

@@ -404,14 +404,35 @@ fun CinematicArtworkBackground(
 ) {
     val backgroundColor = MaterialTheme.colorScheme.background
 
-    // Generate or cache the smooth pre-blurred ambient bitmap
-    val blurredBitmap = remember(artworkBitmap, trackKey) {
+    val blurCacheKey = remember(artworkBitmap, trackKey) {
         if (artworkBitmap != null && !artworkBitmap.isRecycled) {
-            createBlurredArtworkBitmap(artworkBitmap)
-        } else {
-            null
-        }
+            "blur_${trackKey}_${artworkBitmap.hashCode()}"
+        } else ""
     }
+
+    // Generate or cache the smooth pre-blurred ambient bitmap asynchronously off the main thread
+    val blurredBitmap = produceState<Bitmap?>(
+        initialValue = if (blurCacheKey.isNotBlank()) ArtworkMemoryCache.get(blurCacheKey) else null,
+        key1 = artworkBitmap,
+        key2 = trackKey
+    ) {
+        if (artworkBitmap == null || artworkBitmap.isRecycled) {
+            value = null
+            return@produceState
+        }
+        val cached = ArtworkMemoryCache.get(blurCacheKey)
+        if (cached != null && !cached.isRecycled) {
+            value = cached
+            return@produceState
+        }
+        val blurred = withContext(Dispatchers.Default) {
+            createBlurredArtworkBitmap(artworkBitmap)
+        }
+        if (blurred != null && !blurred.isRecycled) {
+            ArtworkMemoryCache.put(blurCacheKey, blurred)
+            value = blurred
+        }
+    }.value
 
     Box(
         modifier = modifier
@@ -500,12 +521,50 @@ fun CinematicArtworkBackground(
     }
 }
 
-// In-memory artwork cache preventing double-loading and play/pause flicker
-private val sArtworkBitmapCache = java.util.concurrent.ConcurrentHashMap<String, Bitmap>()
+// Shared bounded memory cache for artwork bitmaps across LyricBar
+object ArtworkMemoryCache {
+    private val maxMemory = Runtime.getRuntime().maxMemory()
+    // Allocate 1/8th of available runtime heap, bounded between 16MB and 32MB
+    private val cacheSizeBytes = (maxMemory / 8L).coerceIn(16L * 1024 * 1024, 32L * 1024 * 1024).toInt()
+
+    private val lruCache = object : android.util.LruCache<String, Bitmap>(cacheSizeBytes) {
+        override fun sizeOf(key: String, value: Bitmap): Int {
+            return value.byteCount.coerceAtLeast(1)
+        }
+    }
+
+    @Synchronized
+    fun get(key: String): Bitmap? {
+        val bm = lruCache.get(key)
+        return if (bm != null && !bm.isRecycled) bm else null
+    }
+
+    @Synchronized
+    fun put(key: String, bitmap: Bitmap) {
+        if (!bitmap.isRecycled && bitmap.width > 0 && bitmap.height > 0) {
+            lruCache.put(key, bitmap)
+        }
+    }
+
+    @Synchronized
+    fun clear() {
+        lruCache.evictAll()
+    }
+}
+
+/**
+ * Creates a unique, stable artwork cache key combining track key, URI, and resolution variant.
+ * This guarantees different releases/versions with distinct artwork URIs never reuse stale cached images.
+ */
+fun buildArtworkCacheKey(trackKey: String, uriStr: String, variant: String = "full"): String {
+    val cleanKey = trackKey.trim().lowercase()
+    val cleanUri = uriStr.trim()
+    return "$cleanKey::$cleanUri::$variant"
+}
 
 /**
  * Shared, lifecycle-safe artwork bitmap remember helper.
- * Uses an in-memory cache and never drops state to null when the track identity is stable,
+ * Uses a bounded memory cache and never drops state to null when the track identity is stable,
  * eliminating the double-flicker bug on playback state changes.
  */
 @Composable
@@ -515,29 +574,32 @@ fun rememberArtworkBitmap(track: TrackMetadata?): Bitmap? {
     val uriStr = track?.albumArtUri ?: ""
     val embedded = track?.albumArtBitmap
 
+    val cacheKey = remember(trackKey, uriStr) {
+        buildArtworkCacheKey(trackKey, uriStr, "full_512")
+    }
+
     // If an active embedded bitmap is provided, cache and return immediately
     if (embedded != null && !embedded.isRecycled) {
-        if (trackKey.isNotBlank()) sArtworkBitmapCache[trackKey] = embedded
+        if (cacheKey.isNotBlank()) ArtworkMemoryCache.put(cacheKey, embedded)
         return embedded
     }
 
     // Check memory cache synchronously to avoid any momentary null frame
-    val cached = if (trackKey.isNotBlank()) sArtworkBitmapCache[trackKey] else null
+    val cached = if (cacheKey.isNotBlank()) ArtworkMemoryCache.get(cacheKey) else null
     if (cached != null && !cached.isRecycled) {
         return cached
     }
 
     return produceState<Bitmap?>(
         initialValue = cached,
-        key1 = trackKey,
-        key2 = uriStr
+        key1 = cacheKey
     ) {
         if (track == null || (trackKey.isBlank() && uriStr.isBlank())) {
             value = null
             return@produceState
         }
 
-        val memCached = sArtworkBitmapCache[trackKey]
+        val memCached = ArtworkMemoryCache.get(cacheKey)
         if (memCached != null && !memCached.isRecycled) {
             value = memCached
             return@produceState
@@ -545,12 +607,10 @@ fun rememberArtworkBitmap(track: TrackMetadata?): Bitmap? {
 
         if (uriStr.isNotBlank()) {
             val loaded = withContext(Dispatchers.IO) {
-                loadArtworkBitmapSafely(context, uriStr)
+                loadArtworkBitmapSafely(context, uriStr, reqSize = 512)
             }
             if (loaded != null && !loaded.isRecycled) {
-                if (trackKey.isNotBlank()) {
-                    sArtworkBitmapCache[trackKey] = loaded
-                }
+                ArtworkMemoryCache.put(cacheKey, loaded)
                 value = loaded
             }
         }
@@ -559,8 +619,9 @@ fun rememberArtworkBitmap(track: TrackMetadata?): Bitmap? {
 
 /**
  * Robust, memory-bounded, and safe artwork bitmap loader from content, file, or network URIs.
+ * Downsamples safely based on requested pixel dimension [reqSize] (default 512 for main views, 144 for thumbnails).
  */
-fun loadArtworkBitmapSafely(context: Context, uriString: String): Bitmap? {
+fun loadArtworkBitmapSafely(context: Context, uriString: String, reqSize: Int = 512): Bitmap? {
     return try {
         val uri = Uri.parse(uriString)
         val maxByteLimit = 8 * 1024 * 1024 // 8 MB safety bound
@@ -604,9 +665,9 @@ fun loadArtworkBitmapSafely(context: Context, uriString: String): Bitmap? {
 
         var inSampleSize = 1
         val maxDim = maxOf(options.outWidth, options.outHeight)
-        val reqSize = 512
-        if (maxDim > reqSize) {
-            while ((maxDim / (inSampleSize * 2)) >= reqSize) {
+        val targetSize = reqSize.coerceAtLeast(64)
+        if (maxDim > targetSize) {
+            while ((maxDim / (inSampleSize * 2)) >= targetSize) {
                 inSampleSize *= 2
             }
         }
@@ -617,6 +678,7 @@ fun loadArtworkBitmapSafely(context: Context, uriString: String): Bitmap? {
         null
     }
 }
+
 
 private fun readBytesBounded(inputStream: InputStream, limit: Int): ByteArray? {
     val buffer = ByteArray(8192)

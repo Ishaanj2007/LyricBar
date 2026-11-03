@@ -34,42 +34,43 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.local.entity.SongHistoryEntity
 import com.example.data.repository.CompositeLyricsRepository
+import com.example.ui.components.ArtworkMemoryCache
 import com.example.ui.components.FrostedCard
+import com.example.ui.components.buildArtworkCacheKey
 import com.example.ui.components.loadArtworkBitmapSafely
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.*
-import java.util.concurrent.ConcurrentHashMap
-
-// In-memory artwork bitmap cache specifically for History screen thumbnails
-private val sHistoryArtworkCache = ConcurrentHashMap<String, Bitmap>()
 
 @Composable
 private fun rememberHistoryArtworkBitmap(uriString: String?, key: String): Bitmap? {
     val context = LocalContext.current
     if (uriString.isNullOrBlank()) return null
 
-    val cacheKey = key.ifBlank { uriString }
-    val cached = sHistoryArtworkCache[cacheKey]
+    val cacheKey = remember(key, uriString) {
+        buildArtworkCacheKey(key, uriString, "thumb_144")
+    }
+    val cached = ArtworkMemoryCache.get(cacheKey)
     if (cached != null && !cached.isRecycled) return cached
 
-    return produceState<Bitmap?>(initialValue = cached, key1 = uriString, key2 = key) {
-        val memCached = sHistoryArtworkCache[cacheKey]
+    return produceState<Bitmap?>(initialValue = cached, key1 = cacheKey) {
+        val memCached = ArtworkMemoryCache.get(cacheKey)
         if (memCached != null && !memCached.isRecycled) {
             value = memCached
             return@produceState
         }
         val loaded = withContext(Dispatchers.IO) {
-            loadArtworkBitmapSafely(context, uriString)
+            loadArtworkBitmapSafely(context, uriString, reqSize = 144)
         }
         if (loaded != null && !loaded.isRecycled) {
-            sHistoryArtworkCache[cacheKey] = loaded
+            ArtworkMemoryCache.put(cacheKey, loaded)
             value = loaded
         }
     }.value
 }
+
 
 private enum class HistoryTimeGroup(val title: String, val order: Int) {
     TODAY("Today", 0),
