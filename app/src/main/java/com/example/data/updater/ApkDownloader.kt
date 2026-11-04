@@ -71,7 +71,7 @@ class ApkDownloader(
 
                 val request = Request.Builder()
                     .url(asset.downloadUrl)
-                    .header("User-Agent", "LyricBar-Updater/1.9.0")
+                    .header("User-Agent", "LyricBar-Updater/${com.example.BuildConfig.VERSION_NAME}")
                     .build()
 
                 _downloadState.value = DownloadState.Progress(0L, asset.sizeBytes, 0f)

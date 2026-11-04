@@ -31,7 +31,7 @@ class UpdateRepository(
             // First attempt: fetch /releases/latest (GitHub automatically points to the latest non-prerelease, non-draft)
             val request = Request.Builder()
                 .url(latestReleaseUrl)
-                .header("User-Agent", "LyricBar-Updater/1.9.0")
+                .header("User-Agent", "LyricBar-Updater/${com.example.BuildConfig.VERSION_NAME}")
                 .header("Accept", "application/vnd.github.v3+json")
                 .build()
 
@@ -70,7 +70,7 @@ class UpdateRepository(
     private fun fetchFromReleasesList(): Result<ReleaseInfo> {
         val request = Request.Builder()
             .url(allReleasesUrl)
-            .header("User-Agent", "LyricBar-Updater/1.9.0")
+            .header("User-Agent", "LyricBar-Updater/${com.example.BuildConfig.VERSION_NAME}")
             .header("Accept", "application/vnd.github.v3+json")
             .build()
 
