@@ -324,6 +324,11 @@ class OverlayService : Service() {
     private fun observeState() {
         // Observe lyrics, playback state, and preferences
         serviceScope.launch {
+            var lastAppliedLine: com.example.data.model.LyricLine? = null
+            var lastAppliedLyricsKey: String? = null
+            var lastAppliedTrackKey: String? = null
+            var lastAppliedPrefs: com.example.data.preferences.UserPreferences? = null
+
             combine(
                 playbackManager.activeLyricObject,
                 playbackManager.currentLyrics,
@@ -345,82 +350,103 @@ class OverlayService : Service() {
                     return@collect
                 }
 
+                // Verify runtime overlay permission; stop gracefully if revoked
+                if (!Settings.canDrawOverlays(this@OverlayService)) {
+                    stopSelf()
+                    return@collect
+                }
+
                 updateOverlayVisibility(playbackState, prefs.overlayEnabled)
 
-                // Compute next valid lyric timestamp after the current line
-                val nextTimestampMs = if (lineObj != null && lyrics != null) {
-                    lyrics.lines.firstOrNull { it.timeMs > lineObj.timeMs }?.timeMs
-                } else null
+                // 1. Update active lyric line and next timestamp ONLY when the line or lyrics change
+                val currentLyricsKey = lyrics?.let { "${it.title}_${it.lines.size}" }
+                if (lineObj != lastAppliedLine || currentLyricsKey != lastAppliedLyricsKey) {
+                    lastAppliedLine = lineObj
+                    lastAppliedLyricsKey = currentLyricsKey
 
-                val trackDurationSec = playbackState.track?.durationSec ?: 0
-                val trackDurationMs = if (trackDurationSec > 0) trackDurationSec * 1000L else null
+                    val nextTimestampMs = if (lineObj != null && lyrics != null) {
+                        lyrics.lines.firstOrNull { it.timeMs > lineObj.timeMs }?.timeMs
+                    } else null
 
-                // Update text and word-level data
-                view.activeLyricLine = lineObj
-                view.nextLyricTimestampMs = nextTimestampMs
-                view.trackDurationMs = trackDurationMs
-                view.textSizeSp = prefs.overlayTextSizeSp
-                view.textOpacity = prefs.overlayTextOpacity
-                view.typewriterSpeed = prefs.typewriterSpeed
-                view.smoothTransitionSpeed = prefs.smoothTransitionSpeed
-                view.fadeSpeed = prefs.fadeSpeed
-                view.blurRevealSpeed = prefs.blurRevealSpeed
-                view.karaokeSpeed = prefs.karaokeSpeed
-                view.karaokeGlowSpeed = prefs.karaokeGlowSpeed
-                view.textShadowEnabled = prefs.textShadowEnabled
-                view.textAlignMode = prefs.overlayTextAlign
-                view.animationStyle = prefs.animationStyle
-                view.singleLineMode = prefs.singleLineLyrics
-                view.adaptiveScrollingEnabled = prefs.adaptiveLyricScrolling
-                view.scrollSpeedMultiplier = prefs.lyricScrollSpeedMultiplier
-                view.fontResId = prefs.selectedFont.fontResId
+                    view.activeLyricLine = lineObj
+                    view.nextLyricTimestampMs = nextTimestampMs
+                }
 
-                val resolvedPrimary = if (prefs.useWallpaperDynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    try {
-                        dynamicDarkColorScheme(this@OverlayService).primary.toArgb()
-                    } catch (_: Exception) {
-                        android.graphics.Color.WHITE
+                // 2. Update track duration ONLY when track changes
+                val trackKey = playbackState.track?.key
+                if (trackKey != lastAppliedTrackKey) {
+                    lastAppliedTrackKey = trackKey
+                    val trackDurationSec = playbackState.track?.durationSec ?: 0
+                    view.trackDurationMs = if (trackDurationSec > 0) trackDurationSec * 1000L else null
+                }
+
+                // 3. Update styling properties, primary color, and bounds ONLY when preferences actually change
+                if (prefs != lastAppliedPrefs) {
+                    lastAppliedPrefs = prefs
+
+                    view.textSizeSp = prefs.overlayTextSizeSp
+                    view.textOpacity = prefs.overlayTextOpacity
+                    view.typewriterSpeed = prefs.typewriterSpeed
+                    view.smoothTransitionSpeed = prefs.smoothTransitionSpeed
+                    view.fadeSpeed = prefs.fadeSpeed
+                    view.blurRevealSpeed = prefs.blurRevealSpeed
+                    view.karaokeSpeed = prefs.karaokeSpeed
+                    view.karaokeGlowSpeed = prefs.karaokeGlowSpeed
+                    view.textShadowEnabled = prefs.textShadowEnabled
+                    view.textAlignMode = prefs.overlayTextAlign
+                    view.animationStyle = prefs.animationStyle
+                    view.singleLineMode = prefs.singleLineLyrics
+                    view.adaptiveScrollingEnabled = prefs.adaptiveLyricScrolling
+                    view.scrollSpeedMultiplier = prefs.lyricScrollSpeedMultiplier
+                    view.fontResId = prefs.selectedFont.fontResId
+
+                    val resolvedPrimary = if (prefs.useWallpaperDynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        try {
+                            dynamicDarkColorScheme(this@OverlayService).primary.toArgb()
+                        } catch (_: Exception) {
+                            android.graphics.Color.WHITE
+                        }
+                    } else {
+                        when (prefs.themePreset) {
+                            ThemePreset.ROSE_QUARTZ, ThemePreset.OBSIDIAN_MINT -> RoseQuartzPrimary.toArgb()
+                            ThemePreset.LAVENDER_MIST, ThemePreset.MIDNIGHT_AZURE -> LavenderMistPrimary.toArgb()
+                            ThemePreset.PEACH_EMBER, ThemePreset.SUNSET_AMBER -> PeachEmberPrimary.toArgb()
+                            ThemePreset.SAGE_SERENITY, ThemePreset.CYBER_VIOLET -> SageSerenityPrimary.toArgb()
+                        }
                     }
-                } else {
-                    when (prefs.themePreset) {
-                        ThemePreset.ROSE_QUARTZ, ThemePreset.OBSIDIAN_MINT -> RoseQuartzPrimary.toArgb()
-                        ThemePreset.LAVENDER_MIST, ThemePreset.MIDNIGHT_AZURE -> LavenderMistPrimary.toArgb()
-                        ThemePreset.PEACH_EMBER, ThemePreset.SUNSET_AMBER -> PeachEmberPrimary.toArgb()
-                        ThemePreset.SAGE_SERENITY, ThemePreset.CYBER_VIOLET -> SageSerenityPrimary.toArgb()
+                    view.primaryColor = resolvedPrimary
+
+                    // Update drag mode if changed externally from settings
+                    if (isDragMode != prefs.isDragRepositionMode) {
+                        isDragMode = prefs.isDragRepositionMode
+                        updateOverlayFlags()
+                        updateNotification()
+                        updateOverlayVisibility(playbackState, prefs.overlayEnabled)
                     }
-                }
-                view.primaryColor = resolvedPrimary
 
-                // Update drag mode if changed externally from settings
-                if (isDragMode != prefs.isDragRepositionMode) {
-                    isDragMode = prefs.isDragRepositionMode
-                    updateOverlayFlags()
-                    updateNotification()
-                    updateOverlayVisibility(playbackState, prefs.overlayEnabled)
-                }
+                    // Update bounds coordinates & size
+                    var layoutChanged = false
+                    if (params.y != prefs.overlayYPosition || params.x != prefs.overlayXPosition) {
+                        params.x = prefs.overlayXPosition
+                        params.y = prefs.overlayYPosition
+                        currentX = prefs.overlayXPosition
+                        currentY = prefs.overlayYPosition
+                        layoutChanged = true
+                    }
+                    if (prefs.overlayWidthPx > 0 && params.width != prefs.overlayWidthPx) {
+                        params.width = prefs.overlayWidthPx
+                        layoutChanged = true
+                    }
+                    if (prefs.overlayHeightPx > 0 && params.height != prefs.overlayHeightPx) {
+                        params.height = prefs.overlayHeightPx
+                        layoutChanged = true
+                    }
 
-                // Update bounds coordinates & size
-                var layoutChanged = false
-                if (params.y != prefs.overlayYPosition || params.x != prefs.overlayXPosition) {
-                    params.x = prefs.overlayXPosition
-                    params.y = prefs.overlayYPosition
-                    currentX = prefs.overlayXPosition
-                    currentY = prefs.overlayYPosition
-                    layoutChanged = true
-                }
-                if (prefs.overlayWidthPx > 0 && params.width != prefs.overlayWidthPx) {
-                    params.width = prefs.overlayWidthPx
-                    layoutChanged = true
-                }
-                if (prefs.overlayHeightPx > 0 && params.height != prefs.overlayHeightPx) {
-                    params.height = prefs.overlayHeightPx
-                    layoutChanged = true
-                }
-
-                if (layoutChanged) {
-                    try {
-                        windowManager?.updateViewLayout(view, params)
-                    } catch (_: Exception) {}
+                    if (layoutChanged) {
+                        try {
+                            windowManager?.updateViewLayout(view, params)
+                        } catch (_: Exception) {}
+                    }
                 }
             }
         }
@@ -505,6 +531,7 @@ class OverlayService : Service() {
         } catch (_: Exception) {}
         overlayView?.let {
             try {
+                it.stopLoop()
                 windowManager?.removeView(it)
             } catch (_: Exception) {}
         }

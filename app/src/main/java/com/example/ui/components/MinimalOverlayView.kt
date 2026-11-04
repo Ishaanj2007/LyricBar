@@ -87,17 +87,25 @@ class MinimalOverlayView(
         val startMs: Long,
         val endMs: Long,
         var x: Float = 0f,
-        var y: Float = 0f
-    )
+        var y: Float = 0f,
+        val graphemeBoundaries: IntArray = computeGraphemeBoundaries(word)
+    ) {
+        val graphemeCount: Int get() = graphemeBoundaries.size
+    }
 
     data class LayoutLine(
         val words: List<LayoutWord>,
         val lineWidth: Float,
-        var baselineY: Float = 0f
+        var baselineY: Float = 0f,
+        val totalGraphemes: Int = words.sumOf { it.graphemeCount },
+        val totalChars: Int = words.sumOf { it.word.length }
     )
 
     private val currentLayoutLines = mutableListOf<LayoutLine>()
     private var previousLayoutLines = listOf<LayoutLine>()
+
+    private var totalLayoutGraphemes: Int = 0
+    private var totalLayoutChars: Int = 0
 
     private var animProgress: Float = 1f
     private var transitionAnimator: ValueAnimator? = null
@@ -120,12 +128,104 @@ class MinimalOverlayView(
     private var lastUpdatedTimestamp: Long = 0L
     private var isScreenOn: Boolean = true
 
-    // 60 FPS frame animation loop
+    // Frame animation loop control
     private var isLoopRunning: Boolean = false
+
+    private fun getNormalizedStyle(): String {
+        return when (animationStyle) {
+            "KARAOKE", "APPLE_MUSIC" -> "KARAOKE"
+            "SMOOTH_SLIDE", "SMOOTH_SLIDE_UP", "SOFT_FADE", "SCALE_POP" -> "SMOOTH_SLIDE"
+            "FADE", "FADE_IN_OUT" -> "FADE"
+            "BLUR_REVEAL", "BLUR" -> "BLUR_REVEAL"
+            "TYPEWRITER" -> "TYPEWRITER"
+            "INSTANT", "MINIMAL_STATIC" -> "INSTANT"
+            else -> "KARAOKE"
+        }
+    }
+
+    /**
+     * Determines whether the view's current visual state requires continuous frame invalidation.
+     * Prevents continuous rendering loops when lyrics are static, untimed, or between active phrases.
+     */
+    fun isAnimationActive(posMs: Long = getCalculatedPositionMs()): Boolean {
+        if (!isPlaying || !isAttachedToWindow || !isScreenOn || visibility != VISIBLE) {
+            return false
+        }
+
+        // 1. Line transition animation is actively running
+        if (transitionAnimator?.isRunning == true) {
+            return true
+        }
+
+        // 2. Smooth vertical auto-scroll in motion
+        if (maxScrollY > 0f && abs(targetScrollY - currentScrollY) > 0.3f) {
+            return true
+        }
+
+        // 3. Smooth horizontal auto-scroll in motion
+        if (singleLineMode && maxScrollX > 0f && adaptiveScrollingEnabled && abs(targetScrollX - currentScrollX) > 0.3f) {
+            return true
+        }
+
+        val currentLine = activeLyricLine
+        if (currentLine == null || currentLayoutLines.isEmpty()) {
+            return false
+        }
+
+        return when (getNormalizedStyle()) {
+            "KARAOKE" -> {
+                if (currentLine.isWordSynced && currentLine.words.isNotEmpty()) {
+                    val startMs = currentLine.words.first().startMs
+                    val endMs = currentLine.words.last().endMs
+                    // Animate only within the active singing phrase
+                    posMs in startMs..(endMs + 100L)
+                } else if (currentLine.timeMs > 0L || currentLine.endTimeMs > 0L) {
+                    // Line-timed sweep: animate only during the active line duration
+                    val lineStart = currentLine.timeMs
+                    val rawEnd = currentLine.endTimeMs
+                    val lineEnd = if (rawEnd > lineStart) {
+                        rawEnd
+                    } else if (nextLyricTimestampMs != null && nextLyricTimestampMs!! > lineStart) {
+                        nextLyricTimestampMs!!
+                    } else {
+                        lineStart + 3500L
+                    }
+                    posMs in lineStart..(lineEnd + 100L)
+                } else {
+                    // Untimed / static lyrics: no continuous frames required
+                    false
+                }
+            }
+            "TYPEWRITER" -> {
+                val speed = typewriterSpeed.coerceIn(0.3f, 3.0f)
+                if (currentLine.isWordSynced && currentLine.words.isNotEmpty()) {
+                    val startMs = currentLine.words.first().startMs
+                    val endMs = currentLine.words.last().endMs
+                    posMs in startMs..(endMs + 100L)
+                } else {
+                    val lineStart = currentLine.timeMs
+                    val rawEnd = currentLine.endTimeMs
+                    val lineEnd = if (rawEnd > lineStart) {
+                        rawEnd
+                    } else if (nextLyricTimestampMs != null && nextLyricTimestampMs!! > lineStart) {
+                        nextLyricTimestampMs!!
+                    } else {
+                        lineStart + 3500L
+                    }
+                    val baseDuration = (lineEnd - lineStart).coerceIn(1200L, 4000L)
+                    val duration = (baseDuration / speed).toLong().coerceIn(600L, 12000L)
+                    // Animate until all characters finish typing
+                    posMs in lineStart..(lineStart + duration + 50L)
+                }
+            }
+            // Static line-timed styles only require frames while transitionAnimator runs
+            else -> false
+        }
+    }
 
     private val frameRunnable = object : Runnable {
         override fun run() {
-            if (!isAttachedToWindow || !isScreenOn) {
+            if (!isAttachedToWindow || !isScreenOn || visibility != VISIBLE) {
                 isLoopRunning = false
                 return
             }
@@ -159,27 +259,7 @@ class MinimalOverlayView(
 
             invalidate()
 
-            val currentStyle = when (animationStyle) {
-                "KARAOKE", "APPLE_MUSIC" -> "KARAOKE"
-                "SMOOTH_SLIDE", "SMOOTH_SLIDE_UP", "SOFT_FADE", "SCALE_POP" -> "SMOOTH_SLIDE"
-                "FADE", "FADE_IN_OUT" -> "FADE"
-                "BLUR_REVEAL", "BLUR" -> "BLUR_REVEAL"
-                "TYPEWRITER" -> "TYPEWRITER"
-                "INSTANT", "MINIMAL_STATIC" -> "INSTANT"
-                else -> "KARAOKE"
-            }
-
-            // Run continuous 60 FPS animation loop whenever music is playing in KARAOKE style
-            val isKaraoke = currentStyle == "KARAOKE"
-            val needsContinuous = isPlaying && (
-                isKaraoke ||
-                (currentStyle == "TYPEWRITER") ||
-                (transitionAnimator?.isRunning == true) ||
-                (maxScrollY > 0f && abs(targetScrollY - currentScrollY) > 0.3f) ||
-                (singleLineMode && maxScrollX > 0f && abs(targetScrollX - currentScrollX) > 0.3f)
-            )
-
-            if (needsContinuous) {
+            if (isAnimationActive(posMs)) {
                 postOnAnimation(this)
             } else {
                 isLoopRunning = false
@@ -561,6 +641,8 @@ class MinimalOverlayView(
 
     private fun recalculateLayout() {
         currentLayoutLines.clear()
+        totalLayoutGraphemes = 0
+        totalLayoutChars = 0
         maxScrollY = 0f
         targetScrollY = 0f
         currentScrollY = 0f
@@ -702,6 +784,8 @@ class MinimalOverlayView(
         }
 
         currentLayoutLines.addAll(lineList)
+        totalLayoutGraphemes = currentLayoutLines.sumOf { it.totalGraphemes }
+        totalLayoutChars = currentLayoutLines.sumOf { it.totalChars }
         startLoopIfNeeded()
         invalidate()
     }
@@ -855,9 +939,25 @@ class MinimalOverlayView(
     }
 
     fun startLoopIfNeeded() {
-        if (!isLoopRunning && isAttachedToWindow && isScreenOn) {
-            isLoopRunning = true
-            postOnAnimation(frameRunnable)
+        if (!isAttachedToWindow || !isScreenOn || visibility != VISIBLE) {
+            isLoopRunning = false
+            return
+        }
+
+        val posMs = getCalculatedPositionMs()
+        if (isAnimationActive(posMs)) {
+            if (!isLoopRunning) {
+                isLoopRunning = true
+                removeCallbacks(frameRunnable)
+                postOnAnimation(frameRunnable)
+            }
+        } else {
+            // Not in an active animation window: redraw once to render current state and do not loop
+            if (isLoopRunning) {
+                removeCallbacks(frameRunnable)
+                isLoopRunning = false
+            }
+            invalidate()
         }
     }
 
@@ -876,8 +976,18 @@ class MinimalOverlayView(
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
-        transitionAnimator?.cancel()
         stopLoop()
+        transitionAnimator?.cancel()
+        transitionAnimator = null
+    }
+
+    override fun onVisibilityChanged(changedView: View, visibility: Int) {
+        super.onVisibilityChanged(changedView, visibility)
+        if (visibility != VISIBLE) {
+            stopLoop()
+        } else if (isPlaying) {
+            startLoopIfNeeded()
+        }
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
@@ -1060,15 +1170,16 @@ class MinimalOverlayView(
                     // B: Show high-opacity glowing text above that sweeps across the text
                     // Visual lines that have already been sung remain fully glowing and visible
                     if (currentLayoutLines.isNotEmpty()) {
-                        val totalChars = currentLayoutLines.sumOf { l -> l.words.sumOf { it.word.length } }.coerceAtLeast(1)
+                        val totalChars = totalLayoutChars.coerceAtLeast(1)
 
                         var activeLineIdx = 0
                         var activeLineStart = lineStart
                         var activeLineDuration = totalDuration
                         var charAccumulator = 0
 
-                        for ((idx, line) in currentLayoutLines.withIndex()) {
-                            val lineChars = line.words.sumOf { it.word.length }.coerceAtLeast(1)
+                        for (idx in 0 until currentLayoutLines.size) {
+                            val line = currentLayoutLines[idx]
+                            val lineChars = line.totalChars.coerceAtLeast(1)
                             val startFrac = charAccumulator.toFloat() / totalChars
                             val endFrac = (charAccumulator + lineChars).toFloat() / totalChars
                             val lStart = lineStart + (totalDuration * startFrac).toLong()
@@ -1094,7 +1205,8 @@ class MinimalOverlayView(
                         for (prevIdx in 0 until activeLineIdx) {
                             val prevLine = currentLayoutLines[prevIdx]
                             val drawY = prevLine.baselineY - currentScrollY + incomingOffsetY
-                            for (w in prevLine.words) {
+                            for (wIdx in 0 until prevLine.words.size) {
+                                val w = prevLine.words[wIdx]
                                 canvas.drawText(w.word, w.x, drawY, wordGlowPaint)
                                 canvas.drawText(w.word, w.x, drawY, wordActivePaint)
                             }
@@ -1122,7 +1234,8 @@ class MinimalOverlayView(
 
                             canvas.save()
                             canvas.clipRect(0f, 0f, sweepX, height.toFloat())
-                            for (w in activeLine.words) {
+                            for (wIdx in 0 until activeLine.words.size) {
+                                val w = activeLine.words[wIdx]
                                 canvas.drawText(w.word, w.x, drawY, wordGlowPaint)
                                 canvas.drawText(w.word, w.x, drawY, wordActivePaint)
                             }
@@ -1177,9 +1290,11 @@ class MinimalOverlayView(
                 wordActivePaint.alpha = baseAlpha
                 val speed = typewriterSpeed.coerceIn(0.3f, 3.0f)
                 if (isWordSynced && activeLyricLine?.words?.isNotEmpty() == true) {
-                    for (line in currentLayoutLines) {
+                    for (lineIdx in 0 until currentLayoutLines.size) {
+                        val line = currentLayoutLines[lineIdx]
                         val drawY = line.baselineY - currentScrollY
-                        for (w in line.words) {
+                        for (wIdx in 0 until line.words.size) {
+                            val w = line.words[wIdx]
                             if (posMs < w.startMs) continue
                             if (posMs >= w.endMs) {
                                 canvas.drawText(w.word, w.x, drawY, wordActivePaint)
@@ -1187,40 +1302,51 @@ class MinimalOverlayView(
                                 val rawDuration = (w.endMs - w.startMs).coerceAtLeast(1L)
                                 val duration = (rawDuration / speed).toLong().coerceAtLeast(1L)
                                 val frac = ((posMs - w.startMs).toFloat() / duration).coerceIn(0f, 1f)
-                                val chars = (w.word.length * frac).toInt().coerceIn(1, w.word.length)
-                                val sub = w.word.substring(0, chars)
+                                val graphemesToReveal = (w.graphemeCount * frac).toInt().coerceIn(1, w.graphemeCount)
+                                val endIdx = w.graphemeBoundaries.getOrElse(graphemesToReveal - 1) { w.word.length }
+                                val sub = w.word.substring(0, endIdx)
                                 canvas.drawText(sub, w.x, drawY, wordActivePaint)
                             }
                         }
                     }
                 } else {
                     val lineStart = activeLyricLine?.timeMs ?: 0L
-                    val lineEnd = activeLyricLine?.endTimeMs ?: (lineStart + 3500L)
+                    val rawEnd = activeLyricLine?.endTimeMs ?: 0L
+                    val lineEnd = if (rawEnd > lineStart) {
+                        rawEnd
+                    } else if (nextLyricTimestampMs != null && nextLyricTimestampMs!! > lineStart) {
+                        nextLyricTimestampMs!!
+                    } else {
+                        lineStart + 3500L
+                    }
                     val baseDuration = (lineEnd - lineStart).coerceIn(1200L, 4000L)
                     val duration = (baseDuration / speed).toLong().coerceIn(600L, 12000L)
 
-                    val totalChars = currentLayoutLines.sumOf { l -> l.words.sumOf { it.word.length } }
-                    val revealedChars = if (posMs < lineStart) {
-                        if (lineStart == 0L) totalChars else 0
+                    val totalGraphemes = totalLayoutGraphemes.coerceAtLeast(1)
+                    val revealedGraphemes = if (posMs < lineStart) {
+                        if (lineStart == 0L) totalGraphemes else 0
                     } else if (posMs >= lineStart + duration) {
-                        totalChars
+                        totalGraphemes
                     } else {
                         val frac = ((posMs - lineStart).toFloat() / duration).coerceIn(0f, 1f)
-                        (totalChars * frac).toInt().coerceIn(0, totalChars)
+                        (totalGraphemes * frac).toInt().coerceIn(0, totalGraphemes)
                     }
 
-                    var charsRemaining = revealedChars
-                    for (line in currentLayoutLines) {
+                    var graphemesRemaining = revealedGraphemes
+                    for (lineIdx in 0 until currentLayoutLines.size) {
+                        val line = currentLayoutLines[lineIdx]
                         val drawY = line.baselineY - currentScrollY
-                        for (w in line.words) {
-                            if (charsRemaining <= 0) break
-                            if (charsRemaining >= w.word.length) {
+                        for (wIdx in 0 until line.words.size) {
+                            val w = line.words[wIdx]
+                            if (graphemesRemaining <= 0) break
+                            if (graphemesRemaining >= w.graphemeCount) {
                                 canvas.drawText(w.word, w.x, drawY, wordActivePaint)
-                                charsRemaining -= w.word.length
+                                graphemesRemaining -= w.graphemeCount
                             } else {
-                                val sub = w.word.substring(0, charsRemaining)
+                                val endIdx = w.graphemeBoundaries.getOrElse(graphemesRemaining - 1) { w.word.length }
+                                val sub = w.word.substring(0, endIdx)
                                 canvas.drawText(sub, w.x, drawY, wordActivePaint)
-                                charsRemaining = 0
+                                graphemesRemaining = 0
                             }
                         }
                     }
@@ -1369,5 +1495,20 @@ class MinimalOverlayView(
             }
         }
         return super.onTouchEvent(event)
+    }
+
+    companion object {
+        fun computeGraphemeBoundaries(text: String): IntArray {
+            if (text.isEmpty()) return intArrayOf()
+            val it = java.text.BreakIterator.getCharacterInstance()
+            it.setText(text)
+            val boundaries = mutableListOf<Int>()
+            var end = it.next()
+            while (end != java.text.BreakIterator.DONE) {
+                boundaries.add(end)
+                end = it.next()
+            }
+            return boundaries.toIntArray()
+        }
     }
 }
