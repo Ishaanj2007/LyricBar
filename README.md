@@ -29,9 +29,9 @@ AI helped write the code, but I'm still the developer maintaining the project. B
 
 ## Screenshots 📸
 
-| Synchronized Lyrics | Overlay Animation Engine | Material You & Typography | Playback History |
-| :---: | :---: | :---: | :---: |
-| <img src="Screenshots/LyricBar_ss.png" width="200" alt="Synchronized Lyrics View" /> | <img src="Screenshots/LyricBar_ss2.png" width="200" alt="Overlay Animation Engine" /> | <img src="Screenshots/LyricBar_ss3.png" width="200" alt="Material You & Typography" /> | <img src="Screenshots/LyricBar_ss4.png" width="200" alt="Playback History Log" /> |
+| Now Playing | Synchronized Lyrics | Overlay Controls | Playback History | Settings & Themes |
+| :---: | :---: | :---: | :---: | :---: |
+| <img src="Screenshots/Screenshot1_LyricBar.png" width="190" alt="Now Playing Screen" /> | <img src="Screenshots/Screenshot2_LyricBar.png" width="190" alt="Synchronized Lyrics View" /> | <img src="Screenshots/Screenshot3_LyricBar.png" width="190" alt="Overlay Controls" /> | <img src="Screenshots/Screenshot4_LyricBar.png" width="190" alt="Playback History Log" /> | <img src="Screenshots/Screenshot5_LyricBar.png" width="190" alt="Settings & Themes" /> |
 
 ## Features ✨
 
@@ -147,10 +147,11 @@ To run unit tests:
 ```text
 .
 ├── Screenshots/
-│   ├── LyricBar_ss.png
-│   ├── LyricBar_ss2.png
-│   ├── LyricBar_ss3.png
-│   ├── LyricBar_ss4.png
+│   ├── Screenshot1_LyricBar.png
+│   ├── Screenshot2_LyricBar.png
+│   ├── Screenshot3_LyricBar.png
+│   ├── Screenshot4_LyricBar.png
+│   ├── Screenshot5_LyricBar.png
 │   └── lyricbarlogo.png
 ├── app/
 │   ├── build.gradle.kts
