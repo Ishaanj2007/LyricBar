@@ -72,33 +72,6 @@ private fun rememberHistoryArtworkBitmap(uriString: String?, key: String): Bitma
 }
 
 
-private enum class HistoryTimeGroup(val title: String, val order: Int) {
-    TODAY("Today", 0),
-    YESTERDAY("Yesterday", 1),
-    THIS_WEEK("Earlier This Week", 2),
-    THIS_MONTH("Earlier This Month", 3),
-    OLDER("Older", 4)
-}
-
-private fun getHistoryGroup(timestamp: Long): HistoryTimeGroup {
-    val now = Calendar.getInstance()
-    val itemCal = Calendar.getInstance().apply { timeInMillis = timestamp }
-
-    val isSameYear = now.get(Calendar.YEAR) == itemCal.get(Calendar.YEAR)
-    val dayDiff = if (isSameYear) {
-        now.get(Calendar.DAY_OF_YEAR) - itemCal.get(Calendar.DAY_OF_YEAR)
-    } else {
-        (now.get(Calendar.YEAR) - itemCal.get(Calendar.YEAR)) * 365 + now.get(Calendar.DAY_OF_YEAR) - itemCal.get(Calendar.DAY_OF_YEAR)
-    }
-
-    return when {
-        isSameYear && dayDiff == 0 -> HistoryTimeGroup.TODAY
-        isSameYear && dayDiff == 1 -> HistoryTimeGroup.YESTERDAY
-        isSameYear && dayDiff in 2..6 -> HistoryTimeGroup.THIS_WEEK
-        isSameYear && dayDiff in 7..30 -> HistoryTimeGroup.THIS_MONTH
-        else -> HistoryTimeGroup.OLDER
-    }
-}
 
 @Composable
 fun HistoryScreen(
@@ -421,92 +394,40 @@ fun HistoryScreen(
                         }
                     }
                 } else {
-                    // Grouped Cohesive History Sections
+                    // Grouped Virtualized History List
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                         contentPadding = PaddingValues(top = 4.dp, bottom = 128.dp)
                     ) {
                         groupedHistory.forEach { (group, entries) ->
-                            item(key = "section_${group.name}") {
+                            item(key = "header_${group.name}", contentType = "header") {
+                                HistoryGroupHeader(
+                                    group = group,
+                                    count = entries.size,
+                                    modifier = Modifier.padding(top = 10.dp, bottom = 2.dp, start = 4.dp, end = 4.dp)
+                                )
+                            }
+
+                            items(
+                                items = entries,
+                                key = { "entry_${it.id}" },
+                                contentType = { "track" }
+                            ) { entry ->
                                 FrostedCard(
                                     modifier = Modifier.fillMaxWidth(),
-                                    shape = RoundedCornerShape(20.dp),
-                                    backgroundAlpha = 0.28f,
-                                    shadowElevation = 2.dp
+                                    shape = RoundedCornerShape(16.dp),
+                                    backgroundAlpha = 0.26f,
+                                    shadowElevation = 1.5.dp
                                 ) {
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(vertical = 12.dp)
-                                    ) {
-                                        // Section Header
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(horizontal = 16.dp, vertical = 4.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                            ) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .size(8.dp)
-                                                        .clip(CircleShape)
-                                                        .background(MaterialTheme.colorScheme.primary)
-                                                )
-                                                Text(
-                                                    text = group.title.uppercase(),
-                                                    style = MaterialTheme.typography.labelMedium,
-                                                    fontWeight = FontWeight.Bold,
-                                                    letterSpacing = 1.sp,
-                                                    color = MaterialTheme.colorScheme.primary
-                                                )
-                                            }
-
-                                            Surface(
-                                                shape = RoundedCornerShape(8.dp),
-                                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                                            ) {
-                                                Text(
-                                                    text = "${entries.size}",
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = MaterialTheme.colorScheme.primary,
-                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                                                )
-                                            }
-                                        }
-
-                                        Spacer(modifier = Modifier.height(6.dp))
-                                        HorizontalDivider(
-                                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f),
-                                            thickness = 0.5.dp
-                                        )
-
-                                        // Section Items
-                                        entries.forEachIndexed { index, entry ->
-                                            HistoryTrackRow(
-                                                entry = entry,
-                                                group = group,
-                                                timeFormat = timeFormat,
-                                                dayTimeFormat = dayTimeFormat,
-                                                fullDateFormat = fullDateFormat,
-                                                onDeleteClick = { itemToDelete = entry }
-                                            )
-
-                                            if (index < entries.lastIndex) {
-                                                HorizontalDivider(
-                                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.10f),
-                                                    thickness = 0.5.dp,
-                                                    modifier = Modifier.padding(start = 74.dp, end = 16.dp)
-                                                )
-                                            }
-                                        }
-                                    }
+                                    HistoryTrackRow(
+                                        entry = entry,
+                                        group = group,
+                                        timeFormat = timeFormat,
+                                        dayTimeFormat = dayTimeFormat,
+                                        fullDateFormat = fullDateFormat,
+                                        onDeleteClick = { itemToDelete = entry }
+                                    )
                                 }
                             }
                         }
@@ -732,3 +653,49 @@ private fun HistoryTrackRow(
         }
     }
 }
+
+@Composable
+private fun HistoryGroupHeader(
+    group: HistoryTimeGroup,
+    count: Int,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary)
+            )
+            Text(
+                text = group.title.uppercase(),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+
+        Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+        ) {
+            Text(
+                text = "$count",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+            )
+        }
+    }
+}
+

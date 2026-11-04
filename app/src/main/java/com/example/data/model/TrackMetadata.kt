@@ -13,7 +13,14 @@ data class TrackMetadata(
     val albumArtBitmap: android.graphics.Bitmap? = null
 ) {
     val key: String
-        get() = "${cleanString(artist)} - ${cleanString(title)}".trim().lowercase()
+        get() {
+            val cArtist = cleanString(artist).ifBlank { artist.trim().lowercase() }.ifBlank { "unknown artist" }
+            val cTitle = cleanString(title).ifBlank { title.trim().lowercase() }.ifBlank { "unknown title" }
+            return "$cArtist - $cTitle".trim().lowercase()
+        }
+
+    val isValidTrack: Boolean
+        get() = title.isNotBlank() && key.isNotBlank() && key != "unknown artist - unknown title"
 
     companion object {
         fun cleanString(str: String): String {

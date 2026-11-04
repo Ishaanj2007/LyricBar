@@ -171,15 +171,19 @@ class CompositeLyricsRepository internal constructor(
         track: TrackMetadata,
         status: String = "Played"
     ) = withContext(Dispatchers.IO) {
+        val title = track.title.trim()
+        val artist = track.artist.trim()
         val key = track.key
-        if (key.isBlank()) return@withContext
+        if (title.isBlank() || key.isBlank() || key == "unknown artist - unknown title") {
+            return@withContext
+        }
         try {
             historyDao.insertHistory(
                 SongHistoryEntity(
                     key = key,
-                    title = track.title,
-                    artist = track.artist,
-                    albumArtUri = track.albumArtUri,
+                    title = title,
+                    artist = if (artist.isBlank()) "Unknown Artist" else artist,
+                    albumArtUri = track.albumArtUri?.trim()?.takeIf { it.isNotBlank() },
                     status = status,
                     playedAt = System.currentTimeMillis()
                 )

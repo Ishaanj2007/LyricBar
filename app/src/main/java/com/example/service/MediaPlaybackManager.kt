@@ -164,22 +164,37 @@ class MediaPlaybackManager private constructor(private val context: Context) {
     private fun updateFromMetadata(metadata: MediaMetadata?, force: Boolean = false) {
         if (metadata == null) return
 
-        val title = metadata.getString(MediaMetadata.METADATA_KEY_TITLE)
+        val rawTitle = metadata.getString(MediaMetadata.METADATA_KEY_TITLE)
+            ?.trim()?.takeIf { it.isNotBlank() }
             ?: metadata.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE)
-            ?: return
+            ?.trim()?.takeIf { it.isNotBlank() }
 
-        val artist = metadata.getString(MediaMetadata.METADATA_KEY_ARTIST)
+        // If title is missing or blank in this update, reject it to avoid overwriting valid playing tracks
+        // or inserting empty/corrupted history records
+        if (rawTitle.isNullOrBlank()) {
+            return
+        }
+
+        val title = rawTitle
+
+        val rawArtist = metadata.getString(MediaMetadata.METADATA_KEY_ARTIST)
+            ?.trim()?.takeIf { it.isNotBlank() }
             ?: metadata.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
+            ?.trim()?.takeIf { it.isNotBlank() }
             ?: metadata.getString(MediaMetadata.METADATA_KEY_AUTHOR)
+            ?.trim()?.takeIf { it.isNotBlank() }
             ?: "Unknown Artist"
+        val artist = rawArtist
 
-        val album = metadata.getString(MediaMetadata.METADATA_KEY_ALBUM) ?: ""
+        val album = (metadata.getString(MediaMetadata.METADATA_KEY_ALBUM)
+            ?: metadata.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE)
+            ?: "").trim()
         val durationMs = metadata.getLong(MediaMetadata.METADATA_KEY_DURATION)
         val durationSec = if (durationMs > 0) (durationMs / 1000).toInt() else 0
-        val artUri = metadata.getString(MediaMetadata.METADATA_KEY_ART_URI)
+        val artUri = (metadata.getString(MediaMetadata.METADATA_KEY_ART_URI)
             ?: metadata.getString(MediaMetadata.METADATA_KEY_ALBUM_ART_URI)
             ?: metadata.getString(MediaMetadata.METADATA_KEY_DISPLAY_ICON_URI)
-            ?: metadata.description?.iconUri?.toString()
+            ?: metadata.description?.iconUri?.toString())?.trim()?.takeIf { it.isNotBlank() }
 
         val artBitmap = try {
             metadata.getBitmap(MediaMetadata.METADATA_KEY_ART)
@@ -324,7 +339,7 @@ class MediaPlaybackManager private constructor(private val context: Context) {
     private var lastRecordedTrackKey: String? = null
 
     private fun recordSessionIfPlaying(track: TrackMetadata?) {
-        if (track == null || track.key.isBlank()) return
+        if (track == null || !track.isValidTrack) return
         if (!_playbackState.value.isPlaying) return
 
         if (lastRecordedTrackKey == track.key) {
