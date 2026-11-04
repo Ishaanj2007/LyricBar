@@ -15,6 +15,11 @@ import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -48,8 +53,8 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val context = LocalContext.current
-            val prefs by app.preferencesRepository.userPreferencesFlow.collectAsState(
-                initial = UserPreferences()
+            val prefs by app.preferencesRepository.userPreferencesFlow.collectAsStateWithLifecycle(
+                initialValue = UserPreferences()
             )
 
             MyApplicationTheme(
@@ -59,14 +64,23 @@ class MainActivity : ComponentActivity() {
                 fontOption = prefs.selectedFont
             ) {
 
-                var hasCheckedPermissions by remember { mutableStateOf(false) }
-                var showPermissionsOnboarding by remember { mutableStateOf(false) }
+                var hasCheckedPermissions by rememberSaveable { mutableStateOf(false) }
+                var showPermissionsOnboarding by rememberSaveable { mutableStateOf(false) }
 
-                LaunchedEffect(Unit) {
-                    val overlayGranted = Settings.canDrawOverlays(context)
-                    val listenerGranted = checkNotificationListenerGranted(context)
-                    showPermissionsOnboarding = !overlayGranted || !listenerGranted
-                    hasCheckedPermissions = true
+                val lifecycleOwner = LocalLifecycleOwner.current
+                DisposableEffect(lifecycleOwner) {
+                    val observer = LifecycleEventObserver { _, event ->
+                        if (event == Lifecycle.Event.ON_RESUME) {
+                            val overlayGranted = Settings.canDrawOverlays(context)
+                            val listenerGranted = checkNotificationListenerGranted(context)
+                            showPermissionsOnboarding = !overlayGranted || !listenerGranted
+                            hasCheckedPermissions = true
+                        }
+                    }
+                    lifecycleOwner.lifecycle.addObserver(observer)
+                    onDispose {
+                        lifecycleOwner.lifecycle.removeObserver(observer)
+                    }
                 }
 
                 if (!hasCheckedPermissions) {
@@ -96,9 +110,9 @@ fun MainAppScaffold(
     playbackManager: com.example.service.MediaPlaybackManager,
     userPreferences: UserPreferences
 ) {
-    var currentTab by remember { mutableStateOf(AppTab.NOW_PLAYING) }
+    var currentTab by rememberSaveable { mutableStateOf(AppTab.NOW_PLAYING) }
     val navHazeState = remember { HazeState() }
-    val playbackState by playbackManager.playbackState.collectAsState()
+    val playbackState by playbackManager.playbackState.collectAsStateWithLifecycle()
     val artworkBitmap = com.example.ui.components.rememberArtworkBitmap(playbackState.track)
 
     // Intercept back button when on sub-tabs to return to Now Playing

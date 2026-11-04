@@ -37,12 +37,18 @@ fun PermissionsScreen(
     var isOverlayGranted by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
     var isListenerGranted by remember { mutableStateOf(checkNotificationListenerGranted(context)) }
 
-    // Re-check permissions when screen is visible
-    LaunchedEffect(Unit) {
-        while (true) {
-            isOverlayGranted = Settings.canDrawOverlays(context)
-            isListenerGranted = checkNotificationListenerGranted(context)
-            kotlinx.coroutines.delay(1000)
+    // Lifecycle-aware permission refresh: re-checks instantly on ON_RESUME when returning from Android Settings
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                isOverlayGranted = Settings.canDrawOverlays(context)
+                isListenerGranted = checkNotificationListenerGranted(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
         }
     }
 

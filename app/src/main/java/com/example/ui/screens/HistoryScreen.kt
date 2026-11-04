@@ -20,6 +20,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -80,14 +82,14 @@ fun HistoryScreen(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val repository = remember { CompositeLyricsRepository.getInstance(context) }
-    val historyList by repository.songHistory.collectAsState(initial = emptyList())
+    val historyList by repository.songHistory.collectAsStateWithLifecycle(initialValue = emptyList())
 
     val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     val dayTimeFormat = remember { SimpleDateFormat("EEE, HH:mm", Locale.getDefault()) }
     val fullDateFormat = remember { SimpleDateFormat("MMM d, HH:mm", Locale.getDefault()) }
 
-    var searchQuery by remember { mutableStateOf("") }
-    var isSearchVisible by remember { mutableStateOf(false) }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    var isSearchVisible by rememberSaveable { mutableStateOf(false) }
     var showClearConfirmationDialog by remember { mutableStateOf(false) }
     var itemToDelete by remember { mutableStateOf<SongHistoryEntity?>(null) }
 

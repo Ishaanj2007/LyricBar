@@ -29,6 +29,7 @@ import androidx.compose.material3.*
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -62,10 +63,10 @@ fun LyricsScreen(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
-    val playbackState by playbackManager.playbackState.collectAsState()
-    val currentLyrics by playbackManager.currentLyrics.collectAsState()
-    val trackOffset by playbackManager.trackOffsetMs.collectAsState()
-    val isLoading by playbackManager.isLoadingLyrics.collectAsState()
+    val playbackState by playbackManager.playbackState.collectAsStateWithLifecycle()
+    val currentLyrics by playbackManager.currentLyrics.collectAsStateWithLifecycle()
+    val trackOffset by playbackManager.trackOffsetMs.collectAsStateWithLifecycle()
+    val isLoading by playbackManager.isLoadingLyrics.collectAsStateWithLifecycle()
 
     val listState = rememberLazyListState()
     var showManualSearchDialog by remember { mutableStateOf(false) }
@@ -123,11 +124,11 @@ fun LyricsScreen(
     }
 
     // Use MediaPlaybackManager's activeLyricIndex as the single source of truth for line synchronization
-    val activeIndex by playbackManager.activeLyricIndex.collectAsState()
+    val activeIndex by playbackManager.activeLyricIndex.collectAsStateWithLifecycle()
 
     // Manual scroll tracking and automatic resumption
-    var userScrolledAway by remember { mutableStateOf(false) }
-    var previousActiveIndex by remember { mutableIntStateOf(-1) }
+    var userScrolledAway by rememberSaveable { mutableStateOf(false) }
+    var previousActiveIndex by rememberSaveable { mutableIntStateOf(-1) }
 
     LaunchedEffect(listState.isScrollInProgress) {
         if (listState.isScrollInProgress) {

@@ -62,6 +62,8 @@ fun SettingsScreen(
     val coroutineScope = rememberCoroutineScope()
     var showCacheClearedToast by remember { mutableStateOf(false) }
     var isFontListExpanded by rememberSaveable { mutableStateOf(false) }
+    val updateManager = remember { com.example.data.updater.UpdateManager.getInstance(context) }
+    var showUpdateDialog by rememberSaveable { mutableStateOf(false) }
 
     val allSectionKeys = remember {
         listOf("overlay", "animation", "size_align", "position", "theme", "typography", "data", "about")
@@ -2072,10 +2074,10 @@ fun SettingsScreen(
 
                 OutlinedButton(
                     onClick = {
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("${DeveloperConfig.SOURCE_CODE_URL}/releases"))
-                        context.startActivity(intent)
+                        showUpdateDialog = true
+                        updateManager.checkForUpdates(isUserInitiated = true)
                     },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().testTag("check_for_updates_button"),
                     shape = RoundedCornerShape(10.dp)
                 ) {
                     Icon(
@@ -2085,13 +2087,20 @@ fun SettingsScreen(
                         modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Check for Updates (GitHub Releases)", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                    Text("Check for Updates", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
                 }
             }
         }
 
                 Spacer(modifier = Modifier.height(32.dp))
             }
+        }
+
+        if (showUpdateDialog) {
+            UpdateDialog(
+                updateManager = updateManager,
+                onDismiss = { showUpdateDialog = false }
+            )
         }
     }
 }

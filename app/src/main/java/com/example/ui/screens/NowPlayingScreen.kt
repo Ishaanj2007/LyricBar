@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.preferences.UserPreferences
 import com.example.service.MediaPlaybackManager
 import com.example.service.OverlayService
@@ -71,12 +72,12 @@ fun NowPlayingScreen(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    val state by playbackManager.playbackState.collectAsState()
-    val activeLyric by playbackManager.activeLyricLine.collectAsState()
-    val activeLyricObj by playbackManager.activeLyricObject.collectAsState()
-    val currentLyrics by playbackManager.currentLyrics.collectAsState()
-    val isLoadingLyrics by playbackManager.isLoadingLyrics.collectAsState()
-    val trackOffset by playbackManager.trackOffsetMs.collectAsState()
+    val state by playbackManager.playbackState.collectAsStateWithLifecycle()
+    val activeLyric by playbackManager.activeLyricLine.collectAsStateWithLifecycle()
+    val activeLyricObj by playbackManager.activeLyricObject.collectAsStateWithLifecycle()
+    val currentLyrics by playbackManager.currentLyrics.collectAsStateWithLifecycle()
+    val isLoadingLyrics by playbackManager.isLoadingLyrics.collectAsStateWithLifecycle()
+    val trackOffset by playbackManager.trackOffsetMs.collectAsStateWithLifecycle()
     val track = state.track
 
     val activeIdx = remember(activeLyricObj, currentLyrics) {
