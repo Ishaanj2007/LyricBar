@@ -547,8 +547,8 @@ class OverlayService : Service() {
         const val FADE_IN_DURATION_MS = 1000L
         const val FADE_OUT_DURATION_MS = 1000L
 
-        const val ACTION_TOGGLE_DRAG_MODE = "com.aistudio.lyricbar.action.TOGGLE_DRAG_MODE"
-        const val ACTION_STOP_OVERLAY = "com.aistudio.lyricbar.action.STOP_OVERLAY"
+        const val ACTION_TOGGLE_DRAG_MODE = "com.example.lyricbar.action.TOGGLE_DRAG_MODE"
+        const val ACTION_STOP_OVERLAY = "com.example.lyricbar.action.STOP_OVERLAY"
 
         fun start(context: Context) {
             val intent = Intent(context, OverlayService::class.java)

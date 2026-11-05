@@ -24,10 +24,11 @@ A clear and concise description of what you expected to happen.
 **Screenshots**
 If applicable, add screenshots to help explain your problem.
 
-**Smartphone (please complete the following information):**
- - Device: [e.g. iPhone6]
- - OS: [e.g. iOS8.1]
- - Version [e.g. 22]
+**Device (please complete the following information):**
+ - Device: [e.g. Google Pixel 8, Samsung Galaxy S23]
+ - Android Version: [e.g. Android 14]
+ - LyricBar Version: [e.g. 2.0.0]
+ - Music Player: [e.g. Spotify, YouTube Music, Apple Music]
 
 **Additional context**
 Add any other context about the problem here.
