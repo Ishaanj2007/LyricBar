@@ -30,6 +30,8 @@ class UpdaterComprehensiveTest {
 
         // Major increments
         assertTrue("2.0.0 must be newer than 1.9.9", VersionComparator.isNewer("2.0.0", "1.9.9"))
+        assertTrue("2.1.0 must be newer than 2.0.0", VersionComparator.isNewer("2.1.0", "2.0.0"))
+        assertTrue("v2.1.0 must be newer than 2.0.0", VersionComparator.isNewer("v2.1.0", "2.0.0"))
 
         // Older versions
         assertFalse("1.8.9 is not newer than 1.9.0", VersionComparator.isNewer("1.8.9", "1.9.0"))

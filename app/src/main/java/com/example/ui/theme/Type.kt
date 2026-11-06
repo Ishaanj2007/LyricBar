@@ -47,76 +47,150 @@ fun getFontFamily(fontOption: FontOption): FontFamily {
 fun getLyricsFontFamily(fontOption: FontOption): FontFamily = getFontFamily(fontOption)
 
 /**
- * Standard app UI typography — kept stable so app buttons, tabs, titles and settings
- * maintain consistent system styling while lyrics bar customizes independently.
+ * Dedicated LyricBar typography system providing clear visual hierarchy
+ * between synchronized lyrics and standard application UI controls.
+ */
+object LyricBarTypography {
+    fun activeLyricStyle(
+        fontOption: FontOption,
+        fontSize: androidx.compose.ui.unit.TextUnit = 18.sp,
+        fontWeight: FontWeight = FontWeight.Bold,
+        color: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Unspecified
+    ): TextStyle = TextStyle(
+        fontFamily = getFontFamily(fontOption),
+        fontWeight = fontWeight,
+        fontSize = fontSize,
+        lineHeight = (fontSize.value * 1.32f).sp,
+        letterSpacing = 0.15.sp,
+        color = color
+    )
+
+    fun inactiveLyricStyle(
+        fontOption: FontOption,
+        fontSize: androidx.compose.ui.unit.TextUnit = 16.sp,
+        fontWeight: FontWeight = FontWeight.SemiBold,
+        color: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Unspecified
+    ): TextStyle = TextStyle(
+        fontFamily = getFontFamily(fontOption),
+        fontWeight = fontWeight,
+        fontSize = fontSize,
+        lineHeight = (fontSize.value * 1.30f).sp,
+        letterSpacing = 0.10.sp,
+        color = color
+    )
+
+    fun contextualLyricStyle(
+        fontOption: FontOption,
+        fontSize: androidx.compose.ui.unit.TextUnit = 13.sp,
+        fontWeight: FontWeight = FontWeight.Normal,
+        color: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Unspecified
+    ): TextStyle = TextStyle(
+        fontFamily = getFontFamily(fontOption),
+        fontWeight = fontWeight,
+        fontSize = fontSize,
+        lineHeight = (fontSize.value * 1.28f).sp,
+        letterSpacing = 0.20.sp,
+        color = color
+    )
+}
+
+/**
+ * Standard app UI typography — kept clean, consistent, and legible across all screens
+ * while the lyrics view customizes independently according to user preference.
  */
 val AppStandardTypography = Typography(
     displayLarge = TextStyle(
         fontFamily = InterFontFamily,
         fontWeight = FontWeight.Bold,
-        fontSize = 40.sp,
-        lineHeight = 48.sp
+        fontSize = 36.sp,
+        lineHeight = 44.sp,
+        letterSpacing = (-0.25).sp
     ),
     headlineLarge = TextStyle(
         fontFamily = InterFontFamily,
         fontWeight = FontWeight.Bold,
-        fontSize = 32.sp,
-        lineHeight = 40.sp
+        fontSize = 30.sp,
+        lineHeight = 38.sp,
+        letterSpacing = 0.sp
     ),
     headlineMedium = TextStyle(
         fontFamily = InterFontFamily,
         fontWeight = FontWeight.Bold,
-        fontSize = 26.sp,
-        lineHeight = 34.sp
+        fontSize = 24.sp,
+        lineHeight = 32.sp,
+        letterSpacing = 0.sp
     ),
     headlineSmall = TextStyle(
         fontFamily = InterFontFamily,
         fontWeight = FontWeight.Bold,
-        fontSize = 22.sp,
-        lineHeight = 30.sp
+        fontSize = 20.sp,
+        lineHeight = 28.sp,
+        letterSpacing = 0.1.sp
     ),
     titleLarge = TextStyle(
         fontFamily = InterFontFamily,
         fontWeight = FontWeight.SemiBold,
-        fontSize = 20.sp,
-        lineHeight = 28.sp
+        fontSize = 18.sp,
+        lineHeight = 26.sp,
+        letterSpacing = 0.15.sp
     ),
     titleMedium = TextStyle(
         fontFamily = InterFontFamily,
-        fontWeight = FontWeight.Medium,
+        fontWeight = FontWeight.SemiBold,
         fontSize = 16.sp,
-        lineHeight = 24.sp
+        lineHeight = 24.sp,
+        letterSpacing = 0.15.sp
+    ),
+    titleSmall = TextStyle(
+        fontFamily = InterFontFamily,
+        fontWeight = FontWeight.Medium,
+        fontSize = 14.sp,
+        lineHeight = 20.sp,
+        letterSpacing = 0.1.sp
     ),
     bodyLarge = TextStyle(
         fontFamily = InterFontFamily,
         fontWeight = FontWeight.Normal,
         fontSize = 16.sp,
-        lineHeight = 24.sp
+        lineHeight = 24.sp,
+        letterSpacing = 0.25.sp
     ),
     bodyMedium = TextStyle(
         fontFamily = InterFontFamily,
         fontWeight = FontWeight.Normal,
         fontSize = 14.sp,
-        lineHeight = 20.sp
+        lineHeight = 20.sp,
+        letterSpacing = 0.2.sp
+    ),
+    bodySmall = TextStyle(
+        fontFamily = InterFontFamily,
+        fontWeight = FontWeight.Normal,
+        fontSize = 12.sp,
+        lineHeight = 16.sp,
+        letterSpacing = 0.3.sp
     ),
     labelLarge = TextStyle(
         fontFamily = InterFontFamily,
         fontWeight = FontWeight.SemiBold,
         fontSize = 14.sp,
-        lineHeight = 20.sp
+        lineHeight = 20.sp,
+        letterSpacing = 0.1.sp
     ),
     labelMedium = TextStyle(
         fontFamily = InterFontFamily,
         fontWeight = FontWeight.Medium,
         fontSize = 12.sp,
-        lineHeight = 16.sp
+        lineHeight = 16.sp,
+        letterSpacing = 0.4.sp
     ),
     labelSmall = TextStyle(
         fontFamily = InterFontFamily,
         fontWeight = FontWeight.Medium,
         fontSize = 10.sp,
-        lineHeight = 14.sp
+        lineHeight = 14.sp,
+        letterSpacing = 0.5.sp
     )
 )
 
 val Typography = AppStandardTypography
+

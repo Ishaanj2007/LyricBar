@@ -34,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -567,13 +568,27 @@ fun LyricsScreen(
                                     }
                                     val alpha by animateFloatAsState(
                                         targetValue = targetAlpha,
-                                        animationSpec = tween(durationMillis = 180),
+                                        animationSpec = tween(durationMillis = 200),
                                         label = "lyric_alpha"
+                                    )
+                                    val lyricTextColor by animateColorAsState(
+                                        targetValue = if (isActive) onSurfaceColor else onSurfaceVariantColor.copy(alpha = alpha),
+                                        animationSpec = tween(durationMillis = 220),
+                                        label = "lyric_text_color"
+                                    )
+                                    val lineScale by animateFloatAsState(
+                                        targetValue = if (isActive) 1.02f else 1.0f,
+                                        animationSpec = tween(durationMillis = 200),
+                                        label = "lyric_line_scale"
                                     )
 
                                     val lineModifier = Modifier
                                         .fillMaxWidth()
                                         .padding(vertical = if (isActive) 5.dp else 3.dp)
+                                        .graphicsLayer {
+                                            scaleX = lineScale
+                                            scaleY = lineScale
+                                        }
                                         .clickable {
                                             if (lyrics.isSynced) {
                                                 playbackManager.seekTo(line.timeMs)
@@ -635,7 +650,7 @@ fun LyricsScreen(
                                                         text = line.text,
                                                         fontSize = if (isActive) (if (userPreferences.appleMusicStyle) 26.sp else 23.sp) else 18.sp,
                                                         fontWeight = if (isActive) FontWeight.ExtraBold else FontWeight.Bold,
-                                                        color = if (isActive) onSurfaceColor else onSurfaceVariantColor.copy(alpha = alpha),
+                                                        color = lyricTextColor,
                                                         lineHeight = if (isActive) 34.sp else 26.sp,
                                                         fontFamily = com.example.ui.theme.getFontFamily(userPreferences.selectedFont),
                                                         textAlign = inAppTextAlign,

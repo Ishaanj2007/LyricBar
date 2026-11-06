@@ -56,5 +56,19 @@ class TrackArtworkTest {
         org.junit.Assert.assertNotEquals(keyFull, keyThumb)
         org.junit.Assert.assertNotEquals(keyFull, keyDifferentUri)
     }
+
+    @Test
+    fun testArtworkGlowCacheKeyGeneration() {
+        val key = com.example.ui.components.buildArtworkCacheKey("artist - title", "content://art/1", "glow_240_12345")
+        assertEquals("artist - title::content://art/1::glow_240_12345", key)
+    }
+
+    @Test
+    fun testExtractArtworkGlowPaletteNullFallback() {
+        val fallback = androidx.compose.ui.graphics.Color(0xFFE84393)
+        val palette = com.example.ui.components.extractArtworkGlowPalette(null, fallback)
+        assertEquals(fallback, palette.primary)
+        assertEquals(fallback, palette.secondary)
+    }
 }
 

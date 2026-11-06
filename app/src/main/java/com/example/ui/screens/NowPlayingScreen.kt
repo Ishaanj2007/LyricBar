@@ -6,9 +6,17 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.Settings
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -33,6 +41,9 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -53,11 +64,15 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.preferences.UserPreferences
 import com.example.service.MediaPlaybackManager
 import com.example.service.OverlayService
+import com.example.ui.components.ArtworkGlowPalette
 import com.example.ui.components.CinematicArtworkBackground
 import com.example.ui.components.FrostedCard
 import com.example.ui.components.LocalHazeState
+import com.example.ui.components.extractArtworkGlowPalette
 import com.example.ui.components.extractDominantColor
 import com.example.ui.components.rememberArtworkBitmap
+import com.example.ui.components.rememberArtworkGlowBitmap
+import com.example.ui.theme.LyricBarTypography
 import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -114,14 +129,15 @@ fun NowPlayingScreen(
     }
 
     val primaryColor = MaterialTheme.colorScheme.primary
-    val ambientGlowColor = remember(rawArtworkBitmap, track?.key, primaryColor) {
+    val glowPalette = remember(rawArtworkBitmap, track?.key, primaryColor) {
         if (rawArtworkBitmap != null && !rawArtworkBitmap.isRecycled) {
-            val extracted = extractDominantColor(rawArtworkBitmap)
-            if (extracted.isSpecified) extracted else primaryColor
+            extractArtworkGlowPalette(rawArtworkBitmap, primaryColor)
         } else {
-            primaryColor
+            ArtworkGlowPalette(primaryColor, primaryColor, primaryColor)
         }
     }
+    val ambientGlowColor = glowPalette.primary
+    val artworkGlowBitmap = rememberArtworkGlowBitmap(track, rawArtworkBitmap)
 
     var isDelayExpanded by rememberSaveable { mutableStateOf(false) }
     var pendingOverlayEnable by rememberSaveable { mutableStateOf(false) }
@@ -324,48 +340,70 @@ fun NowPlayingScreen(
 
                     Spacer(modifier = Modifier.height(14.dp))
 
-                    // Foreground Album Artwork with smooth radial ambient bloom halo
-                    // Uses a mathematically circular radialGradient drawBehind with zero rectangular edges
+                    // Foreground Album Artwork with organic ambient glow radiating naturally from the artwork
+                    val artworkShape = RoundedCornerShape(26.dp)
                     Box(
                         modifier = Modifier
                             .fillMaxWidth(0.72f)
                             .widthIn(max = 280.dp)
-                            .aspectRatio(1f)
-                            .drawBehind {
-                                if (ambientGlowColor.isSpecified) {
-                                    drawCircle(
-                                        brush = Brush.radialGradient(
-                                            colors = listOf(
-                                                ambientGlowColor.copy(alpha = 0.32f),
-                                                ambientGlowColor.copy(alpha = 0.15f),
-                                                ambientGlowColor.copy(alpha = 0.04f),
-                                                Color.Transparent
-                                            ),
-                                            center = center,
-                                            radius = size.maxDimension * 0.78f
-                                        ),
-                                        radius = size.maxDimension * 0.78f,
-                                        center = center
-                                    )
-                                }
-                            },
+                            .aspectRatio(1f),
                         contentAlignment = Alignment.Center
                     ) {
-                        // Sharp foreground album artwork container
+                        // 1. Organic Ambient Glow Layer: Radiates outward beyond the artwork footprint
+                        // Seamlessly illuminates the surrounding space with zero rectangular patches or sharp corners
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .shadow(
-                                    elevation = 12.dp,
-                                    shape = RoundedCornerShape(26.dp),
+                                .graphicsLayer {
+                                    scaleX = 1.34f
+                                    scaleY = 1.34f
                                     clip = false
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            // Luminous atmospheric radial glow using the extracted artwork palette
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .drawBehind {
+                                        drawCircle(
+                                            brush = Brush.radialGradient(
+                                                colors = listOf(
+                                                    glowPalette.primary.copy(alpha = 0.52f),
+                                                    glowPalette.secondary.copy(alpha = 0.28f),
+                                                    glowPalette.primary.copy(alpha = 0.08f),
+                                                    Color.Transparent
+                                                ),
+                                                center = center,
+                                                radius = size.width * 0.46f
+                                            ),
+                                            radius = size.width * 0.46f,
+                                            center = center
+                                        )
+                                    }
+                            )
+
+                            // Optical artwork silhouette glow (actual artwork colors pre-rounded and diffused seamlessly into transparent padding)
+                            if (artworkGlowBitmap != null) {
+                                Image(
+                                    bitmap = artworkGlowBitmap.asImageBitmap(),
+                                    contentDescription = null,
+                                    contentScale = ContentScale.FillBounds,
+                                    alpha = 0.85f,
+                                    modifier = Modifier.fillMaxSize()
                                 )
-                                .clip(RoundedCornerShape(26.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.40f))
+                            }
+                        }
+
+                        // 2. Sharp foreground album artwork container (floating over the ambient glow)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(artworkShape)
                                 .border(
                                     width = 1.dp,
-                                    color = Color.White.copy(alpha = 0.12f),
-                                    shape = RoundedCornerShape(26.dp)
+                                    color = Color.White.copy(alpha = 0.14f),
+                                    shape = artworkShape
                                 ),
                             contentAlignment = Alignment.Center
                         ) {
@@ -387,7 +425,9 @@ fun NowPlayingScreen(
                                     Column(
                                         horizontalAlignment = Alignment.CenterHorizontally,
                                         verticalArrangement = Arrangement.Center,
-                                        modifier = Modifier.fillMaxSize()
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.40f))
                                     ) {
                                         Surface(
                                             shape = CircleShape,
@@ -536,46 +576,84 @@ fun NowPlayingScreen(
 
                             Spacer(modifier = Modifier.height(10.dp))
 
-                            // Preceding lyric line (subtle & dimmed for contextual continuity)
-                            if (!prevLyricLine.isNullOrBlank()) {
-                                Text(
-                                    text = prevLyricLine,
-                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                                    fontWeight = FontWeight.Normal,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
-                                    textAlign = TextAlign.Center,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                                Spacer(modifier = Modifier.height(3.dp))
+                            // Preceding lyric line (subtle & dimmed for contextual continuity with smooth transition)
+                            AnimatedContent(
+                                targetState = prevLyricLine,
+                                transitionSpec = {
+                                    fadeIn(animationSpec = tween(200, easing = LinearOutSlowInEasing))
+                                        .togetherWith(fadeOut(animationSpec = tween(150, easing = FastOutLinearInEasing)))
+                                },
+                                label = "prev_lyric_transition"
+                            ) { prevText ->
+                                if (!prevText.isNullOrBlank()) {
+                                    Text(
+                                        text = prevText,
+                                        style = LyricBarTypography.contextualLyricStyle(
+                                            fontOption = userPreferences.selectedFont,
+                                            fontSize = 12.sp,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+                                        ),
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                    Spacer(modifier = Modifier.height(3.dp))
+                                }
                             }
 
-                            // Primary active lyric line
-                            Text(
-                                text = primaryLyricLine,
-                                style = MaterialTheme.typography.titleLarge.copy(fontSize = 18.sp),
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                textAlign = TextAlign.Center,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-
-                            // Upcoming lyric preview line
-                            if (!secondaryLyricLine.isNullOrBlank()) {
-                                Spacer(modifier = Modifier.height(4.dp))
+                            // Primary active lyric line with subtle, premium motion
+                            // Animated only when the active lyric string actually changes value
+                            AnimatedContent(
+                                targetState = primaryLyricLine,
+                                transitionSpec = {
+                                    (fadeIn(animationSpec = tween(220, easing = LinearOutSlowInEasing)) +
+                                        slideInVertically(animationSpec = tween(220, easing = LinearOutSlowInEasing)) { height -> height / 4 })
+                                        .togetherWith(
+                                            fadeOut(animationSpec = tween(180, easing = FastOutLinearInEasing)) +
+                                            slideOutVertically(animationSpec = tween(180, easing = FastOutLinearInEasing)) { height -> -height / 4 }
+                                        )
+                                },
+                                label = "primary_lyric_transition"
+                            ) { lyricText ->
                                 Text(
-                                    text = secondaryLyricLine,
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
-                                    fontWeight = FontWeight.Normal,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.70f),
+                                    text = lyricText,
+                                    style = LyricBarTypography.activeLyricStyle(
+                                        fontOption = userPreferences.selectedFont,
+                                        fontSize = 18.sp,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    ),
                                     textAlign = TextAlign.Center,
-                                    maxLines = 1,
+                                    maxLines = 2,
                                     overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.fillMaxWidth()
                                 )
+                            }
+
+                            // Upcoming lyric preview line with smooth transition
+                            AnimatedContent(
+                                targetState = secondaryLyricLine,
+                                transitionSpec = {
+                                    fadeIn(animationSpec = tween(200, easing = LinearOutSlowInEasing))
+                                        .togetherWith(fadeOut(animationSpec = tween(150, easing = FastOutLinearInEasing)))
+                                },
+                                label = "secondary_lyric_transition"
+                            ) { secText ->
+                                if (!secText.isNullOrBlank()) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = secText,
+                                        style = LyricBarTypography.contextualLyricStyle(
+                                            fontOption = userPreferences.selectedFont,
+                                            fontSize = 13.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.70f)
+                                        ),
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
                             }
                         }
                     }
