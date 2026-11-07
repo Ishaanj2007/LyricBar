@@ -368,7 +368,7 @@ class MediaPlaybackManager private constructor(private val context: Context) {
 
         // Load persisted offset for this specific track
         offsetJob = scope.launch {
-            preferencesRepository.getTrackOffsetFlow(track.key).collect { offset ->
+            preferencesRepository.getTrackOffsetFlow(track.identityKey, track.lookupKey).collect { offset ->
                 _trackOffsetMs.value = offset
             }
         }

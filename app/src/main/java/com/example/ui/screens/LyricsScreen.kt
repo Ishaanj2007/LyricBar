@@ -7,11 +7,17 @@ import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -127,26 +133,44 @@ fun LyricsScreen(
     // Use MediaPlaybackManager's activeLyricIndex as the single source of truth for line synchronization
     val activeIndex by playbackManager.activeLyricIndex.collectAsStateWithLifecycle()
 
-    // Manual scroll tracking and automatic resumption
+    // Manual scroll tracking and automatic follow state
+    val isDragged by listState.interactionSource.collectIsDraggedAsState()
+    var isProgrammaticScroll by remember { mutableStateOf(false) }
     var userScrolledAway by rememberSaveable { mutableStateOf(false) }
-    var previousActiveIndex by rememberSaveable { mutableIntStateOf(-1) }
 
-    LaunchedEffect(listState.isScrollInProgress) {
-        if (listState.isScrollInProgress) {
+    // Suspend auto-following when the user manually drags the lyric list
+    LaunchedEffect(isDragged) {
+        if (isDragged) {
             userScrolledAway = true
         }
     }
 
-    // Auto-scroll logic: smoothly centers the active line in reading view,
-    // automatically resumes tracking when the song transitions to the next line
-    LaunchedEffect(activeIndex) {
-        if (activeIndex != -1 && activeIndex != previousActiveIndex) {
-            previousActiveIndex = activeIndex
-            userScrolledAway = false // Resume tracking automatically on next active line
+    LaunchedEffect(listState.isScrollInProgress) {
+        if (listState.isScrollInProgress && isDragged && !isProgrammaticScroll) {
+            userScrolledAway = true
         }
+    }
+
+    // Reset userScrolledAway when the track changes
+    val currentTrackKey = playbackState.track?.identityKey ?: ""
+    LaunchedEffect(currentTrackKey) {
+        userScrolledAway = false
+    }
+
+    // Auto-scroll logic: smoothly centers the active line in reading view when following is enabled.
+    // Does NOT reset userScrolledAway on line changes, allowing the user to read earlier/upcoming lyrics uninterrupted.
+    LaunchedEffect(activeIndex, userScrolledAway) {
         if (!userScrolledAway && activeIndex in 0 until (currentLyrics?.lines?.size ?: 0)) {
             val targetScroll = (activeIndex - 2).coerceAtLeast(0)
-            listState.animateScrollToItem(targetScroll)
+            if (listState.firstVisibleItemIndex != targetScroll) {
+                isProgrammaticScroll = true
+                try {
+                    listState.animateScrollToItem(targetScroll)
+                } catch (_: Exception) {
+                } finally {
+                    isProgrammaticScroll = false
+                }
+            }
         }
     }
 
@@ -591,6 +615,7 @@ fun LyricsScreen(
                                         }
                                         .clickable {
                                             if (lyrics.isSynced) {
+                                                userScrolledAway = false
                                                 playbackManager.seekTo(line.timeMs)
                                             }
                                         }
@@ -694,6 +719,67 @@ fun LyricsScreen(
                             }
                         }
                     }
+                }
+            }
+        }
+
+        // Floating Resume Live Lyrics Control:
+        // Appears when user has manually scrolled away from the active line in a synced lyrics track.
+        // Tapping smoothly brings the viewport back to the current active line and re-enables auto-following.
+        val showResumeButton = userScrolledAway && currentLyrics?.isSynced == true && activeIndex in 0 until (currentLyrics?.lines?.size ?: 0)
+        AnimatedVisibility(
+            visible = showResumeButton,
+            enter = fadeIn(tween(200)) + slideInVertically(tween(250)) { it / 2 },
+            exit = fadeOut(tween(150)) + slideOutVertically(tween(200)) { it / 2 },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .windowInsetsPadding(WindowInsets.navigationBars)
+                .padding(bottom = if (playbackState.track != null) 140.dp else 80.dp)
+        ) {
+            val pillShape = RoundedCornerShape(20.dp)
+            FrostedCard(
+                shape = pillShape,
+                backgroundAlpha = 0.35f,
+                blurRadius = 20.dp,
+                borderWidth = 0.75.dp,
+                borderAlpha = 0.35f,
+                shadowElevation = 8.dp,
+                modifier = Modifier
+                    .clip(pillShape)
+                    .clickable {
+                        userScrolledAway = false
+                        val targetScroll = (activeIndex - 2).coerceAtLeast(0)
+                        coroutineScope.launch {
+                            isProgrammaticScroll = true
+                            try {
+                                listState.animateScrollToItem(targetScroll)
+                            } catch (_: Exception) {
+                            } finally {
+                                isProgrammaticScroll = false
+                            }
+                        }
+                    }
+                    .testTag("resume_live_lyrics_button")
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Navigation,
+                        contentDescription = "Resume Live Lyrics",
+                        tint = themePrimary,
+                        modifier = Modifier
+                            .size(15.dp)
+                            .graphicsLayer { rotationZ = 180f }
+                    )
+                    Text(
+                        text = "Resume Live Lyrics",
+                        style = MaterialTheme.typography.labelMedium.copy(fontSize = 13.sp),
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
                 }
             }
         }

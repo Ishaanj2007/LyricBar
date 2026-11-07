@@ -12,24 +12,94 @@ data class TrackMetadata(
     val albumArtUri: String? = null,
     val albumArtBitmap: android.graphics.Bitmap? = null
 ) {
-    val key: String
+    /**
+     * Base normalized identity based on artist and title, preserving version markers (Live, Remastered, Acoustic, etc.)
+     * while stripping video/platform clutter.
+     */
+    val baseIdentityKey: String
         get() {
-            val cArtist = cleanString(artist).ifBlank { artist.trim().lowercase() }.ifBlank { "unknown artist" }
-            val cTitle = cleanString(title).ifBlank { title.trim().lowercase() }.ifBlank { "unknown title" }
+            val cArtist = cleanMediaClutter(artist).ifBlank { artist.trim().lowercase() }.ifBlank { "unknown artist" }.lowercase()
+            val cTitle = cleanMediaClutter(title).ifBlank { title.trim().lowercase() }.ifBlank { "unknown title" }.lowercase()
             return "$cArtist - $cTitle".trim().lowercase()
         }
 
+    /**
+     * Track Identity Key:
+     * Used for track-specific persistent data:
+     * - Imported LRC associations
+     * - Timing offsets
+     * - Local caching & history
+     * - Artwork cache differentiation
+     *
+     * Preserves recording distinctions:
+     * - "Song Name"
+     * - "Song Name (Remastered)"
+     * - "Song Name [Live]"
+     * - "Song Name (Radio Edit)"
+     * - "Song Name (Acoustic)"
+     * - Same title by different artists
+     * - Same artist and title on different albums
+     */
+    val identityKey: String
+        get() {
+            val base = baseIdentityKey
+            val cAlbum = cleanMediaClutter(album).trim().lowercase()
+            val cTitle = cleanMediaClutter(title).trim().lowercase()
+            return if (cAlbum.isNotBlank() && cAlbum != cTitle) {
+                "$base [album: $cAlbum]"
+            } else {
+                base
+            }
+        }
+
+    /**
+     * Lyrics Lookup Key:
+     * Used exclusively to search online lyric providers (LRCLIB, Lyrics.ovh) and query public databases.
+     * Strips version and platform noise to maximize online search match rates.
+     */
+    val lookupKey: String
+        get() {
+            val cArtist = cleanForLookup(artist).ifBlank { artist.trim().lowercase() }.ifBlank { "unknown artist" }.lowercase()
+            val cTitle = cleanForLookup(title).ifBlank { title.trim().lowercase() }.ifBlank { "unknown title" }.lowercase()
+            return "$cArtist - $cTitle".trim().lowercase()
+        }
+
+    /**
+     * Primary track key for backward compatibility across the codebase. Points to identityKey.
+     */
+    val key: String
+        get() = identityKey
+
     val isValidTrack: Boolean
-        get() = title.isNotBlank() && key.isNotBlank() && key != "unknown artist - unknown title"
+        get() = title.isNotBlank() && lookupKey.isNotBlank() && lookupKey != "unknown artist - unknown title"
 
     companion object {
-        fun cleanString(str: String): String {
-            // Remove audio markers like (Official Video), (Lyric Video), [Remastered], etc.
+        /**
+         * Strips ONLY media wrapper clutter (YouTube / video tags) while strictly preserving
+         * musical version indicators (Remastered, Live, Acoustic, Radio Edit, etc.).
+         */
+        fun cleanMediaClutter(str: String): String {
             return str
-                .replace(Regex("(?i)\\s*[(\\[](?:[^\\])]*\\b(?:official|video|audio|lyrics?|visuali[sz]er|hd|hq|4k|remaster(?:ed)?|explicit|clean|full song|from\\s+[\"“].*)\\b[^\\])]*)[)\\]]"), "")
-                .replace(Regex("(?i)\\s*-\\s*(?:official|video|audio|lyrics?|visuali[sz]er|remaster(?:ed)?|radio edit|bonus track)\\b.*$"), "")
+                .replace(Regex("(?i)\\s*[(\\[](?:[^\\])]*\\b(?:official\\s+(?:video|audio|music\\s+video)|video|audio|visuali[sz]er|hd|hq|4k|full\\s+song|from\\s+[\"“].*)\\b[^\\])]*)[)\\]]"), "")
+                .replace(Regex("(?i)\\s*-\\s*(?:official\\s+(?:video|audio|music\\s+video)|video|audio|visuali[sz]er)\\b.*$"), "")
                 .trim()
         }
+
+        /**
+         * Strips both media clutter AND audio version tags for broad online lyrics search matching.
+         */
+        fun cleanForLookup(str: String): String {
+            val stripped = cleanMediaClutter(str)
+                .replace(Regex("(?i)\\s*[(\\[](?:[^\\])]*\\b(?:remaster(?:ed)?|live|acoustic|unplugged|radio\\s+edit|single\\s+edit|bonus\\s+track|deluxe|explicit|clean)\\b[^\\])]*)[)\\]]"), "")
+                .replace(Regex("(?i)\\s*-\\s*(?:remaster(?:ed)?|live|acoustic|unplugged|radio\\s+edit|single\\s+edit|bonus\\s+track)\\b.*$"), "")
+                .trim()
+            return stripped.ifBlank { cleanMediaClutter(str) }
+        }
+
+        /**
+         * Legacy cleanString method preserved for backward compatibility.
+         */
+        fun cleanString(str: String): String = cleanForLookup(str)
 
         fun resolveAppName(packageName: String, packageManager: PackageManager? = null): String {
             if (packageName.isBlank()) return ""

@@ -226,6 +226,84 @@ class ImportedLyricsPersistenceTest {
         assertEquals("First line of Song B", lyricsB.lines[0].text)
     }
 
+    @Test
+    fun testVersionSpecificImportedLyricsDoNotCollide() = runBlocking {
+        val studioTrack = TrackMetadata(title = "Hotel California", artist = "Eagles")
+        val liveTrack = TrackMetadata(title = "Hotel California [Live]", artist = "Eagles")
+
+        val studioLrc = "[00:01.00]On a dark desert highway\n[00:06.00]Cool wind in my hair"
+        val liveLrc = "[00:15.00]Welcome to the hotel california live\n[00:20.00]Such a lovely place live"
+
+        repository.saveImportedLyrics(studioTrack, studioLrc, source = "Studio LRC")
+        repository.saveImportedLyrics(liveTrack, liveLrc, source = "Live LRC")
+
+        assertEquals(2, fakeLyricsDao.size())
+
+        val fetchedStudio = repository.getOrFetchLyrics(studioTrack, forceNetwork = false).getOrThrow()
+        val fetchedLive = repository.getOrFetchLyrics(liveTrack, forceNetwork = false).getOrThrow()
+
+        assertEquals("On a dark desert highway", fetchedStudio.lines[0].text)
+        assertEquals("Welcome to the hotel california live", fetchedLive.lines[0].text)
+    }
+
+    @Test
+    fun testBackwardCompatibilityLegacyRecordFallback() = runBlocking {
+        // Simulate legacy record saved under old lookup key
+        val legacyKey = "queen - bohemian rhapsody"
+        val legacyLrc = "[00:01.00]Is this the real life?\n[00:05.00]Is this just fantasy?"
+        fakeLyricsDao.insertLyrics(
+            LyricsEntity(
+                key = legacyKey,
+                title = "Bohemian Rhapsody",
+                artist = "Queen",
+                syncedLrc = legacyLrc,
+                plainLyrics = "Is this the real life?\nIs this just fantasy?",
+                isSynced = true,
+                durationSec = 354,
+                source = "Legacy V2.0"
+            )
+        )
+
+        // Query with metadata containing album tag
+        val trackWithAlbum = TrackMetadata(
+            title = "Bohemian Rhapsody",
+            artist = "Queen",
+            album = "A Night at the Opera"
+        )
+
+        val fetched = repository.getOrFetchLyrics(trackWithAlbum, forceNetwork = false).getOrThrow()
+        assertEquals("Is this the real life?", fetched.lines[0].text)
+    }
+
+    @Test
+    fun testAmbiguousLegacyRecordNotReassignedToDifferentVersion() = runBlocking {
+        // Legacy studio record
+        val legacyKey = "eagles - hotel california"
+        val studioLrc = "[00:01.00]On a dark desert highway"
+        fakeLyricsDao.insertLyrics(
+            LyricsEntity(
+                key = legacyKey,
+                title = "Hotel California",
+                artist = "Eagles",
+                syncedLrc = studioLrc,
+                plainLyrics = "On a dark desert highway",
+                isSynced = true,
+                durationSec = 390,
+                source = "Studio Legacy"
+            )
+        )
+
+        // Query with live version when offline
+        val liveTrack = TrackMetadata(
+            title = "Hotel California [Live]",
+            artist = "Eagles",
+            durationSec = 430
+        )
+
+        val result = repository.getOrFetchLyrics(liveTrack, forceNetwork = false, allowNetwork = false)
+        assertTrue("Live track must not silently inherit studio lyrics", result.isFailure)
+    }
+
     // In-memory test implementation of LyricsDao
     private class InMemoryLyricsDao : LyricsDao {
         private val storage = mutableMapOf<String, LyricsEntity>()

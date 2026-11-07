@@ -43,13 +43,29 @@ class CompositeLyricsRepository internal constructor(
         forceNetwork: Boolean = false,
         allowNetwork: Boolean = true
     ): Result<ParsedLyrics> = withContext(Dispatchers.IO) {
-        val key = track.key
-        if (key.isBlank()) return@withContext Result.failure(IllegalArgumentException("Invalid track metadata"))
+        val identityKey = track.identityKey
+        val lookupKey = track.lookupKey
+        val baseKey = track.baseIdentityKey
 
+        if (identityKey.isBlank()) return@withContext Result.failure(IllegalArgumentException("Invalid track metadata"))
 
         // Check Room local cache unless force network re-fetch is requested
         if (!forceNetwork) {
-            val cached = lyricsDao.getLyricsByKey(key)
+            var cached = lyricsDao.getLyricsByKey(identityKey)
+            if (cached == null && identityKey != baseKey) {
+                cached = lyricsDao.getLyricsByKey(baseKey)
+            }
+            if (cached == null && identityKey != lookupKey && baseKey != lookupKey) {
+                val legacy = lyricsDao.getLyricsByKey(lookupKey)
+                if (legacy != null && isSafeLegacyMatch(track, legacy)) {
+                    cached = legacy
+                    // Forward migrate to identityKey so subsequent lookups hit identityKey directly
+                    try {
+                        lyricsDao.insertLyrics(legacy.copy(key = identityKey))
+                    } catch (_: Exception) {}
+                }
+            }
+
             if (cached != null) {
                 val content = cached.syncedLrc ?: cached.plainLyrics ?: ""
                 if (content.isNotBlank() && !LrcParser.isTtml(content)) {
@@ -73,8 +89,8 @@ class CompositeLyricsRepository internal constructor(
         }
 
         // Clean title & artist for web queries (strip (Official Video), [Remastered], etc.)
-        val cleanTitle = TrackMetadata.cleanString(track.title)
-        val cleanArtist = TrackMetadata.cleanString(track.artist)
+        val cleanTitle = TrackMetadata.cleanForLookup(track.title)
+        val cleanArtist = TrackMetadata.cleanForLookup(track.artist)
 
         for (provider in providers) {
             try {
@@ -85,11 +101,11 @@ class CompositeLyricsRepository internal constructor(
                     if (LrcParser.isTtml(lyrics.rawContent) || LrcParser.isTtml(lyrics.plainText)) {
                         continue
                     }
-                    // Cache in database with raw timed content preserved
+                    // Cache in database under track.identityKey to prevent version collisions
                     val rawToCache = if (lyrics.rawContent.isNotBlank()) lyrics.rawContent else lyrics.plainText
                     lyricsDao.insertLyrics(
                         LyricsEntity(
-                            key = key,
+                            key = identityKey,
                             title = track.title,
                             artist = track.artist,
                             syncedLrc = if (lyrics.isSynced) rawToCache else null,
@@ -123,8 +139,8 @@ class CompositeLyricsRepository internal constructor(
         if (content.contains('\u0000')) {
             throw IllegalArgumentException("Unsupported file: binary files are not supported.")
         }
-        val key = track.key
-        if (key.isBlank()) {
+        val identityKey = track.identityKey
+        if (identityKey.isBlank()) {
             throw IllegalArgumentException("Invalid track metadata")
         }
 
@@ -141,7 +157,7 @@ class CompositeLyricsRepository internal constructor(
 
         lyricsDao.insertLyrics(
             LyricsEntity(
-                key = key,
+                key = identityKey,
                 title = track.title,
                 artist = track.artist,
                 syncedLrc = if (parsed.isSynced) content else null,
@@ -173,14 +189,14 @@ class CompositeLyricsRepository internal constructor(
     ) = withContext(Dispatchers.IO) {
         val title = track.title.trim()
         val artist = track.artist.trim()
-        val key = track.key
-        if (title.isBlank() || key.isBlank() || key == "unknown artist - unknown title") {
+        val identityKey = track.identityKey
+        if (title.isBlank() || identityKey.isBlank() || identityKey.startsWith("unknown artist - unknown title")) {
             return@withContext
         }
         try {
             historyDao.insertHistory(
                 SongHistoryEntity(
-                    key = key,
+                    key = identityKey,
                     title = title,
                     artist = if (artist.isBlank()) "Unknown Artist" else artist,
                     albumArtUri = track.albumArtUri?.trim()?.takeIf { it.isNotBlank() },
@@ -192,6 +208,41 @@ class CompositeLyricsRepository internal constructor(
     }
 
     companion object {
+        internal fun isSafeLegacyMatch(track: TrackMetadata, legacy: LyricsEntity): Boolean {
+            val trackArtist = TrackMetadata.cleanForLookup(track.artist)
+            val legacyArtist = TrackMetadata.cleanForLookup(legacy.artist)
+            if (trackArtist.isNotBlank() && legacyArtist.isNotBlank() && !trackArtist.equals(legacyArtist, ignoreCase = true)) {
+                return false
+            }
+
+            val trackTitleLower = track.title.lowercase()
+            val legacyTitleLower = legacy.title.lowercase()
+
+            val isLiveTrack = trackTitleLower.contains("live")
+            val isLiveLegacy = legacyTitleLower.contains("live")
+            if (isLiveTrack != isLiveLegacy) return false
+
+            val isAcousticTrack = trackTitleLower.contains("acoustic") || trackTitleLower.contains("unplugged")
+            val isAcousticLegacy = legacyTitleLower.contains("acoustic") || legacyTitleLower.contains("unplugged")
+            if (isAcousticTrack != isAcousticLegacy) return false
+
+            val isRadioEditTrack = trackTitleLower.contains("radio edit") || trackTitleLower.contains("single edit")
+            val isRadioEditLegacy = legacyTitleLower.contains("radio edit") || legacyTitleLower.contains("single edit")
+            if (isRadioEditTrack != isRadioEditLegacy) return false
+
+            val isInstrumentalTrack = trackTitleLower.contains("instrumental")
+            val isInstrumentalLegacy = legacyTitleLower.contains("instrumental")
+            if (isInstrumentalTrack != isInstrumentalLegacy) return false
+
+            if (track.durationSec > 0 && legacy.durationSec != null && legacy.durationSec > 0) {
+                if (Math.abs(track.durationSec - legacy.durationSec) > 15) {
+                    return false
+                }
+            }
+
+            return true
+        }
+
         @Volatile
         private var INSTANCE: CompositeLyricsRepository? = null
 

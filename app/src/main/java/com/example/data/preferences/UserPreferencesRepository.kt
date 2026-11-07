@@ -367,8 +367,11 @@ class UserPreferencesRepository(private val context: Context) {
         context.dataStore.edit { it[key] = offsetMs }
     }
 
-    fun getTrackOffsetFlow(trackKey: String): Flow<Long> {
-        val key = longPreferencesKey("offset_${trackKey.hashCode()}")
-        return context.dataStore.data.map { it[key] ?: 0L }
+    fun getTrackOffsetFlow(trackKey: String, fallbackKey: String? = null): Flow<Long> {
+        val primaryKey = longPreferencesKey("offset_${trackKey.hashCode()}")
+        val altKey = fallbackKey?.takeIf { it.isNotBlank() && it != trackKey }?.let { longPreferencesKey("offset_${it.hashCode()}") }
+        return context.dataStore.data.map { preferences ->
+            preferences[primaryKey] ?: (if (altKey != null) preferences[altKey] else null) ?: 0L
+        }
     }
 }
