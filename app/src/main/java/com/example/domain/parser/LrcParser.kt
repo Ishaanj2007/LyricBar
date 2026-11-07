@@ -21,6 +21,23 @@ object LrcParser {
         artist: String = "",
         source: String = "LRC"
     ): ParsedLyrics {
+        val trimmedContent = content.trim()
+        if (trimmedContent.isEmpty() ||
+            trimmedContent.equals("null", ignoreCase = true) ||
+            trimmedContent.equals("undefined", ignoreCase = true)
+        ) {
+            return ParsedLyrics(
+                title = title,
+                artist = artist,
+                isSynced = false,
+                lines = emptyList(),
+                plainText = "",
+                source = source,
+                offsetMs = 0L,
+                rawContent = ""
+            )
+        }
+
         if (isTtml(content)) {
             throw IllegalArgumentException("Unsupported format: TTML is not supported. Please use LRC.")
         }
@@ -50,6 +67,7 @@ object LrcParser {
             if (timestampMatches.isNotEmpty()) {
                 // Extract lyric text after stripping all timestamps
                 val text = trimmed.replace(TIMESTAMP_REGEX, "").trim()
+                val cleanText = if (text.equals("null", ignoreCase = true) || text.equals("undefined", ignoreCase = true)) "" else text
 
                 for (match in timestampMatches) {
                     val minutes = match.groupValues[1].toLongOrNull() ?: 0L
@@ -65,7 +83,7 @@ object LrcParser {
                     }
 
                     val totalTimeMs = (minutes * 60L + seconds) * 1000L + millis
-                    parsedLines.add(LyricLine(timeMs = totalTimeMs, text = text))
+                    parsedLines.add(LyricLine(timeMs = totalTimeMs, text = cleanText))
                 }
             }
         }
@@ -87,7 +105,10 @@ object LrcParser {
             val plainLines = lines
                 .map { it.trim() }
                 .filter { trimmed ->
-                    trimmed.isNotEmpty() && !(trimmed.startsWith("[") && trimmed.contains(":") && !trimmed.contains(TIMESTAMP_REGEX))
+                    trimmed.isNotEmpty() &&
+                            !trimmed.equals("null", ignoreCase = true) &&
+                            !trimmed.equals("undefined", ignoreCase = true) &&
+                            !(trimmed.startsWith("[") && trimmed.contains(":") && !trimmed.contains(TIMESTAMP_REGEX))
                 }
 
             ParsedLyrics(
@@ -95,10 +116,10 @@ object LrcParser {
                 artist = artist,
                 isSynced = false,
                 lines = plainLines.map { txt -> LyricLine(timeMs = 0L, text = txt) },
-                plainText = if (plainLines.isNotEmpty()) plainLines.joinToString("\n") else content.trim(),
+                plainText = if (plainLines.isNotEmpty()) plainLines.joinToString("\n") else "",
                 source = source,
                 offsetMs = 0L,
-                rawContent = content
+                rawContent = if (plainLines.isNotEmpty()) content else ""
             )
         }
     }

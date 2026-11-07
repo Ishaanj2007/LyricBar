@@ -269,10 +269,15 @@ class MinimalOverlayView(
 
     var activeLyricLine: LyricLine? = null
         set(value) {
+            val sanitizedLine = if (value != null && (value.text.trim().equals("null", ignoreCase = true) || value.text.trim().equals("undefined", ignoreCase = true))) {
+                null
+            } else {
+                value
+            }
             val oldLine = field
             val oldText = oldLine?.text ?: text
-            val newText = value?.text ?: ""
-            field = value
+            val newText = sanitizedLine?.text?.trim()?.takeIf { !it.equals("null", ignoreCase = true) && !it.equals("undefined", ignoreCase = true) } ?: ""
+            field = sanitizedLine
 
             if (oldText != newText) {
                 val currentStyle = when (animationStyle) {
@@ -286,9 +291,9 @@ class MinimalOverlayView(
                 }
 
                 // Check for normal forward sequential lyric advance
-                val isNormalSequentialAdvance = oldLine != null && value != null &&
-                    value.timeMs >= oldLine.timeMs &&
-                    (value.timeMs - oldLine.timeMs) < 15000L
+                val isNormalSequentialAdvance = oldLine != null && sanitizedLine != null &&
+                    sanitizedLine.timeMs >= oldLine.timeMs &&
+                    (sanitizedLine.timeMs - oldLine.timeMs) < 15000L
 
                 if (currentStyle != "INSTANT" && currentStyle != "TYPEWRITER" &&
                     currentLayoutLines.isNotEmpty() && newText.isNotBlank() && isNormalSequentialAdvance) {
@@ -317,8 +322,9 @@ class MinimalOverlayView(
 
     var text: String = ""
         set(value) {
-            if (field != value) {
-                field = value
+            val sanitized = value.trim().takeIf { !it.equals("null", ignoreCase = true) && !it.equals("undefined", ignoreCase = true) } ?: ""
+            if (field != sanitized) {
+                field = sanitized
                 recalculateLayout()
             }
         }

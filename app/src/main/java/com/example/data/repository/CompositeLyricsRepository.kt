@@ -67,19 +67,27 @@ class CompositeLyricsRepository internal constructor(
             }
 
             if (cached != null) {
-                val content = cached.syncedLrc ?: cached.plainLyrics ?: ""
-                if (content.isNotBlank() && !LrcParser.isTtml(content)) {
+                val rawContent = (cached.syncedLrc ?: cached.plainLyrics ?: "").trim()
+                if (rawContent.isNotBlank() &&
+                    !rawContent.equals("null", ignoreCase = true) &&
+                    !rawContent.equals("undefined", ignoreCase = true) &&
+                    !LrcParser.isTtml(rawContent)
+                ) {
                     val parsed = LrcParser.parse(
-                        content = content,
+                        content = rawContent,
                         title = cached.title,
                         artist = cached.artist,
                         source = if (cached.source.endsWith("(Cached)")) cached.source else "${cached.source} (Cached)"
                     )
                     // Only return cached if valid or if remote network is not strictly needed
-                    if (parsed.isSynced || !cached.isSynced) {
+                    if (parsed.hasValidLyrics && (parsed.isSynced || !cached.isSynced)) {
                         return@withContext Result.success(parsed)
                     }
                 }
+                // Purge corrupted or empty cached entry (e.g. from poisoned cache containing literal "null")
+                try {
+                    lyricsDao.deleteLyricsByKey(cached.key)
+                } catch (_: Exception) {}
             }
         }
 
@@ -98,7 +106,7 @@ class CompositeLyricsRepository internal constructor(
                 if (result.isSuccess) {
                     val lyrics = result.getOrThrow()
                     // Reject unsupported TTML content if returned by any provider
-                    if (LrcParser.isTtml(lyrics.rawContent) || LrcParser.isTtml(lyrics.plainText)) {
+                    if (LrcParser.isTtml(lyrics.rawContent) || LrcParser.isTtml(lyrics.plainText) || !lyrics.hasValidLyrics) {
                         continue
                     }
                     // Cache in database under track.identityKey to prevent version collisions
@@ -151,7 +159,7 @@ class CompositeLyricsRepository internal constructor(
             source = source
         )
 
-        if (parsed.lines.isEmpty() || parsed.lines.all { it.text.isBlank() }) {
+        if (parsed.lines.isEmpty() || parsed.lines.all { it.text.isBlank() } || !parsed.hasValidLyrics) {
             throw IllegalArgumentException("No valid lyrics found in file")
         }
 

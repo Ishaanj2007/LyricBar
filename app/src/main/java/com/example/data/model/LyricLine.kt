@@ -28,6 +28,17 @@ data class ParsedLyrics(
     val format: String = if (isSynced) "LRC" else "PLAIN",
     val rawContent: String = ""
 ) {
+    val hasValidLyrics: Boolean
+        get() {
+            val hasValidLines = lines.isNotEmpty() && lines.any { line ->
+                val t = line.text.trim()
+                t.isNotBlank() && !t.equals("null", ignoreCase = true) && !t.equals("undefined", ignoreCase = true)
+            }
+            if (hasValidLines) return true
+            val pt = plainText.trim()
+            return pt.isNotBlank() && !pt.equals("null", ignoreCase = true) && !pt.equals("undefined", ignoreCase = true)
+        }
+
     private val isSorted: Boolean = if (lines.size <= 1) {
         true
     } else {
@@ -42,7 +53,7 @@ data class ParsedLyrics(
     }
 
     fun findActiveIndex(currentPositionMs: Long, trackOffsetMs: Long = 0L): Int {
-        if (!isSynced || lines.isEmpty()) return -1
+        if (!isSynced || lines.isEmpty() || !hasValidLyrics) return -1
         val adjustedPos = currentPositionMs + offsetMs + trackOffsetMs
         var activeIndex = -1
 
@@ -70,7 +81,8 @@ data class ParsedLyrics(
 
         if (activeIndex != -1) {
             val line = lines[activeIndex]
-            if (line.text.isBlank()) return -1
+            val lineTextTrimmed = line.text.trim()
+            if (lineTextTrimmed.isBlank() || lineTextTrimmed.equals("null", ignoreCase = true)) return -1
             val effectiveEndMs = if (line.endTimeMs > line.timeMs) {
                 line.endTimeMs
             } else if (line.words.isNotEmpty()) {
@@ -87,9 +99,16 @@ data class ParsedLyrics(
 
     fun getActiveLine(currentPositionMs: Long, trackOffsetMs: Long = 0L): String? {
         val idx = findActiveIndex(currentPositionMs, trackOffsetMs)
-        if (idx in lines.indices) return lines[idx].text.ifBlank { null }
+        if (idx in lines.indices) {
+            val t = lines[idx].text.trim()
+            return if (t.isNotBlank() && !t.equals("null", ignoreCase = true)) t else null
+        }
         if (!isSynced && lines.isNotEmpty()) {
-            return lines.firstOrNull { it.text.isNotBlank() }?.text ?: plainText.ifBlank { null }
+            val valid = lines.firstOrNull {
+                val t = it.text.trim()
+                t.isNotBlank() && !t.equals("null", ignoreCase = true)
+            }?.text?.trim()
+            return valid ?: plainText.trim().takeIf { it.isNotBlank() && !it.equals("null", ignoreCase = true) }
         }
         return null
     }
@@ -98,11 +117,17 @@ data class ParsedLyrics(
         val idx = findActiveIndex(currentPositionMs, trackOffsetMs)
         if (idx in lines.indices) {
             val line = lines[idx]
-            return if (line.text.isNotBlank()) line else null
+            val t = line.text.trim()
+            return if (t.isNotBlank() && !t.equals("null", ignoreCase = true)) line else null
         }
         if (!isSynced && lines.isNotEmpty()) {
-            val firstNonBlank = lines.firstOrNull { it.text.isNotBlank() }
-            return firstNonBlank ?: if (plainText.isNotBlank()) LyricLine(timeMs = 0L, text = plainText.trim()) else null
+            val firstValid = lines.firstOrNull {
+                val t = it.text.trim()
+                t.isNotBlank() && !t.equals("null", ignoreCase = true)
+            }
+            return firstValid ?: if (plainText.isNotBlank() && !plainText.trim().equals("null", ignoreCase = true)) {
+                LyricLine(timeMs = 0L, text = plainText.trim())
+            } else null
         }
         return null
     }

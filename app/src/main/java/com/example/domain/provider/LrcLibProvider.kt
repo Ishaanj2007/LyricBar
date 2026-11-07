@@ -45,29 +45,32 @@ class LrcLibProvider(
                     val bodyString = response.body?.string()
                     if (!bodyString.isNullOrBlank()) {
                         val json = JSONObject(bodyString)
-                        val syncedLrc = json.optString("syncedLyrics", "").trim()
-                        val plainLyrics = json.optString("plainLyrics", "").trim()
-                        val trackName = json.optString("trackName", title)
-                        val artistName = json.optString("artistName", artist)
+                        val syncedLrc = json.optCleanLyricsString("syncedLyrics")
+                        val plainLyrics = json.optCleanLyricsString("plainLyrics")
+                        val trackName = json.optCleanLyricsString("trackName") ?: title
+                        val artistName = json.optCleanLyricsString("artistName") ?: artist
 
-                        if (syncedLrc.isNotEmpty()) {
-                            return@withContext Result.success(
-                                LrcParser.parse(
-                                    content = syncedLrc,
-                                    title = trackName,
-                                    artist = artistName,
-                                    source = name
-                                )
+                        if (!syncedLrc.isNullOrBlank()) {
+                            val parsed = LrcParser.parse(
+                                content = syncedLrc,
+                                title = trackName,
+                                artist = artistName,
+                                source = name
                             )
-                        } else if (plainLyrics.isNotEmpty()) {
-                            return@withContext Result.success(
-                                LrcParser.parse(
-                                    content = plainLyrics,
-                                    title = trackName,
-                                    artist = artistName,
-                                    source = "$name (Plain)"
-                                )
+                            if (parsed.hasValidLyrics) {
+                                return@withContext Result.success(parsed)
+                            }
+                        }
+                        if (!plainLyrics.isNullOrBlank()) {
+                            val parsed = LrcParser.parse(
+                                content = plainLyrics,
+                                title = trackName,
+                                artist = artistName,
+                                source = "$name (Plain)"
                             )
+                            if (parsed.hasValidLyrics) {
+                                return@withContext Result.success(parsed)
+                            }
                         }
                     }
                 }
@@ -95,30 +98,34 @@ class LrcLibProvider(
                                 var firstPlain: ParsedLyrics? = null
                                 for (i in 0 until array.length().coerceAtMost(6)) {
                                     val item = array.optJSONObject(i) ?: continue
-                                    val synced = item.optString("syncedLyrics", "").trim()
-                                    val plain = item.optString("plainLyrics", "").trim()
-                                    val tName = item.optString("trackName", title)
-                                    val aName = item.optString("artistName", artist)
+                                    val synced = item.optCleanLyricsString("syncedLyrics")
+                                    val plain = item.optCleanLyricsString("plainLyrics")
+                                    val tName = item.optCleanLyricsString("trackName") ?: title
+                                    val aName = item.optCleanLyricsString("artistName") ?: artist
 
-                                    if (synced.isNotEmpty()) {
-                                        return@withContext Result.success(
-                                            LrcParser.parse(
-                                                content = synced,
-                                                title = tName,
-                                                artist = aName,
-                                                source = name
-                                            )
+                                    if (!synced.isNullOrBlank()) {
+                                        val parsed = LrcParser.parse(
+                                            content = synced,
+                                            title = tName,
+                                            artist = aName,
+                                            source = name
                                         )
-                                    } else if (plain.isNotEmpty() && firstPlain == null) {
-                                        firstPlain = LrcParser.parse(
+                                        if (parsed.hasValidLyrics) {
+                                            return@withContext Result.success(parsed)
+                                        }
+                                    } else if (!plain.isNullOrBlank() && firstPlain == null) {
+                                        val parsed = LrcParser.parse(
                                             content = plain,
                                             title = tName,
                                             artist = aName,
                                             source = "$name (Plain)"
                                         )
+                                        if (parsed.hasValidLyrics) {
+                                            firstPlain = parsed
+                                        }
                                     }
                                 }
-                                if (firstPlain != null) {
+                                if (firstPlain != null && firstPlain.hasValidLyrics) {
                                     return@withContext Result.success(firstPlain)
                                 }
                             }
@@ -131,5 +138,17 @@ class LrcLibProvider(
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+}
+
+private fun JSONObject.optCleanLyricsString(key: String): String? {
+    if (isNull(key)) return null
+    val raw = opt(key) ?: return null
+    if (raw == JSONObject.NULL) return null
+    val str = raw.toString().trim()
+    return if (str.isEmpty() || str.equals("null", ignoreCase = true) || str.equals("undefined", ignoreCase = true)) {
+        null
+    } else {
+        str
     }
 }

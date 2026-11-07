@@ -432,7 +432,7 @@ fun LyricsScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     when {
-                        lyrics == null || lyrics.lines.isEmpty() -> {
+                        lyrics == null || !lyrics.hasValidLyrics -> {
                             // Centered empty state card in the middle of lyrics view
                             FrostedCard(
                                 shape = RoundedCornerShape(24.dp),

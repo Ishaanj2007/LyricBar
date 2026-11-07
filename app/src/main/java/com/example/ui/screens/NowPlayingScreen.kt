@@ -175,7 +175,8 @@ fun NowPlayingScreen(
     val hasSession = state.hasActiveSession
     val isPlaying = state.isPlaying
     val lyrics = currentLyrics
-    val isSynced = lyrics?.isSynced == true
+    val hasValidLyrics = lyrics != null && lyrics.hasValidLyrics
+    val isSynced = hasValidLyrics && lyrics?.isSynced == true
 
     // Resolve semantic presentation states for the Live Lyrics card
     val lyricsBadgeText: String
@@ -196,7 +197,7 @@ fun NowPlayingScreen(
             lyricsBadgeText = "SESSION PAUSED"
             lyricsBadgeColor = MaterialTheme.colorScheme.outline
             prevLyricLine = null
-            primaryLyricLine = activeLyric ?: track.title
+            primaryLyricLine = activeLyric?.takeIf { it.isNotBlank() && !it.equals("null", ignoreCase = true) } ?: track.title
             secondaryLyricLine = "Media player was closed or disconnected"
         }
         isLoadingLyrics -> {
@@ -206,7 +207,7 @@ fun NowPlayingScreen(
             primaryLyricLine = "Finding synchronized lyrics..."
             secondaryLyricLine = listOfNotNull(track?.artist, track?.title).filter { it.isNotBlank() }.joinToString(" — ")
         }
-        lyrics == null -> {
+        lyrics == null || !hasValidLyrics -> {
             lyricsBadgeText = "NO LYRICS"
             lyricsBadgeColor = MaterialTheme.colorScheme.onSurfaceVariant
             prevLyricLine = null
@@ -216,22 +217,23 @@ fun NowPlayingScreen(
         isSynced -> {
             lyricsBadgeText = if (isPlaying) "LIVE LYRICS" else "LYRICS (PAUSED)"
             lyricsBadgeColor = MaterialTheme.colorScheme.primary
-            if (!activeLyric.isNullOrBlank()) {
-                prevLyricLine = prevLyric
-                primaryLyricLine = activeLyric!!
-                secondaryLyricLine = nextLyric
+            val validActive = activeLyric?.takeIf { it.isNotBlank() && !it.equals("null", ignoreCase = true) }
+            if (validActive != null) {
+                prevLyricLine = prevLyric?.takeIf { it.isNotBlank() && !it.equals("null", ignoreCase = true) }
+                primaryLyricLine = validActive
+                secondaryLyricLine = nextLyric?.takeIf { it.isNotBlank() && !it.equals("null", ignoreCase = true) }
             } else {
                 prevLyricLine = null
                 primaryLyricLine = "♪ Instrumental ♪"
-                secondaryLyricLine = nextLyric?.let { "Up next: $it" } ?: "Lyrics will resume with vocals..."
+                secondaryLyricLine = nextLyric?.takeIf { it.isNotBlank() && !it.equals("null", ignoreCase = true) }?.let { "Up next: $it" } ?: "Lyrics will resume with vocals..."
             }
         }
         else -> {
             lyricsBadgeText = "PLAIN LYRICS"
             lyricsBadgeColor = MaterialTheme.colorScheme.primary
             prevLyricLine = null
-            primaryLyricLine = lyrics.lines.firstOrNull { it.text.isNotBlank() }?.text
-                ?: lyrics.plainText.lineSequence().firstOrNull { it.isNotBlank() }
+            primaryLyricLine = lyrics.lines.firstOrNull { it.text.isNotBlank() && !it.text.trim().equals("null", ignoreCase = true) }?.text
+                ?: lyrics.plainText.lineSequence().firstOrNull { it.isNotBlank() && !it.trim().equals("null", ignoreCase = true) }
                 ?: "Unsynchronized lyrics available"
             secondaryLyricLine = "Tap Full Lyrics to read all lines"
         }

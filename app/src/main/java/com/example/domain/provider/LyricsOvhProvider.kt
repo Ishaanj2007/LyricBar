@@ -41,11 +41,12 @@ class LyricsOvhProvider(
                     val bodyString = response.body?.string()
                     if (!bodyString.isNullOrBlank()) {
                         val json = JSONObject(bodyString)
-                        val lyrics = json.optString("lyrics", "").trim()
-                        if (lyrics.isNotEmpty()) {
-                            return@withContext Result.success(
-                                LrcParser.parse(lyrics, title = title, artist = artist, source = name)
-                            )
+                        val lyrics = json.optCleanLyricsString("lyrics")
+                        if (!lyrics.isNullOrBlank()) {
+                            val parsed = LrcParser.parse(lyrics, title = title, artist = artist, source = name)
+                            if (parsed.hasValidLyrics) {
+                                return@withContext Result.success(parsed)
+                            }
                         }
                     }
                 }
@@ -54,5 +55,17 @@ class LyricsOvhProvider(
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+}
+
+private fun JSONObject.optCleanLyricsString(key: String): String? {
+    if (isNull(key)) return null
+    val raw = opt(key) ?: return null
+    if (raw == JSONObject.NULL) return null
+    val str = raw.toString().trim()
+    return if (str.isEmpty() || str.equals("null", ignoreCase = true) || str.equals("undefined", ignoreCase = true)) {
+        null
+    } else {
+        str
     }
 }

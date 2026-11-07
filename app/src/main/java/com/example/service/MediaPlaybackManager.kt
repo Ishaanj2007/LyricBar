@@ -309,24 +309,34 @@ class MediaPlaybackManager private constructor(private val context: Context) {
 
     private fun updateActiveLyrics(currentPos: Long, offset: Long) {
         val lyrics = _currentLyrics.value
-        if (lyrics != null && lyrics.isSynced) {
+        if (lyrics != null && lyrics.hasValidLyrics && lyrics.isSynced) {
             val activeIdx = lyrics.findActiveIndex(currentPos, offset)
             val activeObj = if (activeIdx in lyrics.lines.indices) lyrics.lines[activeIdx] else null
+            val lineText = activeObj?.text?.trim()
+            val cleanText = if (lineText.isNullOrBlank() || lineText.equals("null", ignoreCase = true) || lineText.equals("undefined", ignoreCase = true)) null else lineText
+
             if (_activeLyricIndex.value != activeIdx) {
                 _activeLyricIndex.value = activeIdx
             }
             if (_activeLyricObject.value != activeObj) {
                 _activeLyricObject.value = activeObj
-                _activeLyricLine.value = activeObj?.text
             }
-        } else if (lyrics != null && !lyrics.isSynced) {
+            if (_activeLyricLine.value != cleanText) {
+                _activeLyricLine.value = cleanText
+            }
+        } else if (lyrics != null && lyrics.hasValidLyrics && !lyrics.isSynced) {
             if (_activeLyricIndex.value != 0 && lyrics.lines.isNotEmpty()) {
                 _activeLyricIndex.value = 0
             }
             val activeObj = lyrics.getActiveLyricLine(currentPos, offset)
+            val lineText = activeObj?.text?.trim()
+            val cleanText = if (lineText.isNullOrBlank() || lineText.equals("null", ignoreCase = true) || lineText.equals("undefined", ignoreCase = true)) null else lineText
+
             if (_activeLyricObject.value != activeObj) {
                 _activeLyricObject.value = activeObj
-                _activeLyricLine.value = activeObj?.text
+            }
+            if (_activeLyricLine.value != cleanText) {
+                _activeLyricLine.value = cleanText
             }
         } else {
             if (_activeLyricIndex.value != -1) _activeLyricIndex.value = -1
@@ -389,12 +399,18 @@ class MediaPlaybackManager private constructor(private val context: Context) {
             _isLoadingLyrics.value = false
             if (result.isSuccess) {
                 val lyrics = result.getOrNull()
-                _currentLyrics.value = lyrics
-                if (lyrics != null) {
+                if (lyrics != null && lyrics.hasValidLyrics) {
+                    _currentLyrics.value = lyrics
                     val currentPos = _playbackState.value.calculatedPositionMs
                     val offset = _trackOffsetMs.value
                     updateActiveLyrics(currentPos, offset)
+                } else {
+                    _currentLyrics.value = null
+                    updateActiveLyrics(0L, 0L)
                 }
+            } else {
+                _currentLyrics.value = null
+                updateActiveLyrics(0L, 0L)
             }
         }
     }
@@ -473,10 +489,15 @@ class MediaPlaybackManager private constructor(private val context: Context) {
     }
 
     fun setManualLyrics(lyrics: ParsedLyrics) {
-        _currentLyrics.value = lyrics
-        val currentPos = _playbackState.value.calculatedPositionMs
-        val offset = _trackOffsetMs.value
-        updateActiveLyrics(currentPos, offset)
+        if (lyrics.hasValidLyrics) {
+            _currentLyrics.value = lyrics
+            val currentPos = _playbackState.value.calculatedPositionMs
+            val offset = _trackOffsetMs.value
+            updateActiveLyrics(currentPos, offset)
+        } else {
+            _currentLyrics.value = null
+            updateActiveLyrics(0L, 0L)
+        }
     }
 
     private fun isControllerControllable(controller: MediaController?): Boolean {
