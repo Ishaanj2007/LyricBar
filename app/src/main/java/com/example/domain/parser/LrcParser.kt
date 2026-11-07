@@ -21,7 +21,8 @@ object LrcParser {
         artist: String = "",
         source: String = "LRC"
     ): ParsedLyrics {
-        val trimmedContent = content.trim()
+        val cleanContent = content.removePrefix("\uFEFF")
+        val trimmedContent = cleanContent.trim()
         if (trimmedContent.isEmpty() ||
             trimmedContent.equals("null", ignoreCase = true) ||
             trimmedContent.equals("undefined", ignoreCase = true)
@@ -38,10 +39,10 @@ object LrcParser {
             )
         }
 
-        if (isTtml(content)) {
+        if (isTtml(cleanContent)) {
             throw IllegalArgumentException("Unsupported format: TTML is not supported. Please use LRC.")
         }
-        val lines = content.lines()
+        val lines = cleanContent.lines()
         val parsedLines = mutableListOf<LyricLine>()
         var offsetMs = 0L
 
@@ -73,6 +74,11 @@ object LrcParser {
                     val minutes = match.groupValues[1].toLongOrNull() ?: 0L
                     val seconds = match.groupValues[2].toLongOrNull() ?: 0L
                     val fractionStr = match.groupValues[3]
+
+                    // Range validation: seconds must be 0..59, minutes 0..599
+                    if (seconds !in 0..59 || minutes !in 0..599) {
+                        continue
+                    }
 
                     val millis = when (fractionStr.length) {
                         0 -> 0L

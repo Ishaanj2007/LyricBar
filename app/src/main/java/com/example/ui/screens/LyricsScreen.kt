@@ -56,8 +56,10 @@ import com.example.service.MediaPlaybackManager
 import com.example.ui.components.FrostedCard
 import com.example.ui.components.LocalHazeState
 import dev.chrisbanes.haze.HazeState
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.BufferedReader
 import java.io.InputStreamReader
 
@@ -100,13 +102,9 @@ fun LyricsScreen(
                         return@launch
                     }
 
-                    val text = context.contentResolver.openInputStream(uri)?.use { stream ->
-                        BufferedReader(InputStreamReader(stream)).readText()
-                    } ?: ""
-
-                    if (text.isBlank()) {
-                        Toast.makeText(context, "Lyric file is empty", Toast.LENGTH_SHORT).show()
-                        return@launch
+                    // Safe, bounded read on IO dispatcher with file size protection & encoding detection
+                    val text = withContext(Dispatchers.IO) {
+                        com.example.domain.parser.LrcImporter.readLrcFromUri(context.contentResolver, uri)
                     }
 
                     val track = playbackState.track ?: run {
@@ -121,6 +119,10 @@ fun LyricsScreen(
 
                     playbackManager.saveImportedLyrics(track, text, "Local .lrc")
                     Toast.makeText(context, "Lyrics imported successfully", Toast.LENGTH_SHORT).show()
+                } catch (e: com.example.domain.parser.LrcImportException) {
+                    Toast.makeText(context, e.message, Toast.LENGTH_SHORT).show()
+                } catch (e: SecurityException) {
+                    Toast.makeText(context, "File access permission denied", Toast.LENGTH_SHORT).show()
                 } catch (e: Exception) {
                     e.printStackTrace()
                     val errorMsg = e.localizedMessage?.takeIf { it.isNotBlank() } ?: "Failed to import lyric file"

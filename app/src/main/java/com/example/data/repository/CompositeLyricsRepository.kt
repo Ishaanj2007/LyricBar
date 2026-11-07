@@ -141,11 +141,18 @@ class CompositeLyricsRepository internal constructor(
         content: String,
         source: String = "Imported"
     ): ParsedLyrics = withContext(Dispatchers.IO) {
-        if (content.isBlank()) {
-            throw IllegalArgumentException("Lyric file is empty")
+        val cleanContent = content.removePrefix("\uFEFF")
+        if (cleanContent.isBlank()) {
+            throw com.example.domain.parser.LrcImportException.EmptyFile("Lyric file is empty")
         }
-        if (content.contains('\u0000')) {
-            throw IllegalArgumentException("Unsupported file: binary files are not supported.")
+        if (cleanContent.length > com.example.domain.parser.LrcImporter.MAX_LRC_FILE_SIZE_BYTES) {
+            throw com.example.domain.parser.LrcImportException.FileTooLarge()
+        }
+        if (cleanContent.contains('\u0000')) {
+            throw com.example.domain.parser.LrcImportException.UnsupportedFormat("Unsupported file: binary files are not supported.")
+        }
+        if (LrcParser.isTtml(cleanContent)) {
+            throw com.example.domain.parser.LrcImportException.UnsupportedFormat("Unsupported format: TTML is not supported. Please use LRC.")
         }
         val identityKey = track.identityKey
         if (identityKey.isBlank()) {
@@ -153,29 +160,38 @@ class CompositeLyricsRepository internal constructor(
         }
 
         val parsed = LrcParser.parse(
-            content = content,
+            content = cleanContent,
             title = track.title,
             artist = track.artist,
             source = source
         )
 
         if (parsed.lines.isEmpty() || parsed.lines.all { it.text.isBlank() } || !parsed.hasValidLyrics) {
-            throw IllegalArgumentException("No valid lyrics found in file")
+            val hasTags = cleanContent.lines().any { it.trim().startsWith("[") && it.trim().contains(":") }
+            if (hasTags) {
+                throw com.example.domain.parser.LrcImportException.MetadataOnly("File contains only metadata tags with no valid lyrics")
+            } else {
+                throw com.example.domain.parser.LrcImportException.NoLyricsFound("No valid lyrics found in file")
+            }
         }
 
-        lyricsDao.insertLyrics(
-            LyricsEntity(
-                key = identityKey,
-                title = track.title,
-                artist = track.artist,
-                syncedLrc = if (parsed.isSynced) content else null,
-                plainLyrics = parsed.plainText,
-                isSynced = parsed.isSynced,
-                durationSec = track.durationSec,
-                source = source,
-                cachedAt = System.currentTimeMillis()
+        try {
+            lyricsDao.insertLyrics(
+                LyricsEntity(
+                    key = identityKey,
+                    title = track.title,
+                    artist = track.artist,
+                    syncedLrc = if (parsed.isSynced) cleanContent else null,
+                    plainLyrics = parsed.plainText,
+                    isSynced = parsed.isSynced,
+                    durationSec = track.durationSec,
+                    source = source,
+                    cachedAt = System.currentTimeMillis()
+                )
             )
-        )
+        } catch (e: Exception) {
+            throw com.example.domain.parser.LrcImportException.StorageFailed("Failed to save imported lyrics", e)
+        }
         parsed
     }
 
