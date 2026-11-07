@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Ishaanj2007/LyricBar/releases/latest"><img src="https://img.shields.io/badge/Release-v2.0.0-6C5CE7?style=flat-square&logo=android" alt="Latest Release" /></a>
+  <a href="https://github.com/Ishaanj2007/LyricBar/releases/latest"><img src="https://img.shields.io/badge/Release-v2.1.0-6C5CE7?style=flat-square&logo=android" alt="Latest Release" /></a>
   <a href="https://android.com"><img src="https://img.shields.io/badge/Platform-Android%207.0%2B%20(API%2024--35)-00B894?style=flat-square&logo=android" alt="Android Version" /></a>
   <a href="https://kotlinlang.org"><img src="https://img.shields.io/badge/Kotlin-2.0.21-7F52FF?style=flat-square&logo=kotlin" alt="Kotlin" /></a>
   <a href="https://developer.android.com/jetpack/compose"><img src="https://img.shields.io/badge/UI-Jetpack%20Compose%20%2B%20M3-4285F4?style=flat-square&logo=jetpackcompose" alt="Jetpack Compose" /></a>
@@ -23,6 +23,9 @@
   <a href="#requirements-">Requirements</a> •
   <a href="#permissions-">Permissions</a> •
   <a href="#building-from-source-">Building</a> •
+  <a href="#testing--verification-">Testing</a> •
+  <a href="#known-limitations-">Limitations</a> •
+  <a href="#contributing-">Contributing</a> •
   <a href="#license-">License</a>
 </p>
 
@@ -39,15 +42,18 @@
 ## Features ✨
 
 - **Floating Lyrics Overlay** — Live synchronized lyrics rendered above any active music or media app (Spotify, YouTube Music, Apple Music, local players, etc.).
-- **Automatic Media Detection** — Detects active playback state, track metadata, and album artwork via Android's `MediaSession` API.
-- **Online & Local Lyrics** — Automatic lyrics lookup via LRCLIB with plain-text fallback, plus direct support for importing and saving local `.lrc` files.
+- **Cinematic Ambient Artwork Glow** — Dynamic diffused ambient illumination engine derived from active album artwork palettes, blending naturally into the frosted glass backdrop without harsh rectangular backplates.
+- **Main Screen Live Lyrics Motion** — Smooth active-lyric animations with progress sweep highlights and responsive viewport tracking.
+- **Intelligent Auto-Scroll with Reading Pause** — Smooth automatic lyric following that pauses instantly when user scrolls manually and provides a clean one-tap resume affordance.
+- **Automatic Media Detection** — Detects active playback state, track metadata, and album artwork via Android's `MediaSession` API with strict track-identity cache isolation.
+- **Online & Local Lyrics Engine** — Automatic lyrics lookup via LRCLIB with plain-text fallback, plus a bounded, memory-safe local `.lrc` import system with UTF-8/UTF-16/BOM auto-detection.
 - **Multiple Animation Styles** — Smooth Karaoke glow sweeps, Line Transitions, Fade, Blur Reveal, and Typewriter animations synchronized to playback timing.
-- **Customizable Overlay Engine** — Adjust font size (6sp–24sp), opacity, alignment, position, dimensions, custom Google Fonts, and toggle single-line mode.
+- **Customizable Overlay Engine** — Adjust font size (6sp–24sp), opacity, alignment, position, dimensions, local Google Fonts, and toggle single-line mode.
 - **Real-Time Offset Adjustment** — Fine-tune lyric synchronization on the fly with per-track offset adjustments (`-0.5s`, `-0.1s`, `+0.1s`, `+0.5s`).
 - **Dark-Only Ambient Design** — Subtle backdrop scrim that lets active album artwork glow through translucent frosted-glass surfaces.
 - **Curated & Dynamic Theming** — Curated pastel palettes (Rose Quartz, Lavender Mist, Peach Ember, Sage Serenity), dark presets, and Android 12+ Material You dynamic colors.
 - **Playback History** — Chronological timeline grouping (*Today*, *Yesterday*, *Earlier This Week*, *Previous Month*) stored locally with cached artwork thumbnails.
-- **In-App Updater** — Built-in updater with cryptographic SHA-256 and signing certificate verification for safe, direct installations from GitHub Releases.
+- **Hardened In-App GitHub Updater** — Built-in updater with cryptographic SHA-256 validation, package identity matching, downgrade prevention, and signing certificate lineage verification for safe installations from GitHub Releases.
 - **Battery & Memory Optimized** — Hardware Canvas rendering locked to display refresh rate, LRU artwork memory caching, and zero-polling lifecycle awareness.
 
 ---
@@ -56,7 +62,7 @@
 
 👉 **[Download the Latest Release](https://github.com/Ishaanj2007/LyricBar/releases/latest)**
 
-1. Download the `LyricBar-2.0.0.apk` from the latest release assets.
+1. Download `LyricBar-2.1.0.apk` (or architecture-specific variant) from the latest release assets.
 2. Open the APK on your Android device.
 3. Allow installation from unknown sources if prompted.
 4. Launch LyricBar and grant the required permissions (Overlay & Notification Listener).
@@ -112,20 +118,42 @@ cd LyricBar
 
 ### 2. Build via Gradle
 
+The repository includes an automatic debug keystore restoration hook in `build.gradle.kts` so fresh clones can assemble debug builds immediately without developer-specific machine setup.
+
 **Linux / macOS**
 ```bash
+# Ensure Unix wrapper has execution permissions
+chmod +x gradlew
+
 # Build Debug APK
 ./gradlew :app:assembleDebug
 
-# Run Unit Tests (154 tests)
+# Run Unit Tests (207 tests)
 ./gradlew :app:testDebugUnitTest
+
+# Compile Android Instrumented Tests
+./gradlew :app:compileDebugAndroidTestKotlin
 ```
 
 **Windows**
 ```bat
 gradlew.bat :app:assembleDebug
 gradlew.bat :app:testDebugUnitTest
+gradlew.bat :app:compileDebugAndroidTestKotlin
 ```
+
+---
+
+## Testing & Verification 🧪
+
+LyricBar maintains strict automated test coverage across its core data, parsing, timing, and security layers:
+
+| Test Scope | Count | Status | Notes |
+| :--- | :---: | :---: | :--- |
+| **Local JVM Unit Tests** | 207 | **Passing (100%)** | 24 test suites in `app/src/test/java/` covering LRCLIB parsing, LRC import bounds, HUD timing, Track Identity, Database migrations, and Updater verification. |
+| **Executed Test Cases** | 207 | **207 Passed (0 failed)** | Verified via `./gradlew :app:testDebugUnitTest`. |
+| **Instrumented Tests** | 1 | **Configured & Compiles** | Located in `app/src/androidTest/java/` using AndroidX Test Runner and JUnit4. |
+| **Total Test Methods** | 208 | — | 207 local unit tests + 1 instrumented test. |
 
 ---
 
@@ -133,6 +161,10 @@ gradlew.bat :app:testDebugUnitTest
 
 ```text
 .
+├── .github/
+│   ├── workflows/
+│   │   └── ci.yml                    # Automated GitHub Actions CI workflow
+│   └── ISSUE_TEMPLATE/
 ├── Screenshots/
 │   ├── Screenshot1_LyricBar.png      # Now Playing Screen
 │   ├── Screenshot2_LyricBar.png      # Synchronized Lyrics View
@@ -141,7 +173,7 @@ gradlew.bat :app:testDebugUnitTest
 │   ├── Screenshot5_LyricBar.png      # Settings & Material Themes
 │   └── lyricbarlogo.png              # App Brand Logo
 ├── app/
-│   ├── build.gradle.kts
+│   ├── build.gradle.kts              # Application build config & dependencies
 │   └── src/
 │       ├── main/
 │       │   ├── AndroidManifest.xml
@@ -152,20 +184,43 @@ gradlew.bat :app:testDebugUnitTest
 │       │   │   ├── domain/           # Lyrics Timing Engine, Parser & Providers
 │       │   │   ├── service/          # MediaListener & Overlay Foreground Service
 │       │   │   └── ui/               # Compose Screens, Glass Components & Theme
-│       │   └── res/                  # Vector Assets, Fonts & XML Providers
-│       └── test/                     # 154 Automated Unit Tests
-├── build.gradle.kts
+│       │   └── res/                  # Vector Assets, Local Fonts & XML Providers
+│       ├── test/                     # 207 Local Automated Unit Tests (24 test suites)
+│       └── androidTest/              # Instrumented Android Tests
+├── gradle/
+│   ├── libs.versions.toml            # Version Catalog
+│   └── wrapper/
+│       ├── gradle-wrapper.jar
+│       └── gradle-wrapper.properties
+├── build.gradle.kts                  # Root buildscript with clean-clone key restoration
 ├── settings.gradle.kts
+├── debug.keystore.base64             # Base64-encoded debug keystore for clean-clone reproducibility
+├── LICENSE
 └── README.md
 ```
 
 ---
 
-## Privacy 🔒
+## Known Limitations ⚠️
 
-- Playback state, track titles, and artist names are processed strictly on-device to synchronize lyrics.
-- Online lyric lookups send only the song title and artist name to lyric providers (LRCLIB).
-- No telemetry, analytics, or personal user data is collected, stored, or transmitted.
+1. **Dynamic Theming on Android 11 & Earlier**: Android 12+ (API 31+) is required for system Material You wallpaper color extraction. On Android 7.0–11, curated pastel palettes (Rose Quartz, Lavender Mist, Peach Ember, Sage Serenity) and dark presets provide rich customization.
+2. **System Overlay Restrictions**: On certain Android vendor skins (MIUI/HyperOS, ColorOS, EMUI), background pop-up permissions and aggressive battery optimizations may require manual configuration in system settings.
+3. **Protected Streams**: Media apps that do not publish standard Android `MediaSession` metadata or playback positions cannot provide timing data for synchronization.
+
+---
+
+## Contributing 🤝
+
+Contributions are welcome! Please follow these guidelines:
+
+1. Fork the repository and create a feature branch (`git checkout -b feature/amazing-feature`).
+2. Make your changes and ensure all tests pass:
+   ```bash
+   ./gradlew :app:testDebugUnitTest
+   ./gradlew :app:compileDebugAndroidTestKotlin
+   ```
+3. Commit your changes with clear, descriptive commit messages.
+4. Push to your branch and open a Pull Request.
 
 ---
 
