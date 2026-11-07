@@ -137,7 +137,7 @@ fun NowPlayingScreen(
         }
     }
     val ambientGlowColor = glowPalette.primary
-    val artworkGlowBitmap = rememberArtworkGlowBitmap(track, rawArtworkBitmap)
+    val artworkGlowBitmap = rememberArtworkGlowBitmap(track, rawArtworkBitmap, glowPalette)
 
     var isDelayExpanded by rememberSaveable { mutableStateOf(false) }
     var pendingOverlayEnable by rememberSaveable { mutableStateOf(false) }
@@ -349,49 +349,33 @@ fun NowPlayingScreen(
                             .aspectRatio(1f),
                         contentAlignment = Alignment.Center
                     ) {
-                        // 1. Organic Ambient Glow Layer: Radiates outward beyond the artwork footprint
-                        // Seamlessly illuminates the surrounding space with zero rectangular patches or sharp corners
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .graphicsLayer {
-                                    scaleX = 1.34f
-                                    scaleY = 1.34f
-                                    clip = false
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            // Luminous atmospheric radial glow using the extracted artwork palette
+                        // 1. Organic Artwork Ambient Glow Layer: Radiates outward matching the 26.dp rounded silhouette
+                        // Inner bounds match the 280dp artwork (320 / 220 = 1.455f), diffusing 50px Gaussian halo outward
+                        // Zero circular discs, zero black patches, and zero rectangular edge cuts.
+                        if (artworkGlowBitmap != null) {
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .drawBehind {
-                                        drawCircle(
-                                            brush = Brush.radialGradient(
-                                                colors = listOf(
-                                                    glowPalette.primary.copy(alpha = 0.52f),
-                                                    glowPalette.secondary.copy(alpha = 0.28f),
-                                                    glowPalette.primary.copy(alpha = 0.08f),
-                                                    Color.Transparent
-                                                ),
-                                                center = center,
-                                                radius = size.width * 0.46f
-                                            ),
-                                            radius = size.width * 0.46f,
-                                            center = center
-                                        )
-                                    }
-                            )
-
-                            // Optical artwork silhouette glow (actual artwork colors pre-rounded and diffused seamlessly into transparent padding)
-                            if (artworkGlowBitmap != null) {
-                                Image(
-                                    bitmap = artworkGlowBitmap.asImageBitmap(),
-                                    contentDescription = null,
-                                    contentScale = ContentScale.FillBounds,
-                                    alpha = 0.85f,
-                                    modifier = Modifier.fillMaxSize()
-                                )
+                                    .graphicsLayer {
+                                        scaleX = 1.455f
+                                        scaleY = 1.455f
+                                        clip = false
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Crossfade(
+                                    targetState = track?.key ?: "",
+                                    animationSpec = tween(durationMillis = 280),
+                                    label = "artwork_glow_crossfade"
+                                ) { _ ->
+                                    Image(
+                                        bitmap = artworkGlowBitmap.asImageBitmap(),
+                                        contentDescription = null,
+                                        contentScale = ContentScale.FillBounds,
+                                        alpha = 0.90f,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                }
                             }
                         }
 

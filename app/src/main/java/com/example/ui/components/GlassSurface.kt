@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.Image
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
@@ -354,18 +355,27 @@ fun createBlurredArtworkBitmap(source: Bitmap): Bitmap? {
 data class ArtworkGlowPalette(
     val primary: Color,
     val secondary: Color,
-    val accent: Color
+    val accent: Color,
+    val topColor: Color = primary,
+    val bottomColor: Color = secondary
 )
 
 /**
  * Extracts a luminous, richly saturated color palette from the artwork.
  * Actively prioritizes saturated hues over muddy dark averages, ensuring dark artworks,
  * bright artworks, and black-background albums alike produce incandescent, complementary glows.
+ * Handles monochromatic / black & white albums gracefully with sleek ambient slate tones.
  */
 fun extractArtworkGlowPalette(bitmap: Bitmap?, fallbackColor: Color = Color.Unspecified): ArtworkGlowPalette {
     if (bitmap == null || bitmap.isRecycled || bitmap.width <= 0 || bitmap.height <= 0) {
         val safeFallback = if (fallbackColor.isSpecified) fallbackColor else Color(0xFF6C5CE7)
-        return ArtworkGlowPalette(safeFallback, safeFallback, safeFallback)
+        return ArtworkGlowPalette(
+            primary = safeFallback,
+            secondary = safeFallback,
+            accent = safeFallback,
+            topColor = safeFallback,
+            bottomColor = safeFallback
+        )
     }
 
     return try {
@@ -379,13 +389,21 @@ fun extractArtworkGlowPalette(bitmap: Bitmap?, fallbackColor: Color = Color.Unsp
         var bestSecondaryScore = -1f
         var bestSecondaryColor = 0
 
+        var topBestScore = -1f
+        var topBestColor = 0
+
+        var bottomBestScore = -1f
+        var bottomBestColor = 0
+
+        var maxSaturation = 0f
         var avgR = 0L
         var avgG = 0L
         var avgB = 0L
         var count = 0
 
-        val stepX = (width / 12).coerceAtLeast(1)
-        val stepY = (height / 12).coerceAtLeast(1)
+        val stepX = (width / 14).coerceAtLeast(1)
+        val stepY = (height / 14).coerceAtLeast(1)
+        val halfY = height / 2
 
         for (x in stepX until width step stepX) {
             for (y in stepY until height step stepY) {
@@ -406,9 +424,13 @@ fun extractArtworkGlowPalette(bitmap: Bitmap?, fallbackColor: Color = Color.Unsp
                 val sat = hsv[1]
                 val value = hsv[2]
 
-                // Focus on pixels with noticeable saturation and brightness, filtering out near-black or muddy pixels
-                if (value > 0.18f && sat > 0.12f) {
-                    val score = sat * 1.6f + (if (value in 0.35f..0.85f) 1.0f else 0.4f)
+                if (sat > maxSaturation) {
+                    maxSaturation = sat
+                }
+
+                // Filter out near-black or muddy pixels while favoring luminous saturation
+                if (value > 0.18f && sat > 0.10f) {
+                    val score = sat * 1.8f + (if (value in 0.35f..0.85f) 1.0f else 0.4f)
                     if (score > bestVibrantScore) {
                         bestVibrantScore = score
                         bestVibrantColor = pixel
@@ -419,22 +441,51 @@ fun extractArtworkGlowPalette(bitmap: Bitmap?, fallbackColor: Color = Color.Unsp
                             bestSecondaryColor = pixel
                         }
                     }
+
+                    // Spatial top vs bottom sampling
+                    if (y < halfY) {
+                        if (score > topBestScore) {
+                            topBestScore = score
+                            topBestColor = pixel
+                        }
+                    } else {
+                        if (score > bottomBestScore) {
+                            bottomBestScore = score
+                            bottomBestColor = pixel
+                        }
+                    }
                 }
             }
+        }
+
+        // Monochromatic / black & white artwork handling:
+        // When artwork lacks color saturation, avoid forcing arbitrary purple.
+        // Instead, provide a sophisticated, luminous slate-silver atmospheric tone.
+        if (maxSaturation < 0.08f) {
+            val slateTone = Color(0xFF8A99AD)
+            val slateTop = Color(0xFFA0AEC0)
+            val slateBottom = Color(0xFF718096)
+            return ArtworkGlowPalette(
+                primary = slateTone,
+                secondary = slateTone,
+                accent = slateTone.copy(alpha = 0.85f),
+                topColor = slateTop,
+                bottomColor = slateBottom
+            )
         }
 
         val primaryColor = if (bestVibrantScore > 0f) {
             android.graphics.Color.colorToHSV(bestVibrantColor, hsv)
             hsv[1] = hsv[1].coerceIn(0.55f, 0.95f) // Rich saturation
-            hsv[2] = hsv[2].coerceIn(0.65f, 0.95f) // Incandescent brightness
+            hsv[2] = hsv[2].coerceIn(0.70f, 0.92f) // Incandescent brightness (clamped to prevent overexposure)
             Color(android.graphics.Color.HSVToColor(hsv))
         } else if (count > 0) {
             val r = (avgR / count).toInt()
             val g = (avgG / count).toInt()
             val b = (avgB / count).toInt()
             android.graphics.Color.RGBToHSV(r, g, b, hsv)
-            hsv[1] = hsv[1].coerceAtLeast(0.45f)
-            hsv[2] = hsv[2].coerceIn(0.60f, 0.90f)
+            hsv[1] = hsv[1].coerceIn(0.45f, 0.85f)
+            hsv[2] = hsv[2].coerceIn(0.65f, 0.90f)
             Color(android.graphics.Color.HSVToColor(hsv))
         } else {
             if (fallbackColor.isSpecified) fallbackColor else Color(0xFF6C5CE7)
@@ -443,20 +494,46 @@ fun extractArtworkGlowPalette(bitmap: Bitmap?, fallbackColor: Color = Color.Unsp
         val secondaryColor = if (bestSecondaryScore > 0f) {
             android.graphics.Color.colorToHSV(bestSecondaryColor, hsv)
             hsv[1] = hsv[1].coerceIn(0.50f, 0.90f)
-            hsv[2] = hsv[2].coerceIn(0.60f, 0.90f)
+            hsv[2] = hsv[2].coerceIn(0.65f, 0.90f)
             Color(android.graphics.Color.HSVToColor(hsv))
         } else {
             primaryColor
         }
 
+        val topColor = if (topBestScore > 0f) {
+            android.graphics.Color.colorToHSV(topBestColor, hsv)
+            hsv[1] = hsv[1].coerceIn(0.55f, 0.95f)
+            hsv[2] = hsv[2].coerceIn(0.70f, 0.92f)
+            Color(android.graphics.Color.HSVToColor(hsv))
+        } else {
+            primaryColor
+        }
+
+        val bottomColor = if (bottomBestScore > 0f) {
+            android.graphics.Color.colorToHSV(bottomBestColor, hsv)
+            hsv[1] = hsv[1].coerceIn(0.50f, 0.90f)
+            hsv[2] = hsv[2].coerceIn(0.65f, 0.90f)
+            Color(android.graphics.Color.HSVToColor(hsv))
+        } else {
+            secondaryColor
+        }
+
         ArtworkGlowPalette(
             primary = primaryColor,
             secondary = secondaryColor,
-            accent = primaryColor.copy(alpha = 0.85f)
+            accent = primaryColor.copy(alpha = 0.85f),
+            topColor = topColor,
+            bottomColor = bottomColor
         )
     } catch (_: Throwable) {
         val safeFallback = if (fallbackColor.isSpecified) fallbackColor else Color(0xFF6C5CE7)
-        ArtworkGlowPalette(safeFallback, safeFallback, safeFallback)
+        ArtworkGlowPalette(
+            primary = safeFallback,
+            secondary = safeFallback,
+            accent = safeFallback,
+            topColor = safeFallback,
+            bottomColor = safeFallback
+        )
     }
 }
 
@@ -469,70 +546,82 @@ fun extractDominantColor(bitmap: Bitmap): Color {
 }
 
 /**
- * Creates an authentic, organic artwork glow bitmap.
- * 1. Takes the artwork bitmap.
- * 2. Pre-masks it to a rounded-corner silhouette matching the 26.dp artwork corner radius.
- * 3. Centers it on an expanded canvas with transparent padding on all 4 sides.
- * 4. Applies dual-pass downsample-bilinear blur so colors naturally diffuse into transparency.
- * 5. Guarantees ZERO square corners, ZERO dark rectangular patches, and soft, natural radiant illumination.
+ * Creates an authentic, organic artwork-shaped ambient glow bitmap.
+ *
+ * Architecture:
+ * 1. Geometry & Color Separation:
+ *    - The glow silhouette is constructed directly from the artwork's exact 26.dp rounded corner geometry.
+ *    - Source RGB pixels are NEVER drawn onto the canvas, preventing dark album edges from baking
+ *      muddy or black patches into the halo.
+ * 2. True Software Gaussian Diffusion:
+ *    - Applies Android's BlurMaskFilter on a software ARGB_8888 canvas with generous transparent padding (50px).
+ *    - Dual-pass diffusion: a wide atmospheric pass (38px radius) for smooth ambient falloff and a contour
+ *      pass (16px radius) for luminous silhouette proximity.
+ *    - Because paddingPx (50px) > blurRadius (38px), the glow decays completely to alpha 0 before the canvas
+ *      boundaries, guaranteeing ZERO rectangular cutoff edges or visible box seams.
+ * 3. Color Grading:
+ *    - Shaded via a smooth vertical LinearGradient from palette.topColor to palette.bottomColor.
+ *    - Harmonizes with the artwork without ever creating a circular disc or dark backing patch.
  */
 fun createArtworkGlowBitmap(
     source: Bitmap,
-    targetSize: Int = 240,
-    paddingPx: Int = 38
+    targetSize: Int = 320,
+    paddingPx: Int = 50,
+    palette: ArtworkGlowPalette? = null
 ): Bitmap? {
     return try {
         if (source.isRecycled || source.width <= 0 || source.height <= 0) return null
+
+        val glowPalette = palette ?: extractArtworkGlowPalette(source)
 
         // 1. Create a transparent canvas of targetSize x targetSize
         val glowCanvasBitmap = Bitmap.createBitmap(targetSize, targetSize, Bitmap.Config.ARGB_8888)
         val canvas = android.graphics.Canvas(glowCanvasBitmap)
         canvas.drawColor(android.graphics.Color.TRANSPARENT, android.graphics.PorterDuff.Mode.CLEAR)
 
-        // 2. Compute inner bounds with padding
+        // 2. Compute inner bounds with transparent padding
         val innerLeft = paddingPx.toFloat()
         val innerTop = paddingPx.toFloat()
         val innerRight = (targetSize - paddingPx).toFloat()
         val innerBottom = (targetSize - paddingPx).toFloat()
         val innerSize = innerRight - innerLeft
 
-        // Corner radius scaled proportionally to 26dp / 280dp of inner artwork footprint (~16px)
+        // Corner radius scaled proportionally to 26dp / 280dp of inner artwork footprint (~20.4px)
         val cornerRadius = innerSize * (26f / 280f)
+        val rectF = android.graphics.RectF(innerLeft, innerTop, innerRight, innerBottom)
 
-        // 3. Mask to rounded-rectangle silhouette
-        val path = android.graphics.Path().apply {
-            addRoundRect(
-                android.graphics.RectF(innerLeft, innerTop, innerRight, innerBottom),
-                cornerRadius,
-                cornerRadius,
-                android.graphics.Path.Direction.CW
+        val topArgb = glowPalette.topColor.toArgb()
+        val bottomArgb = glowPalette.bottomColor.toArgb()
+
+        // 3. Wide atmospheric glow pass (large Gaussian spread for soft ambient halo)
+        val widePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            shader = android.graphics.LinearGradient(
+                innerLeft, innerTop,
+                innerLeft, innerBottom,
+                topArgb,
+                bottomArgb,
+                android.graphics.Shader.TileMode.CLAMP
             )
+            maskFilter = android.graphics.BlurMaskFilter(38f, android.graphics.BlurMaskFilter.Blur.NORMAL)
+            alpha = 150 // ~0.59 opacity for soft, expansive atmospheric diffusion
         }
-        canvas.save()
-        canvas.clipPath(path)
+        canvas.drawRoundRect(rectF, cornerRadius, cornerRadius, widePaint)
 
-        // Draw the source artwork scaled into the rounded inner rect
-        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG)
-        val srcRect = android.graphics.Rect(0, 0, source.width, source.height)
-        val dstRect = android.graphics.RectF(innerLeft, innerTop, innerRight, innerBottom)
-        canvas.drawBitmap(source, srcRect, dstRect, paint)
-        canvas.restore()
-
-        // 4. Downsample to small resolution with bilinear filtering to diffuse into padding
-        val tinyDim = 32
-        val tiny = Bitmap.createScaledBitmap(glowCanvasBitmap, tinyDim, tinyDim, true)
-
-        // 5. Upscale back to targetSize with bilinear filtering - creates perfectly smooth optical Gaussian diffusion
-        val blurredGlow = Bitmap.createScaledBitmap(tiny, targetSize, targetSize, true)
-
-        if (tiny != blurredGlow && !tiny.isRecycled) {
-            tiny.recycle()
+        // 4. Contour illumination pass (tighter Gaussian glow hugging the rounded silhouette)
+        val contourPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            shader = android.graphics.LinearGradient(
+                innerLeft, innerTop,
+                innerLeft, innerBottom,
+                topArgb,
+                bottomArgb,
+                android.graphics.Shader.TileMode.CLAMP
+            )
+            maskFilter = android.graphics.BlurMaskFilter(16f, android.graphics.BlurMaskFilter.Blur.NORMAL)
+            alpha = 200 // ~0.78 opacity for vibrant proximity illumination
         }
-        if (glowCanvasBitmap != blurredGlow && !glowCanvasBitmap.isRecycled) {
-            glowCanvasBitmap.recycle()
-        }
+        canvas.drawRoundRect(rectF, cornerRadius, cornerRadius, contourPaint)
 
-        blurredGlow
+        glowCanvasBitmap
     } catch (_: Throwable) {
         null
     }
@@ -545,13 +634,15 @@ fun createArtworkGlowBitmap(
 @Composable
 fun rememberArtworkGlowBitmap(
     track: TrackMetadata?,
-    artworkBitmap: Bitmap?
+    artworkBitmap: Bitmap?,
+    glowPalette: ArtworkGlowPalette? = null
 ): Bitmap? {
     val trackKey = track?.key ?: ""
     val uriStr = track?.albumArtUri ?: ""
-    val cacheKey = remember(trackKey, uriStr, artworkBitmap) {
+    val paletteHash = glowPalette?.let { "${it.topColor.hashCode()}_${it.bottomColor.hashCode()}" } ?: ""
+    val cacheKey = remember(trackKey, uriStr, artworkBitmap, paletteHash) {
         if (artworkBitmap != null && !artworkBitmap.isRecycled) {
-            buildArtworkCacheKey(trackKey, uriStr, "glow_240_${artworkBitmap.hashCode()}")
+            buildArtworkCacheKey(trackKey, uriStr, "glow_mask_320_${artworkBitmap.hashCode()}_$paletteHash")
         } else ""
     }
 
@@ -560,7 +651,8 @@ fun rememberArtworkGlowBitmap(
     return produceState<Bitmap?>(
         initialValue = cached,
         key1 = cacheKey,
-        key2 = artworkBitmap
+        key2 = artworkBitmap,
+        key3 = glowPalette
     ) {
         if (artworkBitmap == null || artworkBitmap.isRecycled) {
             value = null
@@ -574,7 +666,7 @@ fun rememberArtworkGlowBitmap(
         }
 
         val glow = withContext(Dispatchers.Default) {
-            createArtworkGlowBitmap(artworkBitmap, targetSize = 240, paddingPx = 38)
+            createArtworkGlowBitmap(artworkBitmap, targetSize = 320, paddingPx = 50, palette = glowPalette)
         }
 
         if (glow != null && !glow.isRecycled) {

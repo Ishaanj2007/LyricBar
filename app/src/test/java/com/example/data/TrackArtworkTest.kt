@@ -69,6 +69,14 @@ class TrackArtworkTest {
         val palette = com.example.ui.components.extractArtworkGlowPalette(null, fallback)
         assertEquals(fallback, palette.primary)
         assertEquals(fallback, palette.secondary)
+        assertEquals(fallback, palette.topColor)
+        assertEquals(fallback, palette.bottomColor)
+    }
+
+    @Test
+    fun testArtworkGlowMask320CacheKeyGeneration() {
+        val key = com.example.ui.components.buildArtworkCacheKey("artist - title", "content://art/1", "glow_mask_320_12345_6789")
+        assertEquals("artist - title::content://art/1::glow_mask_320_12345_6789", key)
     }
 }
 
