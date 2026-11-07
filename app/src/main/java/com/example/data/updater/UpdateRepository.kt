@@ -1,6 +1,6 @@
 package com.example.data.updater
 
-import com.google.gson.JsonArray
+import android.os.Build
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import kotlinx.coroutines.Dispatchers
@@ -28,7 +28,7 @@ class UpdateRepository(
 
     suspend fun fetchLatestRelease(): Result<ReleaseInfo> = withContext(Dispatchers.IO) {
         try {
-            // First attempt: fetch /releases/latest (GitHub automatically points to the latest non-prerelease, non-draft)
+            // First attempt: fetch /releases/latest
             val request = Request.Builder()
                 .url(latestReleaseUrl)
                 .header("User-Agent", "LyricBar-Updater/${com.example.BuildConfig.VERSION_NAME}")
@@ -42,7 +42,14 @@ class UpdateRepository(
                             ?: return@withContext Result.failure(IOException("Empty response from GitHub API"))
                         val json = JsonParser.parseString(bodyString).asJsonObject
                         val release = parseReleaseJson(json)
-                        return@withContext Result.success(release)
+
+                        // Strict check: accept only stable (non-draft, non-prerelease) releases with a compatible APK
+                        if (!release.isDraft && !release.isPrerelease && release.apkAsset != null) {
+                            return@withContext Result.success(release)
+                        } else {
+                            // /releases/latest was draft, prerelease, or had no APK -> fall back to releases list
+                            return@withContext fetchFromReleasesList()
+                        }
                     }
                     403, 429 -> {
                         return@withContext Result.failure(
@@ -76,7 +83,12 @@ class UpdateRepository(
 
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
-                return Result.failure(IOException("GitHub returned HTTP ${response.code} fetching releases list"))
+                val errorMsg = if (response.code == 403 || response.code == 429) {
+                    "GitHub API rate limit exceeded. Please wait a few moments and try again."
+                } else {
+                    "GitHub returned HTTP ${response.code} fetching releases list"
+                }
+                return Result.failure(IOException(errorMsg))
             }
             val bodyString = response.body?.string()
                 ?: return Result.failure(IOException("Empty response from GitHub releases list"))
@@ -99,6 +111,82 @@ class UpdateRepository(
         }
     }
 
+    suspend fun fetchCompanionChecksum(companionAsset: ReleaseAsset, targetApkName: String? = null): String? = withContext(Dispatchers.IO) {
+        try {
+            val request = Request.Builder()
+                .url(companionAsset.downloadUrl)
+                .header("User-Agent", "LyricBar-Updater/${com.example.BuildConfig.VERSION_NAME}")
+                .build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext null
+                val text = response.body?.string() ?: return@withContext null
+                parseChecksumFromText(text, targetApkName)
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    internal fun parseChecksumFromText(text: String, targetApkName: String? = null): String? {
+        val hex64Pattern = Pattern.compile("([a-fA-F0-9]{64})")
+        if (!targetApkName.isNullOrBlank()) {
+            val cleanName = targetApkName.trim().lowercase()
+            for (line in text.lines()) {
+                val lowerLine = line.lowercase()
+                if (lowerLine.contains(cleanName)) {
+                    val matcher = hex64Pattern.matcher(line)
+                    if (matcher.find()) {
+                        return matcher.group(1)?.lowercase()
+                    }
+                }
+            }
+        }
+        val trimmed = text.trim()
+        val matcher = hex64Pattern.matcher(trimmed)
+        if (matcher.find()) {
+            return matcher.group(1)?.lowercase()
+        }
+        return null
+    }
+
+    fun selectBestApkAsset(apkAssets: List<ReleaseAsset>, supportedAbis: Array<String>? = null): ReleaseAsset? {
+        if (apkAssets.isEmpty()) return null
+        if (apkAssets.size == 1) return apkAssets.first()
+
+        val resolvedAbis = supportedAbis ?: try {
+            Build.SUPPORTED_ABIS
+        } catch (_: Throwable) {
+            null
+        } ?: arrayOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+
+        // 1. Look for asset specifically matching primary supported ABI
+        for (abi in resolvedAbis) {
+            val abiMatch = apkAssets.firstOrNull { asset ->
+                asset.name.contains(abi, ignoreCase = true)
+            }
+            if (abiMatch != null) return abiMatch
+        }
+
+        // 2. Look for universal or fat APK
+        val universal = apkAssets.firstOrNull { asset ->
+            asset.name.contains("universal", ignoreCase = true) ||
+            asset.name.contains("fat", ignoreCase = true) ||
+            asset.name.contains("all", ignoreCase = true)
+        }
+        if (universal != null) return universal
+
+        // 3. Look for APK that does not contain incompatible foreign ABIs in its name
+        val knownForeignAbis = listOf("arm64-v8a", "armeabi-v7a", "armeabi", "x86_64", "x86", "mips")
+        val neutralApk = apkAssets.firstOrNull { asset ->
+            val lower = asset.name.lowercase()
+            knownForeignAbis.none { lower.contains(it) }
+        }
+        if (neutralApk != null) return neutralApk
+
+        // 4. Default to first APK
+        return apkAssets.first()
+    }
+
     internal fun parseReleaseJson(json: JsonObject): ReleaseInfo {
         val tagName = json.get("tag_name")?.asString ?: ""
         val name = json.get("name")?.asString ?: tagName
@@ -110,8 +198,7 @@ class UpdateRepository(
 
         val assetsArray = json.getAsJsonArray("assets")
         val assetsList = mutableListOf<ReleaseAsset>()
-
-        var extractedDigest: String? = null
+        val checksumMap = mutableMapOf<String, String>()
 
         if (assetsArray != null) {
             for (element in assetsArray) {
@@ -124,7 +211,10 @@ class UpdateRepository(
                     val rawDigest = assetObj.get("digest")?.asString ?: ""
 
                     val cleanDigest = if (rawDigest.isNotBlank()) {
-                        rawDigest.removePrefix("sha256:").trim().lowercase()
+                        val candidate = rawDigest.removePrefix("sha256:").trim().lowercase()
+                        if (candidate.length == 64 && candidate.all { it in '0'..'9' || it in 'a'..'f' }) {
+                            candidate
+                        } else null
                     } else null
 
                     val asset = ReleaseAsset(
@@ -136,22 +226,66 @@ class UpdateRepository(
                     )
                     assetsList.add(asset)
 
-                    if (asset.isApk && cleanDigest != null && extractedDigest == null) {
-                        extractedDigest = cleanDigest
+                    if (cleanDigest != null) {
+                        checksumMap[assetName.lowercase()] = cleanDigest
                     }
                 }
             }
         }
 
-        // Prefer compatible APK asset
-        val apkAsset = assetsList.firstOrNull { it.isApk }
+        val apkAssets = assetsList.filter { it.isApk }
+        val apkAsset = selectBestApkAsset(apkAssets)
 
-        // If asset digest is missing, check if SHA-256 hash was noted in markdown release body
-        if (extractedDigest == null && body.isNotBlank()) {
-            val sha256Pattern = Pattern.compile("(?i)(?:sha[-_]?256|checksum)[^a-f0-9]*([a-f0-9]{64})")
-            val matcher = sha256Pattern.matcher(body)
-            if (matcher.find()) {
-                extractedDigest = matcher.group(1)?.lowercase()
+        // Parse checksums from markdown release body
+        if (body.isNotBlank()) {
+            // Pattern 1: <sha256> <filename>
+            val shaFirstPattern = Pattern.compile("(?i)([a-f0-9]{64})\\s+[*]?([a-zA-Z0-9._-]+)")
+            val m1 = shaFirstPattern.matcher(body)
+            while (m1.find()) {
+                val hash = m1.group(1)?.lowercase()
+                val filename = m1.group(2)?.lowercase()
+                if (hash != null && filename != null) {
+                    checksumMap[filename] = hash
+                }
+            }
+
+            // Pattern 2: <filename> : <sha256> or <filename> | <sha256> or <filename> - <sha256>
+            val fileFirstPattern = Pattern.compile("(?i)([a-zA-Z0-9._-]+\\.apk)\\s*[:\\-|]\\s*([a-f0-9]{64})")
+            val m2 = fileFirstPattern.matcher(body)
+            while (m2.find()) {
+                val filename = m2.group(1)?.lowercase()
+                val hash = m2.group(2)?.lowercase()
+                if (filename != null && hash != null) {
+                    checksumMap[filename] = hash
+                }
+            }
+
+            // Pattern 3: Table row | <filename> | <sha256> |
+            val tablePattern = Pattern.compile("(?i)\\|\\s*([a-zA-Z0-9._-]+\\.apk)\\s*\\|\\s*([a-f0-9]{64})\\s*\\|")
+            val m3 = tablePattern.matcher(body)
+            while (m3.find()) {
+                val filename = m3.group(1)?.lowercase()
+                val hash = m3.group(2)?.lowercase()
+                if (filename != null && hash != null) {
+                    checksumMap[filename] = hash
+                }
+            }
+        }
+
+        // Global checksum fallback: ONLY when there is exactly 1 APK asset and no conflicting variant checksums
+        var globalChecksum: String? = null
+        if (apkAsset != null) {
+            globalChecksum = checksumMap[apkAsset.name.lowercase()]
+        }
+        if (globalChecksum == null && apkAssets.size == 1 && body.isNotBlank()) {
+            val genericPattern = Pattern.compile("(?i)(?:sha[-_]?256|checksum)[^a-f0-9]*([a-f0-9]{64})")
+            val m = genericPattern.matcher(body)
+            if (m.find()) {
+                val extracted = m.group(1)?.lowercase()
+                globalChecksum = extracted
+                if (extracted != null && apkAsset != null) {
+                    checksumMap[apkAsset.name.lowercase()] = extracted
+                }
             }
         }
 
@@ -164,7 +298,9 @@ class UpdateRepository(
             isDraft = isDraft,
             isPrerelease = isPrerelease,
             apkAsset = apkAsset,
-            sha256Checksum = extractedDigest
+            sha256Checksum = globalChecksum,
+            allAssets = assetsList,
+            assetChecksums = checksumMap
         )
     }
 }

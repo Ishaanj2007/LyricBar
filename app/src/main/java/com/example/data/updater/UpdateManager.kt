@@ -171,10 +171,27 @@ class UpdateManager private constructor(
         _uiState.value = UpdateUiState.Verifying(release, file)
 
         scope.launch(Dispatchers.Default) {
+            // 1. Resolve asset-specific checksum
+            var expectedSha256 = release.getChecksumForAsset(release.apkAsset)
+
+            // 2. If not found in metadata or release body, check companion checksum file
+            if (expectedSha256 == null && release.apkAsset != null) {
+                val companion = release.allAssets.firstOrNull {
+                    it.isChecksumFile && (
+                        it.name.startsWith(release.apkAsset.name, ignoreCase = true) ||
+                        it.name.equals("SHA256SUMS", ignoreCase = true) ||
+                        it.name.equals("checksums.txt", ignoreCase = true)
+                    )
+                }
+                if (companion != null) {
+                    expectedSha256 = repository.fetchCompanionChecksum(companion, release.apkAsset.name)
+                }
+            }
+
             val result = ApkVerifier.verify(
                 context = context,
                 apkFile = file,
-                expectedSha256 = release.sha256Checksum,
+                expectedSha256 = expectedSha256,
                 installedVersionName = installedVersionName,
                 installedVersionCode = installedVersionCode
             )
@@ -182,7 +199,7 @@ class UpdateManager private constructor(
             withContext(Dispatchers.Main) {
                 when (result) {
                     is VerificationResult.Success -> {
-                        // Check if install permission is required
+                        // Check if unknown app install permission is required
                         if (!UpdateInstaller.canRequestPackageInstalls(context)) {
                             val settingsIntent = UpdateInstaller.createManageUnknownAppSourcesIntent(context)
                             _uiState.value = UpdateUiState.PermissionRequired(
@@ -200,6 +217,11 @@ class UpdateManager private constructor(
                         }
                     }
                     is VerificationResult.Error -> {
+                        // Securely remove the failed/untrusted APK file immediately
+                        try {
+                            if (file.exists()) file.delete()
+                        } catch (_: Exception) {}
+
                         _uiState.value = UpdateUiState.VerificationFailed(
                             release = release,
                             reason = result.message
@@ -211,6 +233,13 @@ class UpdateManager private constructor(
     }
 
     fun installApk(release: ReleaseInfo, file: File) {
+        val currentState = _uiState.value
+        // Only permit installation when in ReadyToInstall or PermissionRequired states
+        if (currentState !is UpdateUiState.ReadyToInstall && currentState !is UpdateUiState.PermissionRequired) {
+            _uiState.value = UpdateUiState.Error("Installation cannot proceed: APK has not passed verification.")
+            return
+        }
+
         val installResult = UpdateInstaller.installApk(context, file)
         when (installResult) {
             is InstallationResult.Launched -> {

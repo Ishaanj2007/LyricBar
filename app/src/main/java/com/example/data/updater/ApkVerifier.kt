@@ -29,13 +29,15 @@ sealed interface VerificationResult {
 
 object ApkVerifier {
 
+    private val HEX_64_REGEX = Regex("^[a-fA-F0-9]{64}$")
+
     /**
      * Comprehensive security verification of a downloaded APK:
      * 1. File existence and non-empty check.
      * 2. SHA-256 checksum verification against release metadata (if available).
      * 3. Package archive integrity parsing.
      * 4. Package identity matching against current installed application.
-     * 5. Version verification (preventing downgrade attacks).
+     * 5. Strict numeric version verification (preventing downgrade or reinstall attacks).
      * 6. Android signing certificate fingerprint match against installed app.
      */
     fun verify(
@@ -54,6 +56,9 @@ object ApkVerifier {
         val actualSha256 = calculateSha256(apkFile)
         val checksumStatus = if (!expectedSha256.isNullOrBlank()) {
             val cleanExpected = expectedSha256.trim().lowercase()
+            if (!HEX_64_REGEX.matches(cleanExpected)) {
+                return VerificationResult.Error("Provided expected SHA-256 checksum is malformed ($cleanExpected).")
+            }
             if (actualSha256.equals(cleanExpected, ignoreCase = true)) {
                 ChecksumStatus.Verified
             } else {
@@ -84,7 +89,7 @@ object ApkVerifier {
             )
         }
 
-        // 5. Version verification
+        // 5. Strict numeric version verification
         val apkVersionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             apkPackageInfo.longVersionCode
         } else {
@@ -93,12 +98,17 @@ object ApkVerifier {
         }
         val apkVersionName = apkPackageInfo.versionName ?: ""
 
-        // Check if APK is older than installed version
-        if (apkVersionCode < installedVersionCode &&
-            VersionComparator.compare(apkVersionName, installedVersionName) < 0
-        ) {
+        // Check if APK versionCode is not strictly newer than installed version
+        if (apkVersionCode <= installedVersionCode) {
             return VerificationResult.Error(
-                "APK version is older than currently installed app (installed: $installedVersionName, apk: $apkVersionName). Downgrading is not permitted."
+                "APK version code ($apkVersionCode) is not newer than installed version code ($installedVersionCode). Downgrading or re-installing the same version is not permitted."
+            )
+        }
+
+        // Check if APK versionName is older than installed version
+        if (VersionComparator.compare(apkVersionName, installedVersionName) < 0) {
+            return VerificationResult.Error(
+                "APK version name ($apkVersionName) is older than installed version name ($installedVersionName). Downgrading is not permitted."
             )
         }
 
