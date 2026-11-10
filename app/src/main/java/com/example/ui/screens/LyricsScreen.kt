@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -15,6 +16,8 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
@@ -27,8 +30,10 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -39,15 +44,26 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.roundToInt
 import com.example.data.model.TrackMetadata
 import com.example.domain.lyricsengine.LyricsFileFormat
 import com.example.domain.lyricsengine.LyricsSearchQueryBuilder
@@ -183,11 +199,25 @@ fun LyricsScreen(
     val themePrimary = MaterialTheme.colorScheme.primary
     val themeSecondary = MaterialTheme.colorScheme.secondary
     val hazeState = LocalHazeState.current
+    val density = LocalDensity.current
+
+    var rootPositionInWindow by remember { mutableStateOf(Offset.Zero) }
+    var rootSizePx by remember { mutableStateOf(IntSize.Zero) }
+    var selectorPositionInWindow by remember { mutableStateOf(Offset.Zero) }
+    var selectorSizePx by remember { mutableStateOf(IntSize.Zero) }
+
+    BackHandler(enabled = isProviderMenuExpanded) {
+        isProviderMenuExpanded = false
+    }
 
     Box(
         modifier = modifier
             .fillMaxSize()
             .windowInsetsPadding(WindowInsets.statusBars)
+            .onGloballyPositioned { coords ->
+                rootPositionInWindow = coords.positionInWindow()
+                rootSizePx = coords.size
+            }
     ) {
         Column(
             modifier = Modifier
@@ -311,6 +341,11 @@ fun LyricsScreen(
                 // Compact Provider Selector & Actual Lyrics Source Bar
                 val lyrics = currentLyrics
                 val actualSourceLabel = if (lyrics != null && lyrics.hasValidLyrics) lyrics.displaySource else ""
+                val chevronRotation by animateFloatAsState(
+                    targetValue = if (isProviderMenuExpanded) 180f else 0f,
+                    animationSpec = tween(durationMillis = 180),
+                    label = "provider_chevron_rotation"
+                )
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -318,81 +353,51 @@ fun LyricsScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box {
-                        Surface(
-                            onClick = { isProviderMenuExpanded = true },
-                            shape = RoundedCornerShape(12.dp),
-                            color = Color.White.copy(alpha = 0.08f),
-                            border = BorderStroke(0.75.dp, themePrimary.copy(alpha = 0.30f)),
-                            modifier = Modifier
-                                .defaultMinSize(minHeight = 32.dp)
-                                .testTag("lyrics_provider_selector")
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Tune,
-                                    contentDescription = "Lyrics provider",
-                                    tint = themePrimary,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Text(
-                                    text = "Provider: ${selectedProvider.displayName}",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Icon(
-                                    imageVector = Icons.Default.ArrowDropDown,
-                                    contentDescription = "Select lyrics provider",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(16.dp)
-                                )
+                    Surface(
+                        onClick = { isProviderMenuExpanded = !isProviderMenuExpanded },
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (isProviderMenuExpanded) {
+                            themePrimary.copy(alpha = 0.16f)
+                        } else {
+                            Color.White.copy(alpha = 0.08f)
+                        },
+                        border = BorderStroke(
+                            0.75.dp,
+                            if (isProviderMenuExpanded) themePrimary.copy(alpha = 0.48f) else themePrimary.copy(alpha = 0.30f)
+                        ),
+                        modifier = Modifier
+                            .defaultMinSize(minHeight = 32.dp)
+                            .onGloballyPositioned { coords ->
+                                selectorPositionInWindow = coords.positionInWindow()
+                                selectorSizePx = coords.size
                             }
-                        }
-
-                        DropdownMenu(
-                            expanded = isProviderMenuExpanded,
-                            onDismissRequest = { isProviderMenuExpanded = false }
+                            .testTag("lyrics_provider_selector")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            com.example.data.preferences.LyricsProviderPreference.entries.forEach { option ->
-                                val isSelected = option == selectedProvider
-                                DropdownMenuItem(
-                                    text = {
-                                        Column {
-                                            Text(
-                                                text = option.displayName,
-                                                fontSize = 13.sp,
-                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                                color = if (isSelected) themePrimary else MaterialTheme.colorScheme.onSurface
-                                            )
-                                            Text(
-                                                text = option.description,
-                                                fontSize = 11.sp,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                    },
-                                    trailingIcon = if (isSelected) {
-                                        {
-                                            Icon(
-                                                imageVector = Icons.Default.Check,
-                                                contentDescription = "Selected",
-                                                tint = themePrimary,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                        }
-                                    } else null,
-                                    onClick = {
-                                        isProviderMenuExpanded = false
-                                        playbackManager.setLyricsProvider(option)
-                                    },
-                                    modifier = Modifier.testTag("lyrics_provider_option_${option.name.lowercase()}")
-                                )
-                            }
+                            Icon(
+                                imageVector = Icons.Default.Tune,
+                                contentDescription = "Lyrics provider",
+                                tint = themePrimary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "Provider: ${selectedProvider.displayName}",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Icon(
+                                imageVector = Icons.Default.ArrowDropDown,
+                                contentDescription = "Select lyrics provider",
+                                tint = if (isProviderMenuExpanded) themePrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier
+                                    .size(16.dp)
+                                    .graphicsLayer { rotationZ = chevronRotation }
+                            )
                         }
                     }
 
@@ -963,6 +968,35 @@ fun LyricsScreen(
                 }
             }
         }
+
+        // Outside-tap dismiss layer when floating provider menu is open
+        if (isProviderMenuExpanded) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = { isProviderMenuExpanded = false }
+                    )
+                    .testTag("lyrics_provider_menu_scrim")
+            )
+        }
+
+        // In-window Frosted-Glass Floating Provider Menu (shares LocalHazeState for true backdrop blur)
+        ProviderFloatingGlassMenu(
+            expanded = isProviderMenuExpanded,
+            selectedProvider = selectedProvider,
+            onSelectProvider = { option ->
+                isProviderMenuExpanded = false
+                playbackManager.setLyricsProvider(option)
+            },
+            rootPositionInWindow = rootPositionInWindow,
+            rootSizePx = rootSizePx,
+            selectorPositionInWindow = selectorPositionInWindow,
+            selectorSizePx = selectorSizePx,
+            hazeState = hazeState
+        )
     }
 
     if (showManualSearchDialog) {
@@ -995,6 +1029,204 @@ fun LyricsScreen(
                 }
             }
         )
+    }
+}
+
+private fun com.example.data.preferences.LyricsProviderPreference.compactMenuDescription(): String = when (this) {
+    com.example.data.preferences.LyricsProviderPreference.AUTO -> "Tries providers in priority order."
+    com.example.data.preferences.LyricsProviderPreference.LRCLIB -> "Synchronized LRC catalog."
+    com.example.data.preferences.LyricsProviderPreference.LRC_RED -> "ISRC-based lyrics."
+    com.example.data.preferences.LyricsProviderPreference.KUGOU -> "Title and artist matching."
+    com.example.data.preferences.LyricsProviderPreference.LYRICS_PLUS -> "Multi-mirror lyrics."
+}
+
+@Composable
+private fun ProviderFloatingGlassMenu(
+    expanded: Boolean,
+    selectedProvider: com.example.data.preferences.LyricsProviderPreference,
+    onSelectProvider: (com.example.data.preferences.LyricsProviderPreference) -> Unit,
+    rootPositionInWindow: Offset,
+    rootSizePx: IntSize,
+    selectorPositionInWindow: Offset,
+    selectorSizePx: IntSize,
+    hazeState: HazeState?
+) {
+    val density = LocalDensity.current
+    val themePrimary = MaterialTheme.colorScheme.primary
+    val onSurface = MaterialTheme.colorScheme.onSurface
+    val onSurfaceVariant = MaterialTheme.colorScheme.onSurfaceVariant
+
+    var menuSizePx by remember { mutableStateOf(IntSize.Zero) }
+
+    val horizontalMarginPx = with(density) { 16.dp.roundToPx() }
+    val verticalGapPx = with(density) { 6.dp.roundToPx() }
+    val bottomSafePaddingPx = with(density) { 88.dp.roundToPx() }
+
+    val rawX = (selectorPositionInWindow.x - rootPositionInWindow.x).roundToInt()
+    val rawY = (selectorPositionInWindow.y - rootPositionInWindow.y + selectorSizePx.height + verticalGapPx).roundToInt()
+
+    val clampedX = if (rootSizePx.width > 0 && menuSizePx.width > 0) {
+        val maxX = (rootSizePx.width - menuSizePx.width - horizontalMarginPx).coerceAtLeast(horizontalMarginPx)
+        rawX.coerceIn(horizontalMarginPx, maxX)
+    } else {
+        rawX.coerceAtLeast(horizontalMarginPx)
+    }
+
+    val clampedY = rawY.coerceAtLeast(with(density) { 44.dp.roundToPx() })
+
+    val maxMenuWidthDp = if (rootSizePx.width > 0) {
+        with(density) {
+            minOf(244.dp, (rootSizePx.width - horizontalMarginPx * 2).toDp().coerceAtLeast(196.dp))
+        }
+    } else {
+        240.dp
+    }
+
+    val maxMenuHeightDp = if (rootSizePx.height > 0) {
+        with(density) {
+            val availablePx = (rootSizePx.height - clampedY - bottomSafePaddingPx).coerceAtLeast(156.dp.roundToPx())
+            minOf(280.dp, availablePx.toDp())
+        }
+    } else {
+        260.dp
+    }
+
+    val menuShape = RoundedCornerShape(16.dp)
+
+    Box(
+        modifier = Modifier
+            .offset { IntOffset(clampedX, clampedY) }
+    ) {
+        AnimatedVisibility(
+            visible = expanded,
+            enter = fadeIn(animationSpec = tween(durationMillis = 150)) +
+                scaleIn(
+                    initialScale = 0.92f,
+                    transformOrigin = TransformOrigin(0f, 0f),
+                    animationSpec = spring(dampingRatio = 0.84f, stiffness = 540f)
+                ),
+            exit = fadeOut(animationSpec = tween(durationMillis = 110)) +
+                scaleOut(
+                    targetScale = 0.95f,
+                    transformOrigin = TransformOrigin(0f, 0f),
+                    animationSpec = tween(durationMillis = 110)
+                )
+        ) {
+            FrostedCard(
+                hazeState = hazeState,
+                shape = menuShape,
+                backgroundAlpha = 0.36f,
+                blurRadius = 26.dp,
+                borderWidth = 0.75.dp,
+                borderAlpha = 0.22f,
+                modifier = Modifier
+                    .widthIn(min = 212.dp, max = maxMenuWidthDp)
+                    .width(IntrinsicSize.Max)
+                    .heightIn(max = maxMenuHeightDp)
+                    .onGloballyPositioned { coords ->
+                        menuSizePx = coords.size
+                    }
+                    .shadow(
+                        elevation = 10.dp,
+                        shape = menuShape,
+                        ambientColor = Color.Black.copy(alpha = 0.32f),
+                        spotColor = Color.Black.copy(alpha = 0.32f)
+                    )
+                    .testTag("lyrics_provider_dropdown_menu")
+            ) {
+                // Subtle artwork/palette-derived glass sheen over the Haze blurred backdrop
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            brush = Brush.verticalGradient(
+                                colors = listOf(
+                                    themePrimary.copy(alpha = 0.07f),
+                                    Color.Black.copy(alpha = 0.10f)
+                                )
+                            )
+                        )
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .verticalScroll(rememberScrollState())
+                            .padding(horizontal = 6.dp, vertical = 6.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        com.example.data.preferences.LyricsProviderPreference.entries.forEach { option ->
+                            val isSelected = option == selectedProvider
+                            val rowShape = RoundedCornerShape(10.dp)
+                            val rowBackground = if (isSelected) {
+                                themePrimary.copy(alpha = 0.15f)
+                            } else {
+                                Color.Transparent
+                            }
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .defaultMinSize(minHeight = 38.dp)
+                                    .clip(rowShape)
+                                    .background(rowBackground)
+                                    .clickable(
+                                        role = Role.RadioButton,
+                                        onClick = { onSelectProvider(option) }
+                                    )
+                                    .padding(horizontal = 10.dp, vertical = 5.dp)
+                                    .testTag("lyrics_provider_option_${option.name.lowercase()}"),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(end = 8.dp),
+                                    verticalArrangement = Arrangement.Center
+                                ) {
+                                    Text(
+                                        text = option.displayName,
+                                        fontSize = 12.5.sp,
+                                        lineHeight = 15.sp,
+                                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                                        color = if (isSelected) themePrimary else onSurface.copy(alpha = 0.95f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = option.compactMenuDescription(),
+                                        fontSize = 10.5.sp,
+                                        lineHeight = 13.sp,
+                                        fontWeight = FontWeight.Normal,
+                                        color = if (isSelected) {
+                                            onSurfaceVariant.copy(alpha = 0.90f)
+                                        } else {
+                                            onSurfaceVariant.copy(alpha = 0.72f)
+                                        },
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+
+                                Box(
+                                    modifier = Modifier.size(16.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (isSelected) {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = "Selected",
+                                            tint = themePrimary,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
