@@ -94,7 +94,7 @@ private fun NavPillItem(
         label = "nav_icon_color"
     )
     val indicatorColor by animateColorAsState(
-        targetValue = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.20f) else Color.Transparent,
+        targetValue = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.28f) else Color.Transparent,
         label = "nav_indicator_color"
     )
     val textColor by animateColorAsState(
@@ -106,7 +106,7 @@ private fun NavPillItem(
         modifier = modifier
             .minimumInteractiveComponentSize()
             .scale(scale)
-            .clip(RoundedCornerShape(22.dp))
+            .clip(RoundedCornerShape(20.dp))
             .clickable(
                 interactionSource = interactionSource,
                 indication = ripple(bounded = true, color = MaterialTheme.colorScheme.primary),
@@ -114,7 +114,7 @@ private fun NavPillItem(
                 onClick = onClick
             )
             .background(indicatorColor)
-            .padding(vertical = 8.dp, horizontal = 4.dp),
+            .padding(vertical = 6.dp, horizontal = 4.dp),
         contentAlignment = Alignment.Center
     ) {
         Column(
