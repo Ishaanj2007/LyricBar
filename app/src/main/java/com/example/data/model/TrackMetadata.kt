@@ -10,7 +10,8 @@ data class TrackMetadata(
     val sourcePackage: String = "",
     val sourceAppName: String = "",
     val albumArtUri: String? = null,
-    val albumArtBitmap: android.graphics.Bitmap? = null
+    val albumArtBitmap: android.graphics.Bitmap? = null,
+    val isrc: String? = null
 ) {
     /**
      * Base normalized identity based on artist and title, preserving version markers (Live, Remastered, Acoustic, etc.)

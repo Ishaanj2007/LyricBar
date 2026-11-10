@@ -7,10 +7,55 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.example.R
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import java.io.IOException
 
 val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "lyricbar_prefs")
+
+enum class LyricsProviderPreference(
+    val displayName: String,
+    val description: String,
+    val providerName: String?
+) {
+    AUTO(
+        displayName = "Automatic",
+        description = "Tries LRCLIB → lrc.red → KuGou → LyricsPlus in order",
+        providerName = null
+    ),
+    LRCLIB(
+        displayName = "LRCLIB",
+        description = "Primary community catalog of synchronized LRC lyrics",
+        providerName = "LRCLIB"
+    ),
+    LRC_RED(
+        displayName = "lrc.red",
+        description = "ISRC-matched synchronized LRC lyrics catalog",
+        providerName = "lrc.red"
+    ),
+    KUGOU(
+        displayName = "KuGou",
+        description = "Title and artist matched synchronized lyrics catalog",
+        providerName = "KuGou"
+    ),
+    LYRICS_PLUS(
+        displayName = "LyricsPlus",
+        description = "Multi-mirror synchronized lyrics aggregator",
+        providerName = "LyricsPlus"
+    );
+
+    companion object {
+        fun fromPersistedValue(value: String?): LyricsProviderPreference {
+            if (value.isNullOrBlank()) return AUTO
+            val trimmed = value.trim()
+            return entries.firstOrNull { option ->
+                option.name.equals(trimmed, ignoreCase = true) ||
+                    option.displayName.equals(trimmed, ignoreCase = true) ||
+                    (option.providerName != null && option.providerName.equals(trimmed, ignoreCase = true))
+            } ?: AUTO
+        }
+    }
+}
 
 enum class ThemePreset(val title: String) {
     ROSE_QUARTZ("Rose Quartz"),
@@ -77,6 +122,7 @@ data class UserPreferences(
     val isDragRepositionMode: Boolean = false,
     val autoShowOnPlayback: Boolean = true,
     val autoFetchLyrics: Boolean = true,
+    val lyricsProvider: LyricsProviderPreference = LyricsProviderPreference.AUTO,
     val useWallpaperDynamicColor: Boolean = true,
     val themeMode: ThemeMode = ThemeMode.FOLLOW_SYSTEM,
     val themePreset: ThemePreset = ThemePreset.ROSE_QUARTZ,
@@ -88,7 +134,9 @@ data class UserPreferences(
     val globalOffsetMs: Long = 0L
 )
 
-class UserPreferencesRepository(private val context: Context) {
+class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
+
+    constructor(context: Context) : this(context.dataStore)
 
     private object PreferencesKeys {
         val OVERLAY_ENABLED = booleanPreferencesKey("overlay_enabled")
@@ -112,6 +160,7 @@ class UserPreferencesRepository(private val context: Context) {
         val IS_DRAG_MODE = booleanPreferencesKey("is_drag_mode")
         val AUTO_SHOW_ON_PLAYBACK = booleanPreferencesKey("auto_show_on_playback")
         val AUTO_FETCH_LYRICS = booleanPreferencesKey("auto_fetch_lyrics")
+        val LYRICS_PROVIDER = stringPreferencesKey("lyrics_provider")
         val USE_WALLPAPER_DYNAMIC_COLOR = booleanPreferencesKey("use_wallpaper_dynamic_color")
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val THEME_PRESET = stringPreferencesKey("theme_preset")
@@ -123,7 +172,7 @@ class UserPreferencesRepository(private val context: Context) {
         val GLOBAL_OFFSET_MS = longPreferencesKey("global_offset_ms")
     }
 
-    val userPreferencesFlow: Flow<UserPreferences> = context.dataStore.data
+    val userPreferencesFlow: Flow<UserPreferences> = dataStore.data
         .catch { exception ->
             if (exception is IOException) {
                 emit(emptyPreferences())
@@ -178,6 +227,10 @@ class UserPreferencesRepository(private val context: Context) {
                 else -> OverlayAnimationStyle.KARAOKE.name
             }
 
+            val lyricsProvider = LyricsProviderPreference.fromPersistedValue(
+                preferences[PreferencesKeys.LYRICS_PROVIDER]
+            )
+
             UserPreferences(
                 overlayEnabled = preferences[PreferencesKeys.OVERLAY_ENABLED] ?: true,
                 overlayTextSizeSp = preferences[PreferencesKeys.OVERLAY_TEXT_SIZE] ?: 14f,
@@ -199,6 +252,7 @@ class UserPreferencesRepository(private val context: Context) {
                 isDragRepositionMode = preferences[PreferencesKeys.IS_DRAG_MODE] ?: false,
                 autoShowOnPlayback = preferences[PreferencesKeys.AUTO_SHOW_ON_PLAYBACK] ?: true,
                 autoFetchLyrics = preferences[PreferencesKeys.AUTO_FETCH_LYRICS] ?: true,
+                lyricsProvider = lyricsProvider,
                 useWallpaperDynamicColor = preferences[PreferencesKeys.USE_WALLPAPER_DYNAMIC_COLOR] ?: true,
                 themeMode = themeMode,
                 themePreset = preset,
@@ -211,38 +265,51 @@ class UserPreferencesRepository(private val context: Context) {
             )
         }
 
+    val lyricsProviderFlow: Flow<LyricsProviderPreference> = userPreferencesFlow
+        .map { it.lyricsProvider }
+        .distinctUntilChanged()
+
+    suspend fun setLyricsProvider(provider: LyricsProviderPreference) {
+        dataStore.edit { it[PreferencesKeys.LYRICS_PROVIDER] = provider.name }
+    }
+
+    suspend fun setLyricsProvider(rawProvider: String?) {
+        val resolved = LyricsProviderPreference.fromPersistedValue(rawProvider)
+        setLyricsProvider(resolved)
+    }
+
     suspend fun setAnimationStyle(style: String) {
-        context.dataStore.edit { it[PreferencesKeys.ANIMATION_STYLE] = style }
+        dataStore.edit { it[PreferencesKeys.ANIMATION_STYLE] = style }
     }
 
     suspend fun setOverlayTextOpacity(opacity: Float) {
         val bounded = opacity.coerceIn(0.15f, 1.0f)
-        context.dataStore.edit { it[PreferencesKeys.OVERLAY_TEXT_OPACITY] = bounded }
+        dataStore.edit { it[PreferencesKeys.OVERLAY_TEXT_OPACITY] = bounded }
     }
 
     suspend fun setTypewriterSpeed(speed: Float) {
         val bounded = speed.coerceIn(0.3f, 3.0f)
-        context.dataStore.edit { it[PreferencesKeys.TYPEWRITER_SPEED] = bounded }
+        dataStore.edit { it[PreferencesKeys.TYPEWRITER_SPEED] = bounded }
     }
 
     suspend fun setSmoothTransitionSpeed(speed: Float) {
         val bounded = speed.coerceIn(0.3f, 3.0f)
-        context.dataStore.edit { it[PreferencesKeys.SMOOTH_TRANSITION_SPEED] = bounded }
+        dataStore.edit { it[PreferencesKeys.SMOOTH_TRANSITION_SPEED] = bounded }
     }
 
     suspend fun setFadeSpeed(speed: Float) {
         val bounded = speed.coerceIn(0.3f, 3.0f)
-        context.dataStore.edit { it[PreferencesKeys.FADE_SPEED] = bounded }
+        dataStore.edit { it[PreferencesKeys.FADE_SPEED] = bounded }
     }
 
     suspend fun setBlurRevealSpeed(speed: Float) {
         val bounded = speed.coerceIn(0.3f, 3.0f)
-        context.dataStore.edit { it[PreferencesKeys.BLUR_REVEAL_SPEED] = bounded }
+        dataStore.edit { it[PreferencesKeys.BLUR_REVEAL_SPEED] = bounded }
     }
 
     suspend fun setKaraokeSpeed(speed: Float) {
         val bounded = speed.coerceIn(0.5f, 1.5f)
-        context.dataStore.edit {
+        dataStore.edit {
             it[PreferencesKeys.KARAOKE_SPEED] = bounded
             it[PreferencesKeys.KARAOKE_GLOW_SPEED] = bounded
         }
@@ -253,38 +320,38 @@ class UserPreferencesRepository(private val context: Context) {
     }
 
     suspend fun setAppleMusicStyle(enabled: Boolean) {
-        context.dataStore.edit { it[PreferencesKeys.APPLE_MUSIC_STYLE] = enabled }
+        dataStore.edit { it[PreferencesKeys.APPLE_MUSIC_STYLE] = enabled }
     }
 
     suspend fun setSingleLineLyrics(enabled: Boolean) {
-        context.dataStore.edit { it[PreferencesKeys.SINGLE_LINE_LYRICS] = enabled }
+        dataStore.edit { it[PreferencesKeys.SINGLE_LINE_LYRICS] = enabled }
     }
 
     suspend fun setAdaptiveLyricScrolling(enabled: Boolean) {
-        context.dataStore.edit { it[PreferencesKeys.ADAPTIVE_LYRIC_SCROLLING] = enabled }
+        dataStore.edit { it[PreferencesKeys.ADAPTIVE_LYRIC_SCROLLING] = enabled }
     }
 
     suspend fun setLyricScrollSpeedMultiplier(multiplier: Float) {
         val bounded = multiplier.coerceIn(1.0f, 1.5f)
-        context.dataStore.edit { it[PreferencesKeys.LYRIC_SCROLL_SPEED_MULTIPLIER] = bounded }
+        dataStore.edit { it[PreferencesKeys.LYRIC_SCROLL_SPEED_MULTIPLIER] = bounded }
     }
 
     suspend fun setOverlayEnabled(enabled: Boolean) {
-        context.dataStore.edit { it[PreferencesKeys.OVERLAY_ENABLED] = enabled }
+        dataStore.edit { it[PreferencesKeys.OVERLAY_ENABLED] = enabled }
     }
 
     suspend fun setOverlayTextSize(sizeSp: Float) {
-        context.dataStore.edit { it[PreferencesKeys.OVERLAY_TEXT_SIZE] = sizeSp }
+        dataStore.edit { it[PreferencesKeys.OVERLAY_TEXT_SIZE] = sizeSp }
     }
 
     suspend fun setTextShadowEnabled(enabled: Boolean) {
-        context.dataStore.edit { it[PreferencesKeys.OVERLAY_TEXT_SHADOW] = enabled }
+        dataStore.edit { it[PreferencesKeys.OVERLAY_TEXT_SHADOW] = enabled }
     }
 
     suspend fun setOverlayPosition(x: Int, y: Int) {
         val boundedX = x.coerceIn(-2000, 2000)
         val boundedY = y.coerceIn(0, 3000)
-        context.dataStore.edit {
+        dataStore.edit {
             it[PreferencesKeys.OVERLAY_X_POS] = boundedX
             it[PreferencesKeys.OVERLAY_Y_POS] = boundedY
         }
@@ -295,7 +362,7 @@ class UserPreferencesRepository(private val context: Context) {
         val boundedY = y.coerceIn(0, 3000)
         val boundedW = widthPx.coerceIn(280, 2000)
         val boundedH = heightPx.coerceIn(60, 800)
-        context.dataStore.edit {
+        dataStore.edit {
             it[PreferencesKeys.OVERLAY_X_POS] = boundedX
             it[PreferencesKeys.OVERLAY_Y_POS] = boundedY
             it[PreferencesKeys.OVERLAY_WIDTH] = boundedW
@@ -306,14 +373,14 @@ class UserPreferencesRepository(private val context: Context) {
     suspend fun setOverlayDimensions(widthPx: Int, heightPx: Int) {
         val boundedW = widthPx.coerceIn(280, 2000)
         val boundedH = heightPx.coerceIn(60, 800)
-        context.dataStore.edit {
+        dataStore.edit {
             it[PreferencesKeys.OVERLAY_WIDTH] = boundedW
             it[PreferencesKeys.OVERLAY_HEIGHT] = boundedH
         }
     }
 
     suspend fun nudgeOverlayPosition(deltaX: Int, deltaY: Int) {
-        context.dataStore.edit {
+        dataStore.edit {
             val currentX = (it[PreferencesKeys.OVERLAY_X_POS] ?: 0) + deltaX
             val currentY = (it[PreferencesKeys.OVERLAY_Y_POS] ?: 180) + deltaY
             it[PreferencesKeys.OVERLAY_X_POS] = currentX.coerceIn(-2000, 2000)
@@ -327,50 +394,50 @@ class UserPreferencesRepository(private val context: Context) {
             "RIGHT" -> "RIGHT"
             else -> "CENTER"
         }
-        context.dataStore.edit { it[PreferencesKeys.OVERLAY_TEXT_ALIGN] = normalized }
+        dataStore.edit { it[PreferencesKeys.OVERLAY_TEXT_ALIGN] = normalized }
     }
 
     suspend fun setUpwardAnimationEnabled(enabled: Boolean) {
-        context.dataStore.edit { it[PreferencesKeys.UPWARD_ANIMATION] = enabled }
+        dataStore.edit { it[PreferencesKeys.UPWARD_ANIMATION] = enabled }
     }
 
     suspend fun setDragRepositionMode(dragMode: Boolean) {
-        context.dataStore.edit { it[PreferencesKeys.IS_DRAG_MODE] = dragMode }
+        dataStore.edit { it[PreferencesKeys.IS_DRAG_MODE] = dragMode }
     }
 
     suspend fun setAutoShowOnPlayback(enabled: Boolean) {
-        context.dataStore.edit { it[PreferencesKeys.AUTO_SHOW_ON_PLAYBACK] = enabled }
+        dataStore.edit { it[PreferencesKeys.AUTO_SHOW_ON_PLAYBACK] = enabled }
     }
 
     suspend fun setAutoFetchLyrics(enabled: Boolean) {
-        context.dataStore.edit { it[PreferencesKeys.AUTO_FETCH_LYRICS] = enabled }
+        dataStore.edit { it[PreferencesKeys.AUTO_FETCH_LYRICS] = enabled }
     }
 
     suspend fun setUseWallpaperDynamicColor(enabled: Boolean) {
-        context.dataStore.edit { it[PreferencesKeys.USE_WALLPAPER_DYNAMIC_COLOR] = enabled }
+        dataStore.edit { it[PreferencesKeys.USE_WALLPAPER_DYNAMIC_COLOR] = enabled }
     }
 
     suspend fun setThemePreset(preset: ThemePreset) {
-        context.dataStore.edit { it[PreferencesKeys.THEME_PRESET] = preset.name }
+        dataStore.edit { it[PreferencesKeys.THEME_PRESET] = preset.name }
     }
 
     suspend fun setThemeMode(mode: ThemeMode) {
-        context.dataStore.edit { it[PreferencesKeys.THEME_MODE] = mode.name }
+        dataStore.edit { it[PreferencesKeys.THEME_MODE] = mode.name }
     }
 
     suspend fun setSelectedFont(font: FontOption) {
-        context.dataStore.edit { it[PreferencesKeys.SELECTED_FONT] = font.name }
+        dataStore.edit { it[PreferencesKeys.SELECTED_FONT] = font.name }
     }
 
     suspend fun setTrackOffset(trackKey: String, offsetMs: Long) {
         val key = longPreferencesKey("offset_${trackKey.hashCode()}")
-        context.dataStore.edit { it[key] = offsetMs }
+        dataStore.edit { it[key] = offsetMs }
     }
 
     fun getTrackOffsetFlow(trackKey: String, fallbackKey: String? = null): Flow<Long> {
         val primaryKey = longPreferencesKey("offset_${trackKey.hashCode()}")
         val altKey = fallbackKey?.takeIf { it.isNotBlank() && it != trackKey }?.let { longPreferencesKey("offset_${it.hashCode()}") }
-        return context.dataStore.data.map { preferences ->
+        return dataStore.data.map { preferences ->
             preferences[primaryKey] ?: (if (altKey != null) preferences[altKey] else null) ?: 0L
         }
     }

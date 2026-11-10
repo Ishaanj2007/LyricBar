@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import com.example.data.preferences.LyricsProviderPreference
 import com.example.data.preferences.OverlayAnimationStyle
 import com.example.data.preferences.ThemeMode
 import com.example.data.preferences.ThemePreset
@@ -49,6 +50,7 @@ import com.example.ui.components.FrostedCard
 import com.example.ui.components.LocalHazeState
 import com.example.ui.theme.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.launch
 
@@ -60,16 +62,19 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    val livePreferences by playbackManager.preferencesRepository.userPreferencesFlow
+        .collectAsStateWithLifecycle(initialValue = userPreferences)
+    val selectedProvider = livePreferences.lyricsProvider
     var showCacheClearedToast by remember { mutableStateOf(false) }
     var isFontListExpanded by rememberSaveable { mutableStateOf(false) }
     val updateManager = remember { com.example.data.updater.UpdateManager.getInstance(context) }
     var showUpdateDialog by rememberSaveable { mutableStateOf(false) }
 
     val allSectionKeys = remember {
-        listOf("overlay", "animation", "size_align", "position", "theme", "typography", "data", "about")
+        listOf("overlay", "animation", "size_align", "position", "theme", "typography", "lyrics_provider", "data", "about")
     }
     var expandedSections by rememberSaveable {
-        mutableStateOf(setOf("overlay", "theme"))
+        mutableStateOf(setOf("overlay", "theme", "lyrics_provider"))
     }
     val toggleSection: (String) -> Unit = { key ->
         expandedSections = if (expandedSections.contains(key)) {
@@ -1881,7 +1886,96 @@ fun SettingsScreen(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // SECTION 7: PLAYBACK & DATA MANAGEMENT
+        // SECTION 7: LYRICS PROVIDER
+        SettingsAccordionCard(
+            title = "Lyrics Provider",
+            subtitle = "${selectedProvider.displayName} • Default lyrics source",
+            icon = Icons.Default.LibraryMusic,
+            isExpanded = "lyrics_provider" in expandedSections,
+            onToggle = { toggleSection("lyrics_provider") },
+            modifier = Modifier.testTag("settings_lyrics_provider_section")
+        ) {
+            Column(modifier = Modifier.padding(18.dp)) {
+                Text(
+                    text = "Default Lyrics Provider",
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = "Choose how LyricBar searches for synchronized lyrics across online catalogs",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(14.dp))
+
+                LyricsProviderPreference.entries.forEach { option ->
+                    val isSelected = selectedProvider == option
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .clickable {
+                                playbackManager.setLyricsProvider(option)
+                            }
+                            .testTag("settings_provider_option_${option.name.lowercase()}"),
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        border = if (isSelected) androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = isSelected,
+                                onClick = {
+                                    playbackManager.setLyricsProvider(option)
+                                }
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text(
+                                        text = option.displayName,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        fontSize = 13.sp,
+                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                                    )
+                                    if (option == LyricsProviderPreference.AUTO) {
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                                        ) {
+                                            Text(
+                                                text = "Default",
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                                Text(
+                                    text = option.description,
+                                    fontSize = 11.sp,
+                                    color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // SECTION 8: PLAYBACK & DATA MANAGEMENT
         SettingsAccordionCard(
             title = "Automation & Cache",
             subtitle = "Auto-sync, cache & storage",

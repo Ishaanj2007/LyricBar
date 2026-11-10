@@ -39,6 +39,21 @@ data class ParsedLyrics(
             return pt.isNotBlank() && !pt.equals("null", ignoreCase = true) && !pt.equals("undefined", ignoreCase = true)
         }
 
+    val displaySource: String
+        get() {
+            val cleaned = source.removeSuffix("(Cached)").trim()
+            return when {
+                cleaned.isEmpty() ||
+                    cleaned.equals("null", ignoreCase = true) ||
+                    cleaned.equals("undefined", ignoreCase = true) -> ""
+                cleaned.equals("Imported", ignoreCase = true) ||
+                    cleaned.equals("Local .lrc", ignoreCase = true) ||
+                    cleaned.equals("Local Import", ignoreCase = true) ||
+                    (cleaned.contains("local", ignoreCase = true) && cleaned.contains("lrc", ignoreCase = true)) -> "Local Import"
+                else -> cleaned
+            }
+        }
+
     private val isSorted: Boolean = if (lines.size <= 1) {
         true
     } else {

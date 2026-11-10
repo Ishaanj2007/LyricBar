@@ -76,10 +76,14 @@ fun LyricsScreen(
     val currentLyrics by playbackManager.currentLyrics.collectAsStateWithLifecycle()
     val trackOffset by playbackManager.trackOffsetMs.collectAsStateWithLifecycle()
     val isLoading by playbackManager.isLoadingLyrics.collectAsStateWithLifecycle()
+    val livePreferences by playbackManager.preferencesRepository.userPreferencesFlow
+        .collectAsStateWithLifecycle(initialValue = userPreferences)
+    val selectedProvider = livePreferences.lyricsProvider
 
     val listState = rememberLazyListState()
     var showManualSearchDialog by remember { mutableStateOf(false) }
     var isDelayExpanded by rememberSaveable { mutableStateOf(false) }
+    var isProviderMenuExpanded by remember { mutableStateOf(false) }
 
     // SAF File Picker (.lrc files only)
     val filePicker = rememberLauncherForActivityResult(
@@ -117,7 +121,7 @@ fun LyricsScreen(
                         )
                     }
 
-                    playbackManager.saveImportedLyrics(track, text, "Local .lrc")
+                    playbackManager.saveImportedLyrics(track, text, "Local Import")
                     Toast.makeText(context, "Lyrics imported successfully", Toast.LENGTH_SHORT).show()
                 } catch (e: com.example.domain.parser.LrcImportException) {
                     Toast.makeText(context, e.message, Toast.LENGTH_SHORT).show()
@@ -304,8 +308,113 @@ fun LyricsScreen(
                     }
                 }
 
-                // Compact Expandable Timing Offset Card
+                // Compact Provider Selector & Actual Lyrics Source Bar
                 val lyrics = currentLyrics
+                val actualSourceLabel = if (lyrics != null && lyrics.hasValidLyrics) lyrics.displaySource else ""
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box {
+                        Surface(
+                            onClick = { isProviderMenuExpanded = true },
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color.White.copy(alpha = 0.08f),
+                            border = BorderStroke(0.75.dp, themePrimary.copy(alpha = 0.30f)),
+                            modifier = Modifier
+                                .defaultMinSize(minHeight = 32.dp)
+                                .testTag("lyrics_provider_selector")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Tune,
+                                    contentDescription = "Lyrics provider",
+                                    tint = themePrimary,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = "Provider: ${selectedProvider.displayName}",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Icon(
+                                    imageVector = Icons.Default.ArrowDropDown,
+                                    contentDescription = "Select lyrics provider",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+
+                        DropdownMenu(
+                            expanded = isProviderMenuExpanded,
+                            onDismissRequest = { isProviderMenuExpanded = false }
+                        ) {
+                            com.example.data.preferences.LyricsProviderPreference.entries.forEach { option ->
+                                val isSelected = option == selectedProvider
+                                DropdownMenuItem(
+                                    text = {
+                                        Column {
+                                            Text(
+                                                text = option.displayName,
+                                                fontSize = 13.sp,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                color = if (isSelected) themePrimary else MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Text(
+                                                text = option.description,
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    },
+                                    trailingIcon = if (isSelected) {
+                                        {
+                                            Icon(
+                                                imageVector = Icons.Default.Check,
+                                                contentDescription = "Selected",
+                                                tint = themePrimary,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    } else null,
+                                    onClick = {
+                                        isProviderMenuExpanded = false
+                                        playbackManager.setLyricsProvider(option)
+                                    },
+                                    modifier = Modifier.testTag("lyrics_provider_option_${option.name.lowercase()}")
+                                )
+                            }
+                        }
+                    }
+
+                    if (actualSourceLabel.isNotBlank()) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                            border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.12f)),
+                            modifier = Modifier.testTag("lyrics_actual_source_badge")
+                        ) {
+                            Text(
+                                text = "Source: $actualSourceLabel",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+                }
+
+                // Compact Expandable Timing Offset Card
                 if (lyrics != null && lyrics.isSynced) {
                     Spacer(modifier = Modifier.height(4.dp))
                     val offsetSec = trackOffset / 1000.0
@@ -871,7 +980,12 @@ fun LyricsScreen(
                     Toast.makeText(context, "Searching lyrics for \"$title\"…", Toast.LENGTH_SHORT).show()
                     val result = com.example.data.repository.CompositeLyricsRepository
                         .getInstance(context)
-                        .getOrFetchLyrics(track, forceNetwork = true, allowNetwork = true)
+                        .getOrFetchLyrics(
+                            track = track,
+                            forceNetwork = true,
+                            allowNetwork = true,
+                            providerPreference = selectedProvider
+                        )
                     if (result.isSuccess) {
                         playbackManager.setManualLyrics(result.getOrThrow())
                         Toast.makeText(context, "Lyrics found for \"$title\"", Toast.LENGTH_SHORT).show()

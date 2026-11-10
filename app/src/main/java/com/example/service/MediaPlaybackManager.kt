@@ -9,6 +9,7 @@ import android.util.Log
 import com.example.data.model.ParsedLyrics
 import com.example.data.model.PlaybackStateInfo
 import com.example.data.model.TrackMetadata
+import com.example.data.preferences.LyricsProviderPreference
 import com.example.data.preferences.UserPreferencesRepository
 import com.example.data.repository.CompositeLyricsRepository
 import com.example.domain.parser.LrcParser
@@ -73,25 +74,41 @@ class MediaPlaybackManager private constructor(private val context: Context) {
     var autoFetchLyrics: Boolean = true
         private set
 
+    var selectedLyricsProvider: LyricsProviderPreference = LyricsProviderPreference.AUTO
+        private set
+
     init {
         startLyricsTicker()
         scope.launch {
             preferencesRepository.userPreferencesFlow.collect { prefs ->
-                val previous = autoFetchLyrics
+                val previousAutoFetch = autoFetchLyrics
+                val previousProvider = selectedLyricsProvider
                 autoFetchLyrics = prefs.autoFetchLyrics
+                selectedLyricsProvider = prefs.lyricsProvider
 
-                if (!previous && autoFetchLyrics) {
+                if (previousProvider != selectedLyricsProvider) {
+                    val currentTrack = _playbackState.value.track
+                    if (currentTrack != null) {
+                        fetchLyricsForTrack(currentTrack, forceNetwork = false)
+                    }
+                } else if (!previousAutoFetch && autoFetchLyrics) {
                     val currentTrack = _playbackState.value.track
                     if (currentTrack != null && _currentLyrics.value == null && !_isLoadingLyrics.value) {
                         fetchLyricsForTrack(currentTrack, forceNetwork = false)
                     }
-                } else if (previous && !autoFetchLyrics) {
+                } else if (previousAutoFetch && !autoFetchLyrics) {
                     if (_isLoadingLyrics.value && _currentLyrics.value == null) {
                         fetchJob?.cancel()
                         _isLoadingLyrics.value = false
                     }
                 }
             }
+        }
+    }
+
+    fun setLyricsProvider(provider: LyricsProviderPreference) {
+        scope.launch {
+            preferencesRepository.setLyricsProvider(provider)
         }
     }
 
@@ -394,7 +411,8 @@ class MediaPlaybackManager private constructor(private val context: Context) {
             val result = lyricsRepository.getOrFetchLyrics(
                 track = track,
                 forceNetwork = forceNetwork,
-                allowNetwork = autoFetchLyrics || forceNetwork
+                allowNetwork = autoFetchLyrics || forceNetwork,
+                providerPreference = selectedLyricsProvider
             )
             _isLoadingLyrics.value = false
             if (result.isSuccess) {
@@ -481,7 +499,7 @@ class MediaPlaybackManager private constructor(private val context: Context) {
     suspend fun saveImportedLyrics(
         track: TrackMetadata,
         content: String,
-        source: String = "Local .lrc"
+        source: String = "Local Import"
     ): ParsedLyrics {
         val parsed = lyricsRepository.saveImportedLyrics(track, content, source)
         setManualLyrics(parsed)
@@ -654,7 +672,12 @@ class MediaPlaybackManager private constructor(private val context: Context) {
             preferencesRepository.setTrackOffset(track.key, 0L)
             if (forceRefresh || _currentLyrics.value == null || _currentLyrics.value?.isSynced != true) {
                 _isLoadingLyrics.value = true
-                val result = lyricsRepository.getOrFetchLyrics(track, forceNetwork = true, allowNetwork = true)
+                val result = lyricsRepository.getOrFetchLyrics(
+                    track = track,
+                    forceNetwork = true,
+                    allowNetwork = true,
+                    providerPreference = selectedLyricsProvider
+                )
                 _isLoadingLyrics.value = false
                 if (result.isSuccess) {
                     _currentLyrics.value = result.getOrNull()

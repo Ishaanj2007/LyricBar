@@ -129,4 +129,34 @@ object LrcParser {
             )
         }
     }
+
+    fun hasTimestampTags(content: String): Boolean {
+        return TIMESTAMP_REGEX.containsMatchIn(content)
+    }
+
+    fun formatLrc(lines: List<LyricLine>, offsetMs: Long = 0L): String {
+        if (lines.isEmpty()) return ""
+        val sb = StringBuilder()
+        if (offsetMs != 0L) {
+            sb.append("[offset:").append(offsetMs).append("]\n")
+        }
+        lines.forEachIndexed { index, line ->
+            val totalMs = line.timeMs.coerceAtLeast(0L)
+            val minutes = totalMs / 60_000L
+            val seconds = (totalMs % 60_000L) / 1000L
+            val millis = totalMs % 1000L
+            sb.append(
+                String.format(
+                    java.util.Locale.US,
+                    "[%02d:%02d.%03d]%s",
+                    minutes,
+                    seconds,
+                    millis,
+                    line.text
+                )
+            )
+            if (index < lines.lastIndex) sb.append('\n')
+        }
+        return sb.toString()
+    }
 }

@@ -22,7 +22,7 @@ class LyricBarApp : Application() {
     override fun onCreate() {
         super.onCreate()
         playbackManager = MediaPlaybackManager.getInstance(this)
-        preferencesRepository = UserPreferencesRepository(this)
+        preferencesRepository = playbackManager.preferencesRepository
 
         // Observe playback state to auto-launch overlay when enabled
         appScope.launch {
