@@ -242,7 +242,7 @@ fun getPreviewColorScheme(
 
 @Composable
 fun MyApplicationTheme(
-    useWallpaperDynamicColor: Boolean = true,
+    useWallpaperDynamicColor: Boolean = false,
     themePreset: ThemePreset = ThemePreset.ROSE_QUARTZ,
     themeMode: ThemeMode = ThemeMode.DARK,
     fontOption: FontOption = FontOption.POPPINS,

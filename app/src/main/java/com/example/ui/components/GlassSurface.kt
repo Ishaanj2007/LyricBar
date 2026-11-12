@@ -782,16 +782,16 @@ fun CinematicArtworkBackground(
 
             // 2. Continuous, seamless dark gradient scrim for contrast and legibility across all insets
             // Extends from absolute top (behind status bar) to absolute bottom (behind nav & gesture bar)
-            // Gently balanced so original artwork colors and ambient glow shine through vibrantly
+            // Carefully calibrated so artwork colors remain atmospheric while white typography stays crisp & readable
             Canvas(modifier = Modifier.fillMaxSize()) {
                 drawRect(
                     brush = Brush.verticalGradient(
                         colors = listOf(
-                            Color.Black.copy(alpha = 0.16f), // Status bar contrast
-                            Color.Black.copy(alpha = 0.04f), // Artwork zone - maximum original color vibrancy
-                            Color.Black.copy(alpha = 0.10f), // Live Lyrics zone
-                            Color.Black.copy(alpha = 0.16f), // Controls zone
-                            Color.Black.copy(alpha = 0.22f)  // Navigation bar & gesture zone
+                            Color.Black.copy(alpha = 0.38f), // Status bar contrast
+                            Color.Black.copy(alpha = 0.24f), // Artwork zone - vibrant ambient glow
+                            Color.Black.copy(alpha = 0.34f), // Live Lyrics zone - high-contrast reading
+                            Color.Black.copy(alpha = 0.42f), // Controls zone
+                            Color.Black.copy(alpha = 0.50f)  // Navigation bar & gesture zone
                         ),
                         startY = 0f,
                         endY = size.height

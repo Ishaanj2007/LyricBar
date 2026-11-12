@@ -139,7 +139,6 @@ fun NowPlayingScreen(
     val ambientGlowColor = glowPalette.primary
     val artworkGlowBitmap = rememberArtworkGlowBitmap(track, rawArtworkBitmap, glowPalette)
 
-    var isDelayExpanded by rememberSaveable { mutableStateOf(false) }
     var pendingOverlayEnable by rememberSaveable { mutableStateOf(false) }
     val parentHazeState = LocalHazeState.current
     val fallbackHazeState = remember { HazeState() }
@@ -644,129 +643,6 @@ fun NowPlayingScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    // Compact Expandable Timing-Delay Card
-                    val offsetSec = trackOffset / 1000.0
-                    val formattedOffset = if (trackOffset > 0) "+%.1fs".format(offsetSec) else if (trackOffset < 0) "%.1fs".format(offsetSec) else "0.0s (In Sync)"
-
-                    FrostedCard(
-                        shape = RoundedCornerShape(18.dp),
-                        backgroundAlpha = 0.18f,
-                        blurRadius = 18.dp,
-                        borderWidth = 0.75.dp,
-                        shadowElevation = 0.dp,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("now_playing_delay_card")
-                            .animateContentSize(animationSpec = tween(durationMillis = 200))
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 10.dp)
-                        ) {
-                            // Header row acting as expandable chip
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .clickable { isDelayExpanded = !isDelayExpanded }
-                                    .padding(vertical = 2.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Timer,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(15.dp)
-                                    )
-                                    Text(
-                                        text = "TIMING OFFSET",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        letterSpacing = 1.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(10.dp))
-                                            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
-                                            .padding(horizontal = 8.dp, vertical = 3.dp)
-                                    ) {
-                                        Text(
-                                            text = formattedOffset,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Medium,
-                                            color = if (trackOffset != 0L) {
-                                                MaterialTheme.colorScheme.primary
-                                            } else {
-                                                MaterialTheme.colorScheme.onSurface
-                                            },
-                                            modifier = Modifier.testTag("now_playing_delay_display")
-                                        )
-                                    }
-                                    Icon(
-                                        imageVector = if (isDelayExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                                        contentDescription = if (isDelayExpanded) "Collapse offset controls" else "Expand offset controls",
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                            }
-
-                            // Compact expanded adjustment controls with accessible 48dp touch targets
-                            if (isDelayExpanded) {
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    TimingAdjustPill(
-                                        text = "-0.5s",
-                                        onClick = { playbackManager.adjustTrackOffset(-500L) },
-                                        modifier = Modifier.weight(1f).testTag("now_playing_delay_minus_500")
-                                    )
-                                    TimingAdjustPill(
-                                        text = "-0.1s",
-                                        onClick = { playbackManager.adjustTrackOffset(-100L) },
-                                        modifier = Modifier.weight(1f).testTag("now_playing_delay_minus_100")
-                                    )
-                                    if (trackOffset != 0L) {
-                                        TimingAdjustPill(
-                                            text = "Reset",
-                                            isPrimary = true,
-                                            onClick = { playbackManager.setExplicitOffset(0L) },
-                                            modifier = Modifier.weight(1f).testTag("now_playing_delay_reset")
-                                        )
-                                    }
-                                    TimingAdjustPill(
-                                        text = "+0.1s",
-                                        onClick = { playbackManager.adjustTrackOffset(100L) },
-                                        modifier = Modifier.weight(1f).testTag("now_playing_delay_plus_100")
-                                    )
-                                    TimingAdjustPill(
-                                        text = "+0.5s",
-                                        onClick = { playbackManager.adjustTrackOffset(500L) },
-                                        modifier = Modifier.weight(1f).testTag("now_playing_delay_plus_500")
-                                    )
-                                }
-                            }
-                        }
-                    }
-
                     Spacer(modifier = Modifier.height(14.dp))
 
                     // Tactile Hero Playback Controls with state indication
@@ -875,56 +751,6 @@ fun NowPlayingScreen(
             CompositionLocalProvider(LocalHazeState provides fallbackHazeState) {
                 content()
             }
-        }
-    }
-}
-
-@Composable
-private fun TimingAdjustPill(
-    text: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    isPrimary: Boolean = false,
-    enabled: Boolean = true
-) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val backgroundColor = if (isPrimary) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
-    }
-    val textColor = if (isPrimary) {
-        MaterialTheme.colorScheme.onPrimary
-    } else {
-        MaterialTheme.colorScheme.onSurface
-    }
-
-    Box(
-        modifier = modifier
-            .defaultMinSize(minHeight = 48.dp)
-            .clickable(
-                interactionSource = interactionSource,
-                indication = ripple(bounded = true, radius = 22.dp),
-                enabled = enabled,
-                onClick = onClick
-            ),
-        contentAlignment = Alignment.Center
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(30.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(backgroundColor),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = text,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = textColor,
-                maxLines = 1
-            )
         }
     }
 }
