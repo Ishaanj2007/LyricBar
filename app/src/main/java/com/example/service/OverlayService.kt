@@ -386,6 +386,12 @@ class OverlayService : Service() {
 
                     view.textSizeSp = prefs.overlayTextSizeSp
                     view.textOpacity = prefs.overlayTextOpacity
+                    view.hudBackdropEnabled = prefs.hudBackdropEnabled
+                    view.hudBackdropStyle = prefs.hudBackdropStyle.name
+                    view.hudBackdropOpacity = prefs.hudBackdropOpacity
+                    view.hudBackdropCornerRadiusDp = prefs.hudBackdropCornerRadiusDp.toFloat()
+                    view.hudBackdropHorizontalPaddingDp = prefs.hudBackdropHorizontalPaddingDp.toFloat()
+                    view.hudBackdropVerticalPaddingDp = prefs.hudBackdropVerticalPaddingDp.toFloat()
                     view.typewriterSpeed = prefs.typewriterSpeed
                     view.smoothTransitionSpeed = prefs.smoothTransitionSpeed
                     view.fadeSpeed = prefs.fadeSpeed
@@ -437,8 +443,21 @@ class OverlayService : Service() {
                         params.width = prefs.overlayWidthPx
                         layoutChanged = true
                     }
-                    if (prefs.overlayHeightPx > 0 && params.height != prefs.overlayHeightPx) {
-                        params.height = prefs.overlayHeightPx
+                    val density = resources.displayMetrics.density
+                    val minBackdropHeightPx = if (prefs.hudBackdropEnabled) {
+                        val textPx = android.util.TypedValue.applyDimension(
+                            android.util.TypedValue.COMPLEX_UNIT_SP,
+                            prefs.overlayTextSizeSp,
+                            resources.displayMetrics
+                        )
+                        val vertPadPx = prefs.hudBackdropVerticalPaddingDp * density * 2f
+                        kotlin.math.round(textPx * 2.2f + vertPadPx + 16f * density).toInt()
+                    } else {
+                        0
+                    }
+                    val effectiveHeightPx = maxOf(prefs.overlayHeightPx, minBackdropHeightPx)
+                    if (effectiveHeightPx > 0 && params.height != effectiveHeightPx) {
+                        params.height = effectiveHeightPx
                         layoutChanged = true
                     }
 

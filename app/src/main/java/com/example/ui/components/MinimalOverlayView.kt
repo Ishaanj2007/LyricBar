@@ -72,6 +72,32 @@ class MinimalOverlayView(
         style = Paint.Style.FILL
     }
 
+    // Pre-allocated HUD Backdrop paints & RectF buffers (zero object allocations in onDraw)
+    private val backdropFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.rgb(18, 18, 22)
+    }
+
+    private val backdropGlassSheenPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.WHITE
+    }
+
+    private val backdropBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        color = Color.WHITE
+        strokeWidth = TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_DIP,
+            1f,
+            resources.displayMetrics
+        )
+    }
+
+    private val currentBackdropRect = android.graphics.RectF()
+    private val previousBackdropRect = android.graphics.RectF()
+    private val drawnBackdropRect = android.graphics.RectF()
+    private val borderBackdropRect = android.graphics.RectF()
+
     var primaryColor: Int = Color.WHITE
         set(value) {
             field = value
@@ -334,6 +360,62 @@ class MinimalOverlayView(
             val clamped = value.coerceIn(0.15f, 1.0f)
             if (field != clamped) {
                 field = clamped
+                invalidate()
+            }
+        }
+
+    var hudBackdropEnabled: Boolean = false
+        set(value) {
+            if (field != value) {
+                field = value
+                recalculateLayout()
+                invalidate()
+            }
+        }
+
+    var hudBackdropStyle: String = "SOLID"
+        set(value) {
+            val normalized = if (value.trim().equals("GLASS", ignoreCase = true)) "GLASS" else "SOLID"
+            if (field != normalized) {
+                field = normalized
+                invalidate()
+            }
+        }
+
+    var hudBackdropOpacity: Float = 0.65f
+        set(value) {
+            val clamped = value.coerceIn(0.0f, 1.0f)
+            if (field != clamped) {
+                field = clamped
+                invalidate()
+            }
+        }
+
+    var hudBackdropCornerRadiusDp: Float = 18f
+        set(value) {
+            val clamped = value.coerceIn(0f, 32f)
+            if (field != clamped) {
+                field = clamped
+                invalidate()
+            }
+        }
+
+    var hudBackdropHorizontalPaddingDp: Float = 16f
+        set(value) {
+            val clamped = value.coerceIn(0f, 32f)
+            if (field != clamped) {
+                field = clamped
+                recalculateLayout()
+                invalidate()
+            }
+        }
+
+    var hudBackdropVerticalPaddingDp: Float = 10f
+        set(value) {
+            val clamped = value.coerceIn(0f, 24f)
+            if (field != clamped) {
+                field = clamped
+                recalculateLayout()
                 invalidate()
             }
         }
@@ -645,6 +727,167 @@ class MinimalOverlayView(
         }
     }
 
+    private fun dpToPx(dp: Float): Float {
+        return TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_DIP,
+            dp,
+            resources.displayMetrics
+        )
+    }
+
+    private fun getBackdropHorizontalPaddingPx(): Float {
+        return dpToPx(hudBackdropHorizontalPaddingDp.coerceIn(0f, 32f))
+    }
+
+    private fun getBackdropVerticalPaddingPx(): Float {
+        return dpToPx(hudBackdropVerticalPaddingDp.coerceIn(0f, 24f))
+    }
+
+    private fun getEffectiveContentHorizontalInsetPx(): Float {
+        return if (hudBackdropEnabled) {
+            (getBackdropHorizontalPaddingPx() + 8f).coerceAtLeast(16f)
+        } else {
+            28f
+        }
+    }
+
+    private fun populateBackdropRectForLines(
+        lines: List<LayoutLine>,
+        scrollY: Float,
+        outRect: android.graphics.RectF
+    ): Boolean {
+        if (!hudBackdropEnabled || hudBackdropOpacity <= 0f || lines.isEmpty() || width <= 0 || height <= 0) {
+            return false
+        }
+        val paddingHorizontal = getEffectiveContentHorizontalInsetPx()
+        val contentLeft = paddingHorizontal
+        val contentRight = (width - paddingHorizontal).coerceAtLeast(contentLeft + 60f)
+
+        var minX = Float.MAX_VALUE
+        var maxX = -Float.MAX_VALUE
+        for (line in lines) {
+            if (line.words.isEmpty()) continue
+            val firstWordX = line.words.first().x
+            val lineRight = firstWordX + line.lineWidth
+            if (firstWordX < minX) minX = firstWordX
+            if (lineRight > maxX) maxX = lineRight
+        }
+        if (minX > maxX) return false
+
+        val textLeft = minX.coerceIn(contentLeft, contentRight)
+        val textRight = maxX.coerceIn(textLeft, contentRight)
+
+        val fontMetrics = wordActivePaint.fontMetrics
+        val rawTop = lines.first().baselineY - scrollY + fontMetrics.ascent
+        val rawBottom = lines.last().baselineY - scrollY + fontMetrics.descent
+
+        val horizPadPx = getBackdropHorizontalPaddingPx()
+        val vertPadPx = getBackdropVerticalPaddingPx()
+        val minTopInset = (vertPadPx + 2f).coerceAtMost(height / 3f)
+        val maxBottomInset = (height - vertPadPx - 2f).coerceAtLeast(minTopInset)
+
+        val textTop = if (maxScrollY > 0f) rawTop.coerceAtLeast(minTopInset) else rawTop
+        val textBottom = if (maxScrollY > 0f) rawBottom.coerceAtMost(maxBottomInset) else rawBottom
+        if (textBottom <= textTop) return false
+
+        val left = (textLeft - horizPadPx).coerceAtLeast(2f)
+        val top = (textTop - vertPadPx).coerceAtLeast(2f)
+        val right = (textRight + horizPadPx).coerceAtMost((width - 2f).coerceAtLeast(left))
+        val bottom = (textBottom + vertPadPx).coerceAtMost((height - 2f).coerceAtLeast(top))
+
+        outRect.set(left, top, right, bottom)
+        return outRect.width() > 0f && outRect.height() > 0f
+    }
+
+    private fun drawHudBackdropIfNeeded(canvas: Canvas, currentStyle: String) {
+        if (!hudBackdropEnabled || hudBackdropOpacity <= 0f) return
+
+        val hasCurrent = populateBackdropRectForLines(currentLayoutLines, currentScrollY, currentBackdropRect)
+        val isTransitioning = animProgress < 1f &&
+            previousLayoutLines.isNotEmpty() &&
+            currentStyle != "INSTANT" &&
+            currentStyle != "TYPEWRITER"
+        val hasPrevious = if (isTransitioning) {
+            populateBackdropRectForLines(previousLayoutLines, 0f, previousBackdropRect)
+        } else {
+            false
+        }
+
+        if (!hasCurrent && !hasPrevious) return
+
+        if (hasCurrent && hasPrevious) {
+            val t = animProgress.coerceIn(0f, 1f)
+            drawnBackdropRect.set(
+                previousBackdropRect.left + (currentBackdropRect.left - previousBackdropRect.left) * t,
+                previousBackdropRect.top + (currentBackdropRect.top - previousBackdropRect.top) * t,
+                previousBackdropRect.right + (currentBackdropRect.right - previousBackdropRect.right) * t,
+                previousBackdropRect.bottom + (currentBackdropRect.bottom - previousBackdropRect.bottom) * t
+            )
+        } else if (hasCurrent) {
+            drawnBackdropRect.set(currentBackdropRect)
+        } else {
+            drawnBackdropRect.set(previousBackdropRect)
+        }
+
+        val density = resources.displayMetrics.density
+        val clampedOpacity = hudBackdropOpacity.coerceIn(0f, 1f)
+        val isGlass = hudBackdropStyle.trim().equals("GLASS", ignoreCase = true)
+        val maxRadiusPx = (minOf(drawnBackdropRect.width(), drawnBackdropRect.height()) / 2f).coerceAtLeast(0f)
+        val cornerRadiusPx = (hudBackdropCornerRadiusDp.coerceIn(0f, 32f) * density).coerceIn(0f, maxRadiusPx)
+
+        val fillColor = if (isGlass) GLASS_BACKDROP_COLOR else SOLID_BACKDROP_COLOR
+        val fillAlpha = if (isGlass) {
+            (clampedOpacity * 245f).roundToInt().coerceIn(0, 255)
+        } else {
+            (clampedOpacity * 255f).roundToInt().coerceIn(0, 255)
+        }
+
+        backdropFillPaint.color = fillColor
+        backdropFillPaint.alpha = fillAlpha
+        canvas.drawRoundRect(
+            drawnBackdropRect,
+            cornerRadiusPx,
+            cornerRadiusPx,
+            backdropFillPaint
+        )
+
+        if (isGlass) {
+            val sheenAlpha = (clampedOpacity * 22f).roundToInt().coerceIn(0, 36)
+            if (sheenAlpha > 0) {
+                backdropGlassSheenPaint.color = Color.WHITE
+                backdropGlassSheenPaint.alpha = sheenAlpha
+                canvas.drawRoundRect(
+                    drawnBackdropRect,
+                    cornerRadiusPx,
+                    cornerRadiusPx,
+                    backdropGlassSheenPaint
+                )
+            }
+
+            val borderAlpha = (clampedOpacity * 68f).roundToInt().coerceIn(0, 90)
+            if (borderAlpha > 0) {
+                val borderWidthPx = (1f * density).coerceAtLeast(1f)
+                val halfStroke = borderWidthPx / 2f
+                borderBackdropRect.set(
+                    drawnBackdropRect.left + halfStroke,
+                    drawnBackdropRect.top + halfStroke,
+                    drawnBackdropRect.right - halfStroke,
+                    drawnBackdropRect.bottom - halfStroke
+                )
+                val borderRadius = (cornerRadiusPx - halfStroke).coerceAtLeast(0f)
+                backdropBorderPaint.strokeWidth = borderWidthPx
+                backdropBorderPaint.color = Color.WHITE
+                backdropBorderPaint.alpha = borderAlpha
+                canvas.drawRoundRect(
+                    borderBackdropRect,
+                    borderRadius,
+                    borderRadius,
+                    backdropBorderPaint
+                )
+            }
+        }
+    }
+
     private fun recalculateLayout() {
         currentLayoutLines.clear()
         totalLayoutGraphemes = 0
@@ -663,7 +906,7 @@ class MinimalOverlayView(
             return
         }
 
-        val paddingHorizontal = 28f
+        val paddingHorizontal = getEffectiveContentHorizontalInsetPx()
         val contentLeft = paddingHorizontal
         val contentRight = (width - paddingHorizontal).coerceAtLeast(contentLeft + 60f)
         val availableWidth = (contentRight - contentLeft).coerceAtLeast(60f)
@@ -767,8 +1010,10 @@ class MinimalOverlayView(
         val lineHeight = fontHeight + lineSpacing
         val totalTextHeight = (lineList.size * lineHeight) - lineSpacing
         val availableHeight = height.toFloat()
+        val verticalInset = if (hudBackdropEnabled) (getBackdropVerticalPaddingPx() + 4f) else 0f
+        val effectiveTextViewportHeight = (availableHeight - verticalInset * 2f).coerceAtLeast(fontHeight)
 
-        if (totalTextHeight <= availableHeight) {
+        if (totalTextHeight <= effectiveTextViewportHeight) {
             // Fits entirely inside overlay: center vertically
             val topY = (availableHeight - totalTextHeight) / 2f
             val startBaseline = topY - fontMetrics.ascent
@@ -780,13 +1025,14 @@ class MinimalOverlayView(
             maxScrollY = 0f
         } else {
             // Multi-line wrapped text exceeds overlay height: smooth vertical auto-scroll mode
-            val startBaseline = 18f - fontMetrics.ascent
+            val topMargin = verticalInset.coerceAtLeast(18f)
+            val startBaseline = topMargin - fontMetrics.ascent
             lineList.forEachIndexed { idx, line ->
                 val by = startBaseline + (idx * lineHeight)
                 line.baselineY = by
                 line.words.forEach { it.y = by }
             }
-            maxScrollY = totalTextHeight - availableHeight + 36f
+            maxScrollY = (totalTextHeight - effectiveTextViewportHeight + 16f).coerceAtLeast(0f)
         }
 
         currentLayoutLines.addAll(lineList)
@@ -870,7 +1116,7 @@ class MinimalOverlayView(
             else -> "KARAOKE"
         }
 
-        val paddingHorizontal = 28f
+        val paddingHorizontal = getEffectiveContentHorizontalInsetPx()
         val contentLeft = paddingHorizontal
         val availableWidth = (width - paddingHorizontal * 2).coerceAtLeast(60f)
 
@@ -1010,7 +1256,8 @@ class MinimalOverlayView(
         val heightSpecSize = MeasureSpec.getSize(heightMeasureSpec)
 
         val fontMetrics = wordActivePaint.fontMetrics
-        val minHeight = ((fontMetrics.descent - fontMetrics.ascent) * 2.8f).roundToInt().coerceIn(60, 200)
+        val extraBackdropHeight = if (hudBackdropEnabled) (getBackdropVerticalPaddingPx() * 2f).roundToInt() else 0
+        val minHeight = (((fontMetrics.descent - fontMetrics.ascent) * 2.8f).roundToInt() + extraBackdropHeight).coerceIn(60, 260)
 
         val finalHeight = if (heightSpecMode == MeasureSpec.EXACTLY && heightSpecSize > 0) {
             heightSpecSize
@@ -1027,12 +1274,6 @@ class MinimalOverlayView(
             return
         }
 
-        val paddingHorizontal = 24f
-
-        // Clip container area so text wraps and scrolls cleanly within configured overlay boundaries
-        canvas.save()
-        canvas.clipRect(paddingHorizontal, 0f, width - paddingHorizontal, height.toFloat())
-
         val currentStyle = when (animationStyle) {
             "KARAOKE", "APPLE_MUSIC" -> "KARAOKE"
             "SMOOTH_SLIDE", "SMOOTH_SLIDE_UP", "SOFT_FADE", "SCALE_POP" -> "SMOOTH_SLIDE"
@@ -1042,6 +1283,19 @@ class MinimalOverlayView(
             "INSTANT", "MINIMAL_STATIC" -> "INSTANT"
             else -> "KARAOKE"
         }
+
+        // 0. Draw optional content-wrapping HUD Backdrop behind the lyrics
+        drawHudBackdropIfNeeded(canvas, currentStyle)
+
+        val paddingHorizontal = if (hudBackdropEnabled) {
+            (getEffectiveContentHorizontalInsetPx() - 2f).coerceAtLeast(4f)
+        } else {
+            24f
+        }
+
+        // Clip container area so text wraps and scrolls cleanly within configured overlay boundaries
+        canvas.save()
+        canvas.clipRect(paddingHorizontal, 0f, width - paddingHorizontal, height.toFloat())
 
         // 1. If transition is running, draw outgoing previous line
         val baseAlpha = (255 * textOpacity).toInt().coerceIn(0, 255)
@@ -1504,6 +1758,95 @@ class MinimalOverlayView(
     }
 
     companion object {
+        const val SOLID_BACKDROP_COLOR: Int = 0xFF121216.toInt()
+        const val GLASS_BACKDROP_COLOR: Int = 0xFF181A22.toInt()
+
+        data class BackdropRenderSpec(
+            val left: Float,
+            val top: Float,
+            val right: Float,
+            val bottom: Float,
+            val cornerRadiusPx: Float,
+            val fillColor: Int,
+            val fillAlpha: Int,
+            val showBorder: Boolean,
+            val borderColor: Int,
+            val borderAlpha: Int,
+            val borderWidthPx: Float,
+            val glassSheenAlpha: Int
+        ) {
+            val width: Float get() = (right - left).coerceAtLeast(0f)
+            val height: Float get() = (bottom - top).coerceAtLeast(0f)
+        }
+
+        fun computeBackdropSpec(
+            enabled: Boolean,
+            style: String,
+            opacity: Float,
+            cornerRadiusDp: Float,
+            horizontalPaddingDp: Float,
+            verticalPaddingDp: Float,
+            density: Float,
+            viewWidth: Int,
+            viewHeight: Int,
+            textLeft: Float,
+            textTop: Float,
+            textRight: Float,
+            textBottom: Float,
+            hasVisibleText: Boolean = true,
+            boundsAlreadyExpanded: Boolean = false
+        ): BackdropRenderSpec? {
+            val clampedOpacity = opacity.coerceIn(0f, 1f)
+            if (!enabled || !hasVisibleText || clampedOpacity <= 0f || viewWidth <= 0 || viewHeight <= 0) {
+                return null
+            }
+            if (textRight <= textLeft || textBottom <= textTop) {
+                return null
+            }
+
+            val safeDensity = density.coerceAtLeast(0.5f)
+            val horizPadPx = if (boundsAlreadyExpanded) 0f else horizontalPaddingDp.coerceIn(0f, 32f) * safeDensity
+            val vertPadPx = if (boundsAlreadyExpanded) 0f else verticalPaddingDp.coerceIn(0f, 24f) * safeDensity
+
+            val left = (textLeft - horizPadPx).coerceAtLeast(2f)
+            val top = (textTop - vertPadPx).coerceAtLeast(2f)
+            val right = (textRight + horizPadPx).coerceAtMost((viewWidth - 2f).coerceAtLeast(left))
+            val bottom = (textBottom + vertPadPx).coerceAtMost((viewHeight - 2f).coerceAtLeast(top))
+
+            if (right <= left || bottom <= top) {
+                return null
+            }
+
+            val maxRadiusPx = (minOf(right - left, bottom - top) / 2f).coerceAtLeast(0f)
+            val cornerRadiusPx = (cornerRadiusDp.coerceIn(0f, 32f) * safeDensity).coerceIn(0f, maxRadiusPx)
+            val isGlass = style.trim().equals("GLASS", ignoreCase = true)
+
+            val fillColor = if (isGlass) GLASS_BACKDROP_COLOR else SOLID_BACKDROP_COLOR
+            val fillAlpha = if (isGlass) {
+                (clampedOpacity * 245f).roundToInt().coerceIn(0, 255)
+            } else {
+                (clampedOpacity * 255f).roundToInt().coerceIn(0, 255)
+            }
+            val borderAlpha = if (isGlass) (clampedOpacity * 68f).roundToInt().coerceIn(0, 90) else 0
+            val glassSheenAlpha = if (isGlass) (clampedOpacity * 22f).roundToInt().coerceIn(0, 36) else 0
+            val borderWidthPx = (1f * safeDensity).coerceAtLeast(1f)
+
+            return BackdropRenderSpec(
+                left = left,
+                top = top,
+                right = right,
+                bottom = bottom,
+                cornerRadiusPx = cornerRadiusPx,
+                fillColor = fillColor,
+                fillAlpha = fillAlpha,
+                showBorder = isGlass && borderAlpha > 0,
+                borderColor = Color.WHITE,
+                borderAlpha = borderAlpha,
+                borderWidthPx = borderWidthPx,
+                glassSheenAlpha = glassSheenAlpha
+            )
+        }
+
         fun computeGraphemeBoundaries(text: String): IntArray {
             if (text.isEmpty()) return intArrayOf()
             val it = java.text.BreakIterator.getCharacterInstance()

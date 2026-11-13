@@ -101,6 +101,18 @@ enum class OverlayAnimationStyle(val title: String, val description: String) {
     INSTANT("Instant", "Replaces the current line immediately with no animation")
 }
 
+enum class HudBackdropStyle(val title: String, val description: String) {
+    SOLID("Solid", "Clean, neutral dark translucent surface"),
+    GLASS("Glass", "Frosted-glass appearance with a subtle soft border");
+
+    companion object {
+        fun fromName(name: String?): HudBackdropStyle {
+            if (name.isNullOrBlank()) return SOLID
+            return entries.find { it.name.equals(name.trim(), ignoreCase = true) } ?: SOLID
+        }
+    }
+}
+
 data class UserPreferences(
     val overlayEnabled: Boolean = true,
     val overlayTextSizeSp: Float = 14f,
@@ -112,6 +124,12 @@ data class UserPreferences(
     val karaokeSpeed: Float = 1.0f, // 0.5x to 1.5x (Glow Sweep Speed)
     val karaokeGlowSpeed: Float = 1.0f, // 0.5x to 1.5x (Glow Sweep Speed)
     val textShadowEnabled: Boolean = true,
+    val hudBackdropEnabled: Boolean = false,
+    val hudBackdropStyle: HudBackdropStyle = HudBackdropStyle.SOLID,
+    val hudBackdropOpacity: Float = 0.65f, // 0.0f to 1.0f (0% to 100%, default 65%)
+    val hudBackdropCornerRadiusDp: Int = 18, // 0 to 32 dp (default 18dp)
+    val hudBackdropHorizontalPaddingDp: Int = 16, // 0 to 32 dp (default 16dp)
+    val hudBackdropVerticalPaddingDp: Int = 10, // 0 to 24 dp (default 10dp)
     val overlayYPosition: Int = 180, // Full range
     val overlayXPosition: Int = 0, // Full range
     val overlayWidthPx: Int = 850, // Resizable overlay width
@@ -149,6 +167,12 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
         val KARAOKE_SPEED = floatPreferencesKey("karaoke_speed")
         val KARAOKE_GLOW_SPEED = floatPreferencesKey("karaoke_glow_speed")
         val OVERLAY_TEXT_SHADOW = booleanPreferencesKey("overlay_text_shadow")
+        val HUD_BACKDROP_ENABLED = booleanPreferencesKey("hud_backdrop_enabled")
+        val HUD_BACKDROP_STYLE = stringPreferencesKey("hud_backdrop_style")
+        val HUD_BACKDROP_OPACITY = floatPreferencesKey("hud_backdrop_opacity")
+        val HUD_BACKDROP_CORNER_RADIUS_DP = intPreferencesKey("hud_backdrop_corner_radius_dp")
+        val HUD_BACKDROP_HORIZONTAL_PADDING_DP = intPreferencesKey("hud_backdrop_horizontal_padding_dp")
+        val HUD_BACKDROP_VERTICAL_PADDING_DP = intPreferencesKey("hud_backdrop_vertical_padding_dp")
         val OVERLAY_Y_POS = intPreferencesKey("overlay_y_position")
         val OVERLAY_X_POS = intPreferencesKey("overlay_x_position")
         val OVERLAY_WIDTH = intPreferencesKey("overlay_width")
@@ -242,6 +266,12 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
                 karaokeSpeed = (preferences[PreferencesKeys.KARAOKE_GLOW_SPEED] ?: preferences[PreferencesKeys.KARAOKE_SPEED] ?: 1.0f).coerceIn(0.5f, 1.5f),
                 karaokeGlowSpeed = (preferences[PreferencesKeys.KARAOKE_GLOW_SPEED] ?: preferences[PreferencesKeys.KARAOKE_SPEED] ?: 1.0f).coerceIn(0.5f, 1.5f),
                 textShadowEnabled = preferences[PreferencesKeys.OVERLAY_TEXT_SHADOW] ?: true,
+                hudBackdropEnabled = preferences[PreferencesKeys.HUD_BACKDROP_ENABLED] ?: false,
+                hudBackdropStyle = HudBackdropStyle.fromName(preferences[PreferencesKeys.HUD_BACKDROP_STYLE]),
+                hudBackdropOpacity = (preferences[PreferencesKeys.HUD_BACKDROP_OPACITY] ?: 0.65f).coerceIn(0.0f, 1.0f),
+                hudBackdropCornerRadiusDp = (preferences[PreferencesKeys.HUD_BACKDROP_CORNER_RADIUS_DP] ?: 18).coerceIn(0, 32),
+                hudBackdropHorizontalPaddingDp = (preferences[PreferencesKeys.HUD_BACKDROP_HORIZONTAL_PADDING_DP] ?: 16).coerceIn(0, 32),
+                hudBackdropVerticalPaddingDp = (preferences[PreferencesKeys.HUD_BACKDROP_VERTICAL_PADDING_DP] ?: 10).coerceIn(0, 24),
                 overlayYPosition = clampedY,
                 overlayXPosition = clampedX,
                 overlayWidthPx = width.coerceIn(280, 2000),
@@ -346,6 +376,34 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
 
     suspend fun setTextShadowEnabled(enabled: Boolean) {
         dataStore.edit { it[PreferencesKeys.OVERLAY_TEXT_SHADOW] = enabled }
+    }
+
+    suspend fun setHudBackdropEnabled(enabled: Boolean) {
+        dataStore.edit { it[PreferencesKeys.HUD_BACKDROP_ENABLED] = enabled }
+    }
+
+    suspend fun setHudBackdropStyle(style: HudBackdropStyle) {
+        dataStore.edit { it[PreferencesKeys.HUD_BACKDROP_STYLE] = style.name }
+    }
+
+    suspend fun setHudBackdropOpacity(opacity: Float) {
+        val bounded = opacity.coerceIn(0.0f, 1.0f)
+        dataStore.edit { it[PreferencesKeys.HUD_BACKDROP_OPACITY] = bounded }
+    }
+
+    suspend fun setHudBackdropCornerRadiusDp(cornerRadiusDp: Int) {
+        val bounded = cornerRadiusDp.coerceIn(0, 32)
+        dataStore.edit { it[PreferencesKeys.HUD_BACKDROP_CORNER_RADIUS_DP] = bounded }
+    }
+
+    suspend fun setHudBackdropHorizontalPaddingDp(horizontalPaddingDp: Int) {
+        val bounded = horizontalPaddingDp.coerceIn(0, 32)
+        dataStore.edit { it[PreferencesKeys.HUD_BACKDROP_HORIZONTAL_PADDING_DP] = bounded }
+    }
+
+    suspend fun setHudBackdropVerticalPaddingDp(verticalPaddingDp: Int) {
+        val bounded = verticalPaddingDp.coerceIn(0, 24)
+        dataStore.edit { it[PreferencesKeys.HUD_BACKDROP_VERTICAL_PADDING_DP] = bounded }
     }
 
     suspend fun setOverlayPosition(x: Int, y: Int) {
