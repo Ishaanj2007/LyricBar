@@ -5,9 +5,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.LinearGradient
 import android.graphics.Paint
-import android.graphics.Shader
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -45,93 +43,76 @@ class MinimalOverlayView(
 
     // Pre-allocated paints to guarantee zero object allocation during onDraw
     private val wordActivePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = ACTIVE_LYRIC_COLOR
+        color = HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR
         textAlign = Paint.Align.LEFT
         isFakeBoldText = true
     }
 
     private val wordInactivePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = INACTIVE_LYRIC_COLOR
+        color = HudColorSystem.DEFAULT_INACTIVE_LYRIC_COLOR
         textAlign = Paint.Align.LEFT
         isFakeBoldText = true
     }
 
     private val previousTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = INACTIVE_LYRIC_COLOR
+        color = HudColorSystem.DEFAULT_INACTIVE_LYRIC_COLOR
         textAlign = Paint.Align.LEFT
         isFakeBoldText = true
     }
 
     private val wordGlowPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = ACTIVE_LYRIC_COLOR
+        color = HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR
         textAlign = Paint.Align.LEFT
         isFakeBoldText = true
-        setShadowLayer(10f, 0f, 0f, Color.argb(ACTIVE_GLOW_ALPHA, 255, 255, 255))
+        setShadowLayer(
+            9f,
+            0f,
+            0f,
+            androidx.core.graphics.ColorUtils.setAlphaComponent(
+                HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR,
+                ACTIVE_GLOW_ALPHA
+            )
+        )
     }
 
     private val blurRevealPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = ACTIVE_LYRIC_COLOR
+        color = HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR
         textAlign = Paint.Align.LEFT
         isFakeBoldText = true
     }
 
     // Editable bounding box paints (displayed ONLY when isDragMode == true)
     private val editBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = androidx.core.graphics.ColorUtils.setAlphaComponent(Color.WHITE, 160)
+        color = androidx.core.graphics.ColorUtils.setAlphaComponent(HudColorSystem.DEFAULT_ACCENT_COLOR, 180)
         style = Paint.Style.STROKE
         strokeWidth = 2.5f
     }
 
     private val editHandlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = androidx.core.graphics.ColorUtils.setAlphaComponent(Color.WHITE, 220)
+        color = androidx.core.graphics.ColorUtils.setAlphaComponent(HudColorSystem.DEFAULT_ACCENT_COLOR, 230)
         style = Paint.Style.FILL
     }
 
-    // Pre-allocated HUD Backdrop paints & RectF buffers (zero object allocations in onDraw)
-    private val backdropGlassShadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        color = Color.BLACK
-    }
-
+    // Pre-allocated HUD Backdrop paint & RectF buffers (single-alpha clean surface, zero allocation in onDraw)
     private val backdropFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
-        color = SOLID_BACKDROP_COLOR
-    }
-
-    private val backdropGlassSheenPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.FILL
-        color = Color.WHITE
-    }
-
-    private val backdropGlassInnerRimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        color = Color.WHITE
-    }
-
-    private val backdropBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        color = Color.WHITE
-        strokeWidth = TypedValue.applyDimension(
-            TypedValue.COMPLEX_UNIT_DIP,
-            1f,
-            resources.displayMetrics
-        )
+        color = BLACK_BACKDROP_COLOR
     }
 
     // Subtle hold-to-reposition feedback paints (pre-allocated)
     private val holdHaloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        color = Color.WHITE
+        color = HudColorSystem.DEFAULT_ACCENT_COLOR
     }
 
     private val holdOutlinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        color = Color.WHITE
+        color = HudColorSystem.DEFAULT_ACCENT_COLOR
     }
 
     private val holdFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
-        color = Color.WHITE
+        color = HudColorSystem.DEFAULT_ACCENT_COLOR
     }
 
     private val holdDotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -139,31 +120,53 @@ class MinimalOverlayView(
         color = Color.WHITE
     }
 
-    // Cached Glass shader keys to prevent per-frame shader allocations
-    private var cachedGlassTop = Float.NaN
-    private var cachedGlassBottom = Float.NaN
-    private var cachedGlassSheenAlpha = -1
-    private var cachedGlassBorderTop = Float.NaN
-    private var cachedGlassBorderBottom = Float.NaN
-    private var cachedGlassBorderAlpha = -1
-    private var cachedGlassInnerTop = Float.NaN
-    private var cachedGlassInnerBottom = Float.NaN
-    private var cachedGlassInnerAlpha = -1
-
     private val currentBackdropRect = android.graphics.RectF()
     private val previousBackdropRect = android.graphics.RectF()
     private val drawnBackdropRect = android.graphics.RectF()
-    private val shadowBackdropRect = android.graphics.RectF()
-    private val innerRimBackdropRect = android.graphics.RectF()
-    private val borderBackdropRect = android.graphics.RectF()
     private val holdFeedbackRect = android.graphics.RectF()
 
     var primaryColor: Int = Color.WHITE
         set(value) {
             field = value
-            editBorderPaint.color = androidx.core.graphics.ColorUtils.setAlphaComponent(value, 160)
-            editHandlePaint.color = androidx.core.graphics.ColorUtils.setAlphaComponent(value, 220)
             invalidate()
+        }
+
+    var activeLyricColor: Int = HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR
+        set(value) {
+            val safe = HudColorSystem.sanitizeOpaqueColor(value, HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR)
+            if (field != safe) {
+                field = safe
+                wordActivePaint.color = safe
+                wordGlowPaint.color = safe
+                blurRevealPaint.color = safe
+                updateShadow(wordActivePaint, textShadowEnabled, isSubordinate = false, inkColor = safe)
+                updateWordGlowLayer(safe)
+                invalidate()
+            }
+        }
+
+    var inactiveLyricColor: Int = HudColorSystem.DEFAULT_INACTIVE_LYRIC_COLOR
+        set(value) {
+            val safe = HudColorSystem.sanitizeOpaqueColor(value, HudColorSystem.DEFAULT_INACTIVE_LYRIC_COLOR)
+            if (field != safe) {
+                field = safe
+                wordInactivePaint.color = safe
+                previousTextPaint.color = safe
+                updateShadow(wordInactivePaint, textShadowEnabled, isSubordinate = true, inkColor = safe)
+                updateShadow(previousTextPaint, textShadowEnabled, isSubordinate = true, inkColor = safe)
+                invalidate()
+            }
+        }
+
+    var hudAccentColor: Int = HudColorSystem.DEFAULT_ACCENT_COLOR
+        set(value) {
+            val safe = HudColorSystem.sanitizeOpaqueColor(value, HudColorSystem.DEFAULT_ACCENT_COLOR)
+            if (field != safe) {
+                field = safe
+                editBorderPaint.color = androidx.core.graphics.ColorUtils.setAlphaComponent(safe, 180)
+                editHandlePaint.color = androidx.core.graphics.ColorUtils.setAlphaComponent(safe, 230)
+                invalidate()
+            }
         }
 
     // Layout data structures for zero-allocation rendering & smooth multi-line wrapping
@@ -438,9 +441,9 @@ class MinimalOverlayView(
             }
         }
 
-    var hudBackdropStyle: String = "SOLID"
+    var hudBackdropStyle: String = "BLACK"
         set(value) {
-            val normalized = if (value.trim().equals("GLASS", ignoreCase = true)) "GLASS" else "SOLID"
+            val normalized = normalizeBackdropStyle(value)
             if (field != normalized) {
                 field = normalized
                 invalidate()
@@ -557,9 +560,9 @@ class MinimalOverlayView(
     var textShadowEnabled: Boolean = true
         set(value) {
             field = value
-            updateShadow(wordActivePaint, value, isSubordinate = false)
-            updateShadow(wordInactivePaint, value, isSubordinate = true)
-            updateShadow(previousTextPaint, value, isSubordinate = true)
+            updateShadow(wordActivePaint, value, isSubordinate = false, inkColor = activeLyricColor)
+            updateShadow(wordInactivePaint, value, isSubordinate = true, inkColor = inactiveLyricColor)
+            updateShadow(previousTextPaint, value, isSubordinate = true, inkColor = inactiveLyricColor)
             invalidate()
         }
 
@@ -800,20 +803,42 @@ class MinimalOverlayView(
         previousTextPaint.textSize = initialPx
         wordGlowPaint.textSize = initialPx
         blurRevealPaint.textSize = initialPx
-        updateShadow(wordActivePaint, textShadowEnabled, isSubordinate = false)
-        updateShadow(wordInactivePaint, textShadowEnabled, isSubordinate = true)
-        updateShadow(previousTextPaint, textShadowEnabled, isSubordinate = true)
+        updateShadow(wordActivePaint, textShadowEnabled, isSubordinate = false, inkColor = activeLyricColor)
+        updateShadow(wordInactivePaint, textShadowEnabled, isSubordinate = true, inkColor = inactiveLyricColor)
+        updateShadow(previousTextPaint, textShadowEnabled, isSubordinate = true, inkColor = inactiveLyricColor)
+        updateWordGlowLayer(activeLyricColor)
     }
 
-    private fun updateShadow(paint: Paint, enabled: Boolean, isSubordinate: Boolean = false) {
-        if (enabled) {
-            if (isSubordinate) {
-                paint.setShadowLayer(3.5f, 0f, 1.5f, Color.argb(INACTIVE_SHADOW_ALPHA, 0, 0, 0))
-            } else {
-                paint.setShadowLayer(5.5f, 0f, 1.5f, Color.argb(ACTIVE_SHADOW_ALPHA, 0, 0, 0))
-            }
-        } else {
+    private fun updateShadow(
+        paint: Paint,
+        enabled: Boolean,
+        isSubordinate: Boolean = false,
+        inkColor: Int = if (isSubordinate) inactiveLyricColor else activeLyricColor
+    ) {
+        if (!enabled) {
             paint.clearShadowLayer()
+            return
+        }
+        if (HudColorSystem.isDarkColor(inkColor)) {
+            val lightHaloAlpha = if (isSubordinate) 40 else 65
+            paint.setShadowLayer(2.5f, 0f, 1f, Color.argb(lightHaloAlpha, 255, 255, 255))
+        } else {
+            val darkShadowAlpha = if (isSubordinate) INACTIVE_SHADOW_ALPHA else ACTIVE_SHADOW_ALPHA
+            val blurRadius = if (isSubordinate) 3.5f else 5.5f
+            paint.setShadowLayer(blurRadius, 0f, 1.5f, Color.argb(darkShadowAlpha, 0, 0, 0))
+        }
+    }
+
+    private fun updateWordGlowLayer(inkColor: Int = activeLyricColor) {
+        if (HudColorSystem.isDarkColor(inkColor)) {
+            wordGlowPaint.clearShadowLayer()
+        } else {
+            wordGlowPaint.setShadowLayer(
+                9f,
+                0f,
+                0f,
+                androidx.core.graphics.ColorUtils.setAlphaComponent(inkColor, ACTIVE_GLOW_ALPHA)
+            )
         }
     }
 
@@ -1027,25 +1052,6 @@ class MinimalOverlayView(
         val maxRadiusPx = (minOf(drawnBackdropRect.width(), drawnBackdropRect.height()) / 2f).coerceAtLeast(0f)
         val cornerRadiusPx = (hudBackdropCornerRadiusDp.coerceIn(0f, 32f) * density).coerceIn(0f, maxRadiusPx)
 
-        if (appearance.isGlass && appearance.glassElevationShadowAlpha > 0) {
-            val shadowStrokePx = (1.5f * density).coerceAtLeast(1.25f)
-            val shadowOffset = shadowStrokePx / 2f
-            shadowBackdropRect.set(
-                (drawnBackdropRect.left - shadowOffset).coerceAtLeast(0f),
-                (drawnBackdropRect.top - shadowOffset * 0.5f).coerceAtLeast(0f),
-                (drawnBackdropRect.right + shadowOffset).coerceAtMost(width.toFloat()),
-                (drawnBackdropRect.bottom + shadowOffset).coerceAtMost(height.toFloat())
-            )
-            backdropGlassShadowPaint.strokeWidth = shadowStrokePx
-            backdropGlassShadowPaint.alpha = appearance.glassElevationShadowAlpha
-            canvas.drawRoundRect(
-                shadowBackdropRect,
-                (cornerRadiusPx + shadowOffset).coerceAtLeast(0f),
-                (cornerRadiusPx + shadowOffset).coerceAtLeast(0f),
-                backdropGlassShadowPaint
-            )
-        }
-
         backdropFillPaint.color = appearance.fillColor
         backdropFillPaint.alpha = appearance.fillAlpha
         canvas.drawRoundRect(
@@ -1054,118 +1060,6 @@ class MinimalOverlayView(
             cornerRadiusPx,
             backdropFillPaint
         )
-
-        if (appearance.isGlass) {
-            val sheenAlpha = appearance.glassSheenAlpha
-            if (sheenAlpha > 0) {
-                if (cachedGlassTop != drawnBackdropRect.top ||
-                    cachedGlassBottom != drawnBackdropRect.bottom ||
-                    cachedGlassSheenAlpha != sheenAlpha ||
-                    backdropGlassSheenPaint.shader == null
-                ) {
-                    cachedGlassTop = drawnBackdropRect.top
-                    cachedGlassBottom = drawnBackdropRect.bottom
-                    cachedGlassSheenAlpha = sheenAlpha
-                    backdropGlassSheenPaint.shader = LinearGradient(
-                        0f,
-                        drawnBackdropRect.top,
-                        0f,
-                        drawnBackdropRect.bottom.coerceAtLeast(drawnBackdropRect.top + 1f),
-                        buildGlassFrostGradientColors(sheenAlpha),
-                        GLASS_FROST_STOPS,
-                        Shader.TileMode.CLAMP
-                    )
-                }
-                backdropGlassSheenPaint.alpha = 255
-                canvas.drawRoundRect(
-                    drawnBackdropRect,
-                    cornerRadiusPx,
-                    cornerRadiusPx,
-                    backdropGlassSheenPaint
-                )
-            }
-
-            val borderWidthPx = (1f * density).coerceAtLeast(1f)
-            val innerAlpha = appearance.glassInnerHighlightAlpha
-            if (innerAlpha > 0 && drawnBackdropRect.height() > borderWidthPx * 4f) {
-                val innerInset = borderWidthPx + (0.65f * density).coerceAtLeast(0.75f)
-                innerRimBackdropRect.set(
-                    drawnBackdropRect.left + innerInset,
-                    drawnBackdropRect.top + innerInset,
-                    (drawnBackdropRect.right - innerInset).coerceAtLeast(drawnBackdropRect.left + innerInset),
-                    (drawnBackdropRect.bottom - innerInset).coerceAtLeast(drawnBackdropRect.top + innerInset)
-                )
-                val innerRadius = (cornerRadiusPx - innerInset).coerceAtLeast(0f)
-                if (cachedGlassInnerTop != innerRimBackdropRect.top ||
-                    cachedGlassInnerBottom != innerRimBackdropRect.bottom ||
-                    cachedGlassInnerAlpha != innerAlpha ||
-                    backdropGlassInnerRimPaint.shader == null
-                ) {
-                    cachedGlassInnerTop = innerRimBackdropRect.top
-                    cachedGlassInnerBottom = innerRimBackdropRect.bottom
-                    cachedGlassInnerAlpha = innerAlpha
-                    backdropGlassInnerRimPaint.shader = LinearGradient(
-                        0f,
-                        innerRimBackdropRect.top,
-                        0f,
-                        innerRimBackdropRect.bottom.coerceAtLeast(innerRimBackdropRect.top + 1f),
-                        buildGlassInnerHighlightColors(innerAlpha),
-                        GLASS_INNER_HIGHLIGHT_STOPS,
-                        Shader.TileMode.CLAMP
-                    )
-                }
-                backdropGlassInnerRimPaint.strokeWidth = (0.75f * density).coerceAtLeast(1f)
-                backdropGlassInnerRimPaint.alpha = 255
-                canvas.drawRoundRect(
-                    innerRimBackdropRect,
-                    innerRadius,
-                    innerRadius,
-                    backdropGlassInnerRimPaint
-                )
-            }
-
-            val borderAlpha = appearance.borderAlpha
-            if (borderAlpha > 0) {
-                val halfStroke = borderWidthPx / 2f
-                borderBackdropRect.set(
-                    drawnBackdropRect.left + halfStroke,
-                    drawnBackdropRect.top + halfStroke,
-                    drawnBackdropRect.right - halfStroke,
-                    drawnBackdropRect.bottom - halfStroke
-                )
-                val borderRadius = (cornerRadiusPx - halfStroke).coerceAtLeast(0f)
-                if (cachedGlassBorderTop != borderBackdropRect.top ||
-                    cachedGlassBorderBottom != borderBackdropRect.bottom ||
-                    cachedGlassBorderAlpha != borderAlpha ||
-                    backdropBorderPaint.shader == null
-                ) {
-                    cachedGlassBorderTop = borderBackdropRect.top
-                    cachedGlassBorderBottom = borderBackdropRect.bottom
-                    cachedGlassBorderAlpha = borderAlpha
-                    backdropBorderPaint.shader = LinearGradient(
-                        0f,
-                        borderBackdropRect.top,
-                        0f,
-                        borderBackdropRect.bottom.coerceAtLeast(borderBackdropRect.top + 1f),
-                        buildGlassBorderGradientColors(borderAlpha),
-                        GLASS_BORDER_STOPS,
-                        Shader.TileMode.CLAMP
-                    )
-                }
-                backdropBorderPaint.strokeWidth = borderWidthPx
-                backdropBorderPaint.alpha = 255
-                canvas.drawRoundRect(
-                    borderBackdropRect,
-                    borderRadius,
-                    borderRadius,
-                    backdropBorderPaint
-                )
-            }
-        } else {
-            backdropGlassSheenPaint.shader = null
-            backdropGlassInnerRimPaint.shader = null
-            backdropBorderPaint.shader = null
-        }
     }
 
     private fun recalculateLayout() {
@@ -1581,10 +1475,12 @@ class MinimalOverlayView(
         canvas.save()
         canvas.clipRect(paddingHorizontal, 0f, width - paddingHorizontal, height.toFloat())
 
-        // 1. Unified color & alpha hierarchy across active, subordinate, and outgoing lines
+        // 1. Unified customizable lyric colour & alpha hierarchy across active, inactive, and outgoing lines
         val isFadeStyle = currentStyle == "FADE" || currentStyle == "BLUR_REVEAL"
         val isAnimatedTransition = currentStyle == "KARAOKE" || currentStyle == "SMOOTH_SLIDE" || isFadeStyle
         val hierarchy = computeLyricColorHierarchy(
+            activeColor = activeLyricColor,
+            inactiveColor = inactiveLyricColor,
             textOpacity = textOpacity,
             animProgress = if (isAnimatedTransition) animProgress else 1f,
             isFadeStyle = isFadeStyle
@@ -1597,7 +1493,7 @@ class MinimalOverlayView(
             } else {
                 0f
             }
-            previousTextPaint.color = INACTIVE_LYRIC_COLOR
+            previousTextPaint.color = hierarchy.inactiveColor
             previousTextPaint.alpha = hierarchy.outgoingAlpha
             canvas.save()
             if (singleLineMode && previousScrollX > 0f) {
@@ -1628,12 +1524,12 @@ class MinimalOverlayView(
         when (currentStyle) {
             "KARAOKE" -> {
                 if (isWordSynced && activeLyricLine?.words?.isNotEmpty() == true) {
-                    // 1. Word-synchronized lyrics: crisp active highlight + readable soft-white un-sung words
-                    wordInactivePaint.color = INACTIVE_LYRIC_COLOR
+                    // 1. Word-synchronized lyrics: user's active & inactive lyric colours
+                    wordInactivePaint.color = hierarchy.inactiveColor
                     wordInactivePaint.alpha = inactiveAlpha
-                    wordActivePaint.color = ACTIVE_LYRIC_COLOR
+                    wordActivePaint.color = hierarchy.activeColor
                     wordActivePaint.alpha = incomingAlpha
-                    wordGlowPaint.color = ACTIVE_LYRIC_COLOR
+                    wordGlowPaint.color = hierarchy.activeColor
                     wordGlowPaint.alpha = incomingAlpha
 
                     // Determine the single active visual line index
@@ -1688,6 +1584,7 @@ class MinimalOverlayView(
                     }
                 } else if (activeLyricLine?.timeMs == 0L && activeLyricLine?.endTimeMs == 0L && !isWordSynced) {
                     // 2. Untimed / plain lyrics fallback: display clearly as readable static text without fake karaoke sweep
+                    wordActivePaint.color = hierarchy.activeColor
                     wordActivePaint.alpha = incomingAlpha
                     for (line in currentLayoutLines) {
                         val drawY = line.baselineY - currentScrollY + incomingOffsetY
@@ -1708,8 +1605,8 @@ class MinimalOverlayView(
                     }
                     val totalDuration = (lineEnd - lineStart).coerceIn(1200L, 12000L)
 
-                    // A: Always display ALL lines with clean soft-white subordinate alpha (never muddy dark grey)
-                    wordInactivePaint.color = INACTIVE_LYRIC_COLOR
+                    // A: Display unsung visual lines using the user's inactive lyric colour
+                    wordInactivePaint.color = hierarchy.inactiveColor
                     wordInactivePaint.alpha = inactiveAlpha
                     for (line in currentLayoutLines) {
                         val drawY = line.baselineY - currentScrollY + incomingOffsetY
@@ -1718,8 +1615,7 @@ class MinimalOverlayView(
                         }
                     }
 
-                    // B: Show high-opacity glowing text above that sweeps across the text
-                    // Visual lines that have already been sung remain fully glowing and visible
+                    // B: Show active lyric colour sweeping cleanly across current words
                     if (currentLayoutLines.isNotEmpty()) {
                         val totalChars = totalLayoutChars.coerceAtLeast(1)
 
@@ -1749,7 +1645,9 @@ class MinimalOverlayView(
                             charAccumulator += lineChars
                         }
 
+                        wordActivePaint.color = hierarchy.activeColor
                         wordActivePaint.alpha = incomingAlpha
+                        wordGlowPaint.color = hierarchy.activeColor
                         wordGlowPaint.alpha = incomingAlpha
 
                         // Draw prior completed visual lines (0 until activeLineIdx) fully highlighted and glowing
@@ -1796,6 +1694,7 @@ class MinimalOverlayView(
                 }
             }
             "SMOOTH_SLIDE" -> {
+                wordActivePaint.color = hierarchy.activeColor
                 wordActivePaint.alpha = incomingAlpha
                 for (line in currentLayoutLines) {
                     val drawY = line.baselineY - currentScrollY + incomingOffsetY
@@ -1805,6 +1704,7 @@ class MinimalOverlayView(
                 }
             }
             "FADE" -> {
+                wordActivePaint.color = hierarchy.activeColor
                 wordActivePaint.alpha = incomingAlpha
                 for (line in currentLayoutLines) {
                     val drawY = line.baselineY - currentScrollY
@@ -1817,8 +1717,9 @@ class MinimalOverlayView(
                 if (animProgress < 1f) {
                     val blurRadius = (1f - animProgress) * 14f
                     if (blurRadius > 0.8f) {
+                        blurRevealPaint.color = hierarchy.activeColor
                         blurRevealPaint.alpha = ((1f - animProgress) * baseAlpha * 0.7f).toInt().coerceIn(0, 255)
-                        blurRevealPaint.setShadowLayer(blurRadius, 0f, 0f, Color.WHITE)
+                        blurRevealPaint.setShadowLayer(blurRadius, 0f, 0f, hierarchy.activeColor)
                         for (line in currentLayoutLines) {
                             val drawY = line.baselineY - currentScrollY
                             for (w in line.words) {
@@ -1829,6 +1730,7 @@ class MinimalOverlayView(
                 } else {
                     blurRevealPaint.clearShadowLayer()
                 }
+                wordActivePaint.color = hierarchy.activeColor
                 wordActivePaint.alpha = incomingAlpha
                 for (line in currentLayoutLines) {
                     val drawY = line.baselineY - currentScrollY
@@ -1838,6 +1740,7 @@ class MinimalOverlayView(
                 }
             }
             "TYPEWRITER" -> {
+                wordActivePaint.color = hierarchy.activeColor
                 wordActivePaint.alpha = baseAlpha
                 val speed = typewriterSpeed.coerceIn(0.3f, 3.0f)
                 if (isWordSynced && activeLyricLine?.words?.isNotEmpty() == true) {
@@ -1904,6 +1807,7 @@ class MinimalOverlayView(
                 }
             }
             "INSTANT" -> {
+                wordActivePaint.color = hierarchy.activeColor
                 wordActivePaint.alpha = baseAlpha
                 for (line in currentLayoutLines) {
                     val drawY = line.baselineY - currentScrollY
@@ -1970,22 +1874,23 @@ class MinimalOverlayView(
             radiusPx = (16f * density).coerceIn(0f, maxR)
         }
 
+        val accent = hudAccentColor
         holdFillPaint.color = androidx.core.graphics.ColorUtils.setAlphaComponent(
-            primaryColor,
+            accent,
             (42f * prog).roundToInt().coerceIn(0, 48)
         )
         canvas.drawRoundRect(holdFeedbackRect, radiusPx, radiusPx, holdFillPaint)
 
         holdHaloPaint.strokeWidth = strokePx + (2.5f * density)
         holdHaloPaint.color = androidx.core.graphics.ColorUtils.setAlphaComponent(
-            primaryColor,
+            accent,
             (64f * prog).roundToInt().coerceIn(0, 80)
         )
         canvas.drawRoundRect(holdFeedbackRect, radiusPx, radiusPx, holdHaloPaint)
 
         holdOutlinePaint.strokeWidth = strokePx
         holdOutlinePaint.color = androidx.core.graphics.ColorUtils.setAlphaComponent(
-            primaryColor,
+            accent,
             (235f * prog).roundToInt().coerceIn(0, 245)
         )
         canvas.drawRoundRect(holdFeedbackRect, radiusPx, radiusPx, holdOutlinePaint)
@@ -1993,7 +1898,7 @@ class MinimalOverlayView(
         val dotRadius = (3.5f * density).coerceAtLeast(3f) * prog
         val inset = maxOf(radiusPx * 0.42f, 8f * density)
         holdDotPaint.color = androidx.core.graphics.ColorUtils.setAlphaComponent(
-            Color.WHITE,
+            accent,
             (235f * prog).roundToInt().coerceIn(0, 245)
         )
         canvas.drawCircle(holdFeedbackRect.left + inset, holdFeedbackRect.top + inset, dotRadius, holdDotPaint)
@@ -2306,34 +2211,21 @@ class MinimalOverlayView(
     }
 
     companion object {
-        const val SOLID_BACKDROP_COLOR: Int = 0xFF121216.toInt()
-        const val GLASS_BACKDROP_COLOR: Int = 0xFF161A24.toInt()
-        const val GLASS_FILL_ALPHA_MAX: Float = 224f
-        const val GLASS_SHEEN_ALPHA_MAX: Float = 44f
-        const val GLASS_BORDER_ALPHA_MAX: Float = 118f
-        const val GLASS_ELEVATION_SHADOW_ALPHA_MAX: Float = 52f
-        const val GLASS_INNER_HIGHLIGHT_ALPHA_MAX: Float = 54f
+        const val BLACK_BACKDROP_COLOR: Int = HudColorSystem.BLACK_BACKDROP_COLOR
+        const val GREY_BACKDROP_COLOR: Int = HudColorSystem.GREY_BACKDROP_COLOR
 
-        val GLASS_FROST_STOPS = floatArrayOf(0f, 0.38f, 0.72f, 1f)
-        val GLASS_BORDER_STOPS = floatArrayOf(0f, 0.45f, 1f)
-        val GLASS_INNER_HIGHLIGHT_STOPS = floatArrayOf(0f, 0.42f, 1f)
-
-        const val ACTIVE_LYRIC_COLOR: Int = 0xFFFFFFFF.toInt()
-        const val INACTIVE_LYRIC_COLOR: Int = 0xFFF2F5FA.toInt()
+        const val ACTIVE_LYRIC_COLOR: Int = HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR
+        const val INACTIVE_LYRIC_COLOR: Int = HudColorSystem.DEFAULT_INACTIVE_LYRIC_COLOR
         const val INACTIVE_LYRIC_ALPHA_RATIO: Float = 0.64f
         const val OUTGOING_LYRIC_ALPHA_RATIO: Float = 0.44f
         const val ACTIVE_SHADOW_ALPHA: Int = 215
         const val INACTIVE_SHADOW_ALPHA: Int = 95
-        const val ACTIVE_GLOW_ALPHA: Int = 185
+        const val ACTIVE_GLOW_ALPHA: Int = 140
 
         data class BackdropAppearanceSpec(
-            val isGlass: Boolean,
+            val style: String,
             val fillColor: Int,
-            val fillAlpha: Int,
-            val glassSheenAlpha: Int,
-            val borderAlpha: Int,
-            val glassElevationShadowAlpha: Int,
-            val glassInnerHighlightAlpha: Int
+            val fillAlpha: Int
         )
 
         data class LyricColorHierarchy(
@@ -2341,108 +2233,53 @@ class MinimalOverlayView(
             val activeAlpha: Int,
             val inactiveAlpha: Int,
             val outgoingAlpha: Int,
-            val activeColor: Int = ACTIVE_LYRIC_COLOR,
-            val inactiveColor: Int = INACTIVE_LYRIC_COLOR
+            val activeColor: Int = HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR,
+            val inactiveColor: Int = HudColorSystem.DEFAULT_INACTIVE_LYRIC_COLOR
         )
 
+        fun normalizeBackdropStyle(style: String?): String {
+            if (style.isNullOrBlank()) return "BLACK"
+            return when (style.trim().uppercase(java.util.Locale.US)) {
+                "GREY", "GRAY" -> "GREY"
+                else -> "BLACK"
+            }
+        }
+
         fun computeBackdropAppearance(style: String, opacity: Float): BackdropAppearanceSpec {
+            val normalizedStyle = normalizeBackdropStyle(style)
             val clampedOpacity = opacity.coerceIn(0f, 1f)
-            val isGlass = style.trim().equals("GLASS", ignoreCase = true)
-            val fillColor = if (isGlass) GLASS_BACKDROP_COLOR else SOLID_BACKDROP_COLOR
-            val fillAlpha = if (isGlass) {
-                (clampedOpacity * GLASS_FILL_ALPHA_MAX).roundToInt().coerceIn(0, 255)
-            } else {
-                (clampedOpacity * 255f).roundToInt().coerceIn(0, 255)
-            }
-            val glassSheenAlpha = if (isGlass) {
-                (clampedOpacity * GLASS_SHEEN_ALPHA_MAX).roundToInt().coerceIn(0, 44)
-            } else {
-                0
-            }
-            val borderAlpha = if (isGlass) {
-                (clampedOpacity * GLASS_BORDER_ALPHA_MAX).roundToInt().coerceIn(0, 120)
-            } else {
-                0
-            }
-            val elevationShadowAlpha = if (isGlass) {
-                (clampedOpacity * GLASS_ELEVATION_SHADOW_ALPHA_MAX).roundToInt().coerceIn(0, 64)
-            } else {
-                0
-            }
-            val innerHighlightAlpha = if (isGlass) {
-                (clampedOpacity * GLASS_INNER_HIGHLIGHT_ALPHA_MAX).roundToInt().coerceIn(0, 68)
-            } else {
-                0
-            }
+            val fillColor = if (normalizedStyle == "GREY") GREY_BACKDROP_COLOR else BLACK_BACKDROP_COLOR
+            val fillAlpha = (clampedOpacity * 255f).roundToInt().coerceIn(0, 255)
             return BackdropAppearanceSpec(
-                isGlass = isGlass,
+                style = normalizedStyle,
                 fillColor = fillColor,
-                fillAlpha = fillAlpha,
-                glassSheenAlpha = glassSheenAlpha,
-                borderAlpha = borderAlpha,
-                glassElevationShadowAlpha = elevationShadowAlpha,
-                glassInnerHighlightAlpha = innerHighlightAlpha
-            )
-        }
-
-        private fun argbColor(alpha: Int, red: Int, green: Int, blue: Int): Int {
-            return ((alpha.coerceIn(0, 255) shl 24) or
-                (red.coerceIn(0, 255) shl 16) or
-                (green.coerceIn(0, 255) shl 8) or
-                blue.coerceIn(0, 255))
-        }
-
-        fun buildGlassFrostGradientColors(sheenAlpha: Int): IntArray {
-            val safe = sheenAlpha.coerceIn(0, 255)
-            val upperMid = (safe * 0.34f).roundToInt().coerceIn(0, 255)
-            val lowerMid = (safe * 0.14f).roundToInt().coerceIn(0, 255)
-            val bottom = (safe * 0.30f).roundToInt().coerceIn(0, 255)
-            return intArrayOf(
-                argbColor(safe, 255, 255, 255),
-                argbColor(upperMid, 238, 244, 255),
-                argbColor(lowerMid, 218, 228, 248),
-                argbColor(bottom, 206, 220, 245)
-            )
-        }
-
-        fun buildGlassBorderGradientColors(borderAlpha: Int): IntArray {
-            val safe = borderAlpha.coerceIn(0, 255)
-            val mid = (safe * 0.38f).roundToInt().coerceIn(0, 255)
-            val bottom = (safe * 0.56f).roundToInt().coerceIn(0, 255)
-            return intArrayOf(
-                argbColor(safe, 255, 255, 255),
-                argbColor(mid, 230, 238, 252),
-                argbColor(bottom, 202, 216, 242)
-            )
-        }
-
-        fun buildGlassInnerHighlightColors(innerAlpha: Int): IntArray {
-            val safe = innerAlpha.coerceIn(0, 255)
-            val mid = (safe * 0.18f).roundToInt().coerceIn(0, 255)
-            return intArrayOf(
-                argbColor(safe, 255, 255, 255),
-                argbColor(mid, 236, 244, 255),
-                argbColor(0, 220, 232, 255)
+                fillAlpha = fillAlpha
             )
         }
 
         fun computeLyricColorHierarchy(
+            activeColor: Int = HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR,
+            inactiveColor: Int = HudColorSystem.DEFAULT_INACTIVE_LYRIC_COLOR,
             textOpacity: Float,
             animProgress: Float = 1f,
             isFadeStyle: Boolean = false
         ): LyricColorHierarchy {
+            val safeActive = HudColorSystem.sanitizeOpaqueColor(activeColor, HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR)
+            val safeInactive = HudColorSystem.sanitizeOpaqueColor(inactiveColor, HudColorSystem.DEFAULT_INACTIVE_LYRIC_COLOR)
             val clampedOpacity = textOpacity.coerceIn(0.15f, 1.0f)
             val clampedProgress = animProgress.coerceIn(0f, 1f)
             val baseAlpha = (255f * clampedOpacity).roundToInt().coerceIn(0, 255)
             val activeAlpha = (baseAlpha * clampedProgress).roundToInt().coerceIn(0, 255)
-            val inactiveAlpha = (activeAlpha * INACTIVE_LYRIC_ALPHA_RATIO).roundToInt().coerceIn(0, 255)
+            val inactiveAlpha = activeAlpha
             val outgoingRatio = if (isFadeStyle) 1f else OUTGOING_LYRIC_ALPHA_RATIO
             val outgoingAlpha = (baseAlpha * (1f - clampedProgress) * outgoingRatio).roundToInt().coerceIn(0, 255)
             return LyricColorHierarchy(
                 baseAlpha = baseAlpha,
                 activeAlpha = activeAlpha,
                 inactiveAlpha = inactiveAlpha,
-                outgoingAlpha = outgoingAlpha
+                outgoingAlpha = outgoingAlpha,
+                activeColor = safeActive,
+                inactiveColor = safeInactive
             )
         }
 
@@ -2452,15 +2289,9 @@ class MinimalOverlayView(
             val right: Float,
             val bottom: Float,
             val cornerRadiusPx: Float,
+            val style: String,
             val fillColor: Int,
-            val fillAlpha: Int,
-            val showBorder: Boolean,
-            val borderColor: Int,
-            val borderAlpha: Int,
-            val borderWidthPx: Float,
-            val glassSheenAlpha: Int,
-            val glassElevationShadowAlpha: Int = 0,
-            val glassInnerHighlightAlpha: Int = 0
+            val fillAlpha: Int
         ) {
             val width: Float get() = (right - left).coerceAtLeast(0f)
             val height: Float get() = (bottom - top).coerceAtLeast(0f)
@@ -2507,7 +2338,6 @@ class MinimalOverlayView(
             val maxRadiusPx = (minOf(right - left, bottom - top) / 2f).coerceAtLeast(0f)
             val cornerRadiusPx = (cornerRadiusDp.coerceIn(0f, 32f) * safeDensity).coerceIn(0f, maxRadiusPx)
             val appearance = computeBackdropAppearance(style, clampedOpacity)
-            val borderWidthPx = (1f * safeDensity).coerceAtLeast(1f)
 
             return BackdropRenderSpec(
                 left = left,
@@ -2515,15 +2345,9 @@ class MinimalOverlayView(
                 right = right,
                 bottom = bottom,
                 cornerRadiusPx = cornerRadiusPx,
+                style = appearance.style,
                 fillColor = appearance.fillColor,
-                fillAlpha = appearance.fillAlpha,
-                showBorder = appearance.isGlass && appearance.borderAlpha > 0,
-                borderColor = Color.WHITE,
-                borderAlpha = appearance.borderAlpha,
-                borderWidthPx = borderWidthPx,
-                glassSheenAlpha = appearance.glassSheenAlpha,
-                glassElevationShadowAlpha = appearance.glassElevationShadowAlpha,
-                glassInnerHighlightAlpha = appearance.glassInnerHighlightAlpha
+                fillAlpha = appearance.fillAlpha
             )
         }
 

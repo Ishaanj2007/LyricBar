@@ -10,6 +10,7 @@ import com.example.service.HudDisplayGeometry
 import com.example.service.HudOrientation
 import com.example.service.HudOverlayProfile
 import com.example.service.HudPositioningEngine
+import com.example.ui.components.HudColorSystem
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -107,13 +108,24 @@ enum class OverlayAnimationStyle(val title: String, val description: String) {
 }
 
 enum class HudBackdropStyle(val title: String, val description: String) {
-    SOLID("Solid", "Clean, neutral dark translucent surface"),
-    GLASS("Glass", "Frosted-glass appearance with a subtle soft border");
+    BLACK("Black", "Deep neutral black surface with crisp contrast"),
+    GREY("Grey", "Clean balanced neutral grey surface");
 
     companion object {
         fun fromName(name: String?): HudBackdropStyle {
-            if (name.isNullOrBlank()) return SOLID
-            return entries.find { it.name.equals(name.trim(), ignoreCase = true) } ?: SOLID
+            if (name.isNullOrBlank()) return BLACK
+            return when (name.trim().uppercase(java.util.Locale.US)) {
+                "GREY", "GRAY" -> GREY
+                // Legacy GLASS defaults to BLACK; legacy SOLID used deep dark #121216 -> maps reliably to BLACK
+                "BLACK", "GLASS", "SOLID" -> BLACK
+                else -> BLACK
+            }
+        }
+
+        fun shouldMigrateLegacyValue(rawValue: String?): Boolean {
+            if (rawValue.isNullOrBlank()) return false
+            val normalized = rawValue.trim().uppercase(java.util.Locale.US)
+            return normalized == "GLASS" || normalized == "SOLID"
         }
     }
 }
@@ -130,11 +142,15 @@ data class UserPreferences(
     val karaokeGlowSpeed: Float = 1.0f, // 0.5x to 1.5x (Glow Sweep Speed)
     val textShadowEnabled: Boolean = true,
     val hudBackdropEnabled: Boolean = false,
-    val hudBackdropStyle: HudBackdropStyle = HudBackdropStyle.SOLID,
+    val hudBackdropStyle: HudBackdropStyle = HudBackdropStyle.BLACK,
     val hudBackdropOpacity: Float = 0.65f, // 0.0f to 1.0f (0% to 100%, default 65%)
     val hudBackdropCornerRadiusDp: Int = 18, // 0 to 32 dp (default 18dp)
     val hudBackdropHorizontalPaddingDp: Int = 16, // 0 to 32 dp (default 16dp)
     val hudBackdropVerticalPaddingDp: Int = 10, // 0 to 24 dp (default 10dp)
+    val hudActiveLyricColor: Int = HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR,
+    val hudInactiveLyricColor: Int = HudColorSystem.DEFAULT_INACTIVE_LYRIC_COLOR,
+    val hudAccentColor: Int = HudColorSystem.DEFAULT_ACCENT_COLOR,
+    val hudCustomColors: List<Int> = emptyList(),
     val overlayYPosition: Int = HudPositioningEngine.DEFAULT_PORTRAIT_Y, // Portrait Y (legacy mirror)
     val overlayXPosition: Int = HudPositioningEngine.DEFAULT_PORTRAIT_X, // Portrait X (legacy mirror)
     val overlayWidthPx: Int = HudPositioningEngine.DEFAULT_PORTRAIT_WIDTH_PX, // Portrait width (legacy mirror)
@@ -224,6 +240,11 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
         val HUD_BACKDROP_CORNER_RADIUS_DP = intPreferencesKey("hud_backdrop_corner_radius_dp")
         val HUD_BACKDROP_HORIZONTAL_PADDING_DP = intPreferencesKey("hud_backdrop_horizontal_padding_dp")
         val HUD_BACKDROP_VERTICAL_PADDING_DP = intPreferencesKey("hud_backdrop_vertical_padding_dp")
+        val HUD_ACTIVE_LYRIC_COLOR = intPreferencesKey("hud_active_lyric_color")
+        val HUD_INACTIVE_LYRIC_COLOR = intPreferencesKey("hud_inactive_lyric_color")
+        val HUD_ACCENT_COLOR = intPreferencesKey("hud_accent_color")
+        val HUD_CUSTOM_COLORS = stringPreferencesKey("hud_custom_colors")
+        val HUD_STYLE_MIGRATION_VERSION = intPreferencesKey("hud_style_migration_version")
         val OVERLAY_Y_POS = intPreferencesKey("overlay_y_position")
         val OVERLAY_X_POS = intPreferencesKey("overlay_x_position")
         val OVERLAY_WIDTH = intPreferencesKey("overlay_width")
@@ -350,6 +371,21 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
                 hudBackdropCornerRadiusDp = (preferences[PreferencesKeys.HUD_BACKDROP_CORNER_RADIUS_DP] ?: 18).coerceIn(0, 32),
                 hudBackdropHorizontalPaddingDp = (preferences[PreferencesKeys.HUD_BACKDROP_HORIZONTAL_PADDING_DP] ?: 16).coerceIn(0, 32),
                 hudBackdropVerticalPaddingDp = (preferences[PreferencesKeys.HUD_BACKDROP_VERTICAL_PADDING_DP] ?: 10).coerceIn(0, 24),
+                hudActiveLyricColor = HudColorSystem.sanitizeOpaqueColor(
+                    preferences[PreferencesKeys.HUD_ACTIVE_LYRIC_COLOR],
+                    HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR
+                ),
+                hudInactiveLyricColor = HudColorSystem.sanitizeOpaqueColor(
+                    preferences[PreferencesKeys.HUD_INACTIVE_LYRIC_COLOR],
+                    HudColorSystem.DEFAULT_INACTIVE_LYRIC_COLOR
+                ),
+                hudAccentColor = HudColorSystem.sanitizeOpaqueColor(
+                    preferences[PreferencesKeys.HUD_ACCENT_COLOR],
+                    HudColorSystem.DEFAULT_ACCENT_COLOR
+                ),
+                hudCustomColors = HudColorSystem.deserializeCustomColors(
+                    preferences[PreferencesKeys.HUD_CUSTOM_COLORS]
+                ),
                 overlayYPosition = portraitY,
                 overlayXPosition = portraitX,
                 overlayWidthPx = portraitWidth,
@@ -490,6 +526,63 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
     suspend fun setHudBackdropVerticalPaddingDp(verticalPaddingDp: Int) {
         val bounded = verticalPaddingDp.coerceIn(0, 24)
         dataStore.edit { it[PreferencesKeys.HUD_BACKDROP_VERTICAL_PADDING_DP] = bounded }
+    }
+
+    suspend fun setHudActiveLyricColor(colorArgb: Int) {
+        val safe = HudColorSystem.sanitizeOpaqueColor(colorArgb, HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR)
+        dataStore.edit { it[PreferencesKeys.HUD_ACTIVE_LYRIC_COLOR] = safe }
+    }
+
+    suspend fun setHudInactiveLyricColor(colorArgb: Int) {
+        val safe = HudColorSystem.sanitizeOpaqueColor(colorArgb, HudColorSystem.DEFAULT_INACTIVE_LYRIC_COLOR)
+        dataStore.edit { it[PreferencesKeys.HUD_INACTIVE_LYRIC_COLOR] = safe }
+    }
+
+    suspend fun setHudAccentColor(colorArgb: Int) {
+        val safe = HudColorSystem.sanitizeOpaqueColor(colorArgb, HudColorSystem.DEFAULT_ACCENT_COLOR)
+        dataStore.edit { it[PreferencesKeys.HUD_ACCENT_COLOR] = safe }
+    }
+
+    suspend fun applyHudColorPair(activeColorArgb: Int, inactiveColorArgb: Int) {
+        val safeActive = HudColorSystem.sanitizeOpaqueColor(activeColorArgb, HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR)
+        val safeInactive = HudColorSystem.sanitizeOpaqueColor(inactiveColorArgb, HudColorSystem.DEFAULT_INACTIVE_LYRIC_COLOR)
+        dataStore.edit {
+            it[PreferencesKeys.HUD_ACTIVE_LYRIC_COLOR] = safeActive
+            it[PreferencesKeys.HUD_INACTIVE_LYRIC_COLOR] = safeInactive
+        }
+    }
+
+    suspend fun saveCustomHudColor(colorArgb: Int) {
+        val safe = HudColorSystem.sanitizeOpaqueColor(colorArgb, HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR)
+        dataStore.edit { prefs ->
+            val current = HudColorSystem.deserializeCustomColors(prefs[PreferencesKeys.HUD_CUSTOM_COLORS])
+            val isBuiltInPreset = HudColorSystem.curatedPresets.any { it.argb == safe }
+            if (!isBuiltInPreset) {
+                val updated = listOf(safe) + current.filterNot { it == safe }
+                prefs[PreferencesKeys.HUD_CUSTOM_COLORS] = HudColorSystem.serializeCustomColors(updated)
+            }
+        }
+    }
+
+    /**
+     * Idempotent upgrade migration from Glass/Solid backdrop styles to Black/Grey.
+     * - Legacy GLASS migrates to BLACK.
+     * - Legacy SOLID (previously deep dark #121216) maps reliably to BLACK.
+     * - Ambiguous/unknown strings are left untouched on disk and read via safe default BLACK.
+     * - Preserves opacity, corner radius, padding, and all unrelated preferences.
+     */
+    suspend fun migrateLegacyPreferencesIfNeeded() {
+        dataStore.edit { prefs ->
+            val migratedVersion = prefs[PreferencesKeys.HUD_STYLE_MIGRATION_VERSION] ?: 0
+            if (migratedVersion >= CURRENT_HUD_STYLE_MIGRATION_VERSION) {
+                return@edit
+            }
+            val rawStyle = prefs[PreferencesKeys.HUD_BACKDROP_STYLE]
+            if (HudBackdropStyle.shouldMigrateLegacyValue(rawStyle)) {
+                prefs[PreferencesKeys.HUD_BACKDROP_STYLE] = HudBackdropStyle.BLACK.name
+            }
+            prefs[PreferencesKeys.HUD_STYLE_MIGRATION_VERSION] = CURRENT_HUD_STYLE_MIGRATION_VERSION
+        }
     }
 
     suspend fun setOverlayPosition(
@@ -671,6 +764,7 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
     }
 
     companion object {
+        private const val CURRENT_HUD_STYLE_MIGRATION_VERSION = 1
         private const val MIN_STORED_X_PX = -4000
         private const val MAX_STORED_POS_PX = 8000
         private const val MIN_STORED_WIDTH_PX = 120

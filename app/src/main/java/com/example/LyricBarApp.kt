@@ -24,8 +24,9 @@ class LyricBarApp : Application() {
         playbackManager = MediaPlaybackManager.getInstance(this)
         preferencesRepository = playbackManager.preferencesRepository
 
-        // Observe playback state to auto-launch overlay when enabled
+        // Run idempotent legacy preference migration and observe playback state for overlay
         appScope.launch {
+            preferencesRepository.migrateLegacyPreferencesIfNeeded()
             combine(
                 playbackManager.playbackState,
                 preferencesRepository.userPreferencesFlow

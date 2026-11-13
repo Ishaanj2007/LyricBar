@@ -36,9 +36,12 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -60,6 +63,9 @@ import com.example.service.HudPositioningEngine
 import com.example.service.MediaPlaybackManager
 import com.example.ui.components.CalmThemedBackground
 import com.example.ui.components.FrostedCard
+import com.example.ui.components.HudColorPickerDialog
+import com.example.ui.components.HudColorSystem
+import com.example.ui.components.HudColorTarget
 import com.example.ui.components.LocalHazeState
 import com.example.ui.components.MinimalOverlayView
 import com.example.ui.theme.*
@@ -85,6 +91,8 @@ fun SettingsScreen(
     val updateManager = remember { com.example.data.updater.UpdateManager.getInstance(context) }
     var showUpdateDialog by rememberSaveable { mutableStateOf(false) }
     var showOrientationInfoDialog by rememberSaveable { mutableStateOf(false) }
+    var selectedColorTarget by rememberSaveable { mutableStateOf(HudColorTarget.ACTIVE_LYRIC) }
+    var activeColorPickerTarget by rememberSaveable { mutableStateOf<HudColorTarget?>(null) }
 
     val allSectionKeys = remember {
         listOf("overlay", "animation", "size_align", "position", "theme", "typography", "lyrics_provider", "data", "about")
@@ -153,9 +161,14 @@ fun SettingsScreen(
 
     val sectionOverlay: @Composable () -> Unit = {
         // SECTION 1: FLOATING OVERLAY & TIMELINE
+        val overlayStatusSummary = if (livePreferences.hudBackdropEnabled) {
+            "${livePreferences.hudBackdropStyle.title} backdrop"
+        } else {
+            "Text-only HUD"
+        }
         SettingsAccordionCard(
                     title = "Floating Overlay & Timeline",
-                    subtitle = if (livePreferences.overlayEnabled) "Active • Pure white lyrics ON" else "Off • Floating overlay disabled",
+                    subtitle = if (livePreferences.overlayEnabled) "Active • $overlayStatusSummary" else "Off • Floating overlay disabled",
                     icon = Icons.Default.Layers,
                     isExpanded = "overlay" in expandedSections,
                     onToggle = { toggleSection("overlay") }
@@ -394,40 +407,67 @@ fun SettingsScreen(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 // Live Preview Box
-                Text(
-                    text = "Live Preview",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Live Preview",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(Color(livePreferences.hudAccentColor))
+                                .border(
+                                    width = 0.75.dp,
+                                    color = Color.White.copy(alpha = 0.55f),
+                                    shape = CircleShape
+                                )
+                        )
+                        Text(
+                            text = "Accent ${HudColorSystem.formatHexColor(livePreferences.hudAccentColor)}",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
                 Spacer(modifier = Modifier.height(6.dp))
 
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 74.dp)
+                        .heightIn(min = 82.dp)
                         .clip(RoundedCornerShape(14.dp))
                         .background(
-                            brush = androidx.compose.ui.graphics.Brush.linearGradient(
+                            brush = androidx.compose.ui.graphics.Brush.horizontalGradient(
                                 colors = listOf(
-                                    Color(0xFF3E3546),
-                                    Color(0xFF6B534B),
-                                    Color(0xFF2B3E4E)
+                                    Color(0xFF1E242E),
+                                    Color(0xFF5D6573),
+                                    Color(0xFFD5DCE6)
                                 )
                             )
                         )
                         .border(
                             width = 1.dp,
-                            color = Color.White.copy(alpha = 0.10f),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
                             shape = RoundedCornerShape(14.dp)
                         )
-                        .padding(horizontal = 12.dp, vertical = 10.dp)
+                        .padding(horizontal = 12.dp, vertical = 12.dp)
                         .testTag("hud_backdrop_live_preview"),
                     contentAlignment = Alignment.Center
                 ) {
                     val cornerDp = localCornerRadiusDp.roundToInt().coerceIn(0, 32)
                     val previewShape = RoundedCornerShape(cornerDp.dp)
-                    val innerPreviewShape = RoundedCornerShape((cornerDp - 1).coerceAtLeast(0).dp)
                     val clampedPreviewOpacity = localBackdropOpacity.coerceIn(0f, 1f)
                     val appearance = remember(livePreferences.hudBackdropStyle, clampedPreviewOpacity) {
                         MinimalOverlayView.computeBackdropAppearance(
@@ -435,113 +475,95 @@ fun SettingsScreen(
                             opacity = clampedPreviewOpacity
                         )
                     }
-                    val lyricColors = remember(livePreferences.overlayTextOpacity) {
+                    val lyricColors = remember(
+                        livePreferences.hudActiveLyricColor,
+                        livePreferences.hudInactiveLyricColor,
+                        livePreferences.overlayTextOpacity
+                    ) {
                         MinimalOverlayView.computeLyricColorHierarchy(
+                            activeColor = livePreferences.hudActiveLyricColor,
+                            inactiveColor = livePreferences.hudInactiveLyricColor,
                             textOpacity = livePreferences.overlayTextOpacity
                         )
                     }
                     val baseFillColor = Color(appearance.fillColor).copy(
                         alpha = (appearance.fillAlpha / 255f).coerceIn(0f, 1f)
                     )
-                    val frostColorStops = remember(appearance.glassSheenAlpha) {
-                        val colors = MinimalOverlayView.buildGlassFrostGradientColors(appearance.glassSheenAlpha)
-                        Array(colors.size) { idx ->
-                            MinimalOverlayView.GLASS_FROST_STOPS[idx] to Color(colors[idx])
-                        }
-                    }
-                    val borderColorStops = remember(appearance.borderAlpha) {
-                        val colors = MinimalOverlayView.buildGlassBorderGradientColors(appearance.borderAlpha)
-                        Array(colors.size) { idx ->
-                            MinimalOverlayView.GLASS_BORDER_STOPS[idx] to Color(colors[idx])
-                        }
-                    }
-                    val innerHighlightStops = remember(appearance.glassInnerHighlightAlpha) {
-                        val colors = MinimalOverlayView.buildGlassInnerHighlightColors(appearance.glassInnerHighlightAlpha)
-                        Array(colors.size) { idx ->
-                            MinimalOverlayView.GLASS_INNER_HIGHLIGHT_STOPS[idx] to Color(colors[idx])
-                        }
-                    }
-
                     val isShowingBackdrop = isBackdropEnabled && clampedPreviewOpacity > 0f
                     val previewOuterModifier = if (isShowingBackdrop) {
                         Modifier
                             .clip(previewShape)
                             .background(baseFillColor, previewShape)
-                            .then(
-                                if (appearance.isGlass) {
-                                    Modifier
-                                        .background(
-                                            brush = androidx.compose.ui.graphics.Brush.verticalGradient(
-                                                colorStops = frostColorStops
-                                            ),
-                                            shape = previewShape
-                                        )
-                                        .border(
-                                            width = 1.dp,
-                                            brush = androidx.compose.ui.graphics.Brush.verticalGradient(
-                                                colorStops = borderColorStops
-                                            ),
-                                            shape = previewShape
-                                        )
-                                } else {
-                                    Modifier
-                                }
-                            )
                     } else {
                         Modifier
+                    }
+
+                    val contentPaddingModifier = if (isShowingBackdrop) {
+                        Modifier.padding(
+                            horizontal = localHorizontalPaddingDp.roundToInt().coerceIn(0, 32).dp,
+                            vertical = localVerticalPaddingDp.roundToInt().coerceIn(0, 24).dp
+                        )
+                    } else {
+                        Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    }
+
+                    val activePreviewColor = Color(lyricColors.activeColor).copy(
+                        alpha = (lyricColors.activeAlpha / 255f).coerceIn(0f, 1f)
+                    )
+                    val inactivePreviewColor = Color(lyricColors.inactiveColor).copy(
+                        alpha = (lyricColors.inactiveAlpha / 255f).coerceIn(0f, 1f)
+                    )
+                    val activeShadow = if (livePreferences.textShadowEnabled) {
+                        if (HudColorSystem.isDarkColor(lyricColors.activeColor)) {
+                            androidx.compose.ui.graphics.Shadow(
+                                color = Color.White.copy(alpha = 0.25f),
+                                offset = androidx.compose.ui.geometry.Offset(0f, 1f),
+                                blurRadius = 2.5f
+                            )
+                        } else {
+                            androidx.compose.ui.graphics.Shadow(
+                                color = Color.Black.copy(
+                                    alpha = MinimalOverlayView.ACTIVE_SHADOW_ALPHA / 255f
+                                ),
+                                offset = androidx.compose.ui.geometry.Offset(0f, 1.5f),
+                                blurRadius = 5.5f
+                            )
+                        }
+                    } else {
+                        null
                     }
 
                     Box(
                         modifier = previewOuterModifier,
                         contentAlignment = Alignment.Center
                     ) {
-                        if (isShowingBackdrop && appearance.isGlass && appearance.glassInnerHighlightAlpha > 0) {
-                            Box(
-                                modifier = Modifier
-                                    .matchParentSize()
-                                    .padding(1.dp)
-                                    .border(
-                                        width = 0.75.dp,
-                                        brush = androidx.compose.ui.graphics.Brush.verticalGradient(
-                                            colorStops = innerHighlightStops
-                                        ),
-                                        shape = innerPreviewShape
-                                    )
-                            )
-                        }
-                        val contentPaddingModifier = if (isShowingBackdrop) {
-                            Modifier.padding(
-                                horizontal = localHorizontalPaddingDp.roundToInt().coerceIn(0, 32).dp,
-                                vertical = localVerticalPaddingDp.roundToInt().coerceIn(0, 24).dp
-                            )
-                        } else {
-                            Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        }
-                        Box(
+                        Column(
                             modifier = contentPaddingModifier,
-                            contentAlignment = Alignment.Center
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
                             Text(
-                                text = "I thought I saw your face today",
-                                color = Color(lyricColors.activeColor).copy(
-                                    alpha = (lyricColors.activeAlpha / 255f).coerceIn(0f, 1f)
-                                ),
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                textAlign = TextAlign.Center,
-                                style = LocalTextStyle.current.copy(
-                                    shadow = if (livePreferences.textShadowEnabled) {
-                                        androidx.compose.ui.graphics.Shadow(
-                                            color = Color.Black.copy(
-                                                alpha = MinimalOverlayView.ACTIVE_SHADOW_ALPHA / 255f
-                                            ),
-                                            offset = androidx.compose.ui.geometry.Offset(0f, 1.5f),
-                                            blurRadius = 5.5f
+                                text = buildAnnotatedString {
+                                    withStyle(
+                                        SpanStyle(
+                                            color = activePreviewColor,
+                                            fontWeight = FontWeight.Bold
                                         )
-                                    } else {
-                                        null
+                                    ) {
+                                        append("I thought I saw ")
                                     }
-                                )
+                                    withStyle(
+                                        SpanStyle(
+                                            color = inactivePreviewColor,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    ) {
+                                        append("your face today")
+                                    }
+                                },
+                                fontSize = 14.sp,
+                                textAlign = TextAlign.Center,
+                                style = LocalTextStyle.current.copy(shadow = activeShadow)
                             )
                         }
                     }
@@ -852,6 +874,443 @@ fun SettingsScreen(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .testTag("hud_backdrop_vertical_padding_slider")
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // HUD LYRIC & ACCENT COLOURS (Independent of backdrop toggle)
+                val currentTargetColor = when (selectedColorTarget) {
+                    HudColorTarget.ACTIVE_LYRIC -> livePreferences.hudActiveLyricColor
+                    HudColorTarget.INACTIVE_LYRIC -> livePreferences.hudInactiveLyricColor
+                    HudColorTarget.ACCENT -> livePreferences.hudAccentColor
+                }
+                val hasCustomColorChanges = livePreferences.hudActiveLyricColor != HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR ||
+                    livePreferences.hudInactiveLyricColor != HudColorSystem.DEFAULT_INACTIVE_LYRIC_COLOR ||
+                    livePreferences.hudAccentColor != HudColorSystem.DEFAULT_ACCENT_COLOR
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Lyric & Accent Colours",
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    if (hasCustomColorChanges) {
+                        TextButton(
+                            onClick = {
+                                coroutineScope.launch {
+                                    playbackManager.preferencesRepository.applyHudColorPair(
+                                        activeColorArgb = HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR,
+                                        inactiveColorArgb = HudColorSystem.DEFAULT_INACTIVE_LYRIC_COLOR
+                                    )
+                                    playbackManager.preferencesRepository.setHudAccentColor(
+                                        HudColorSystem.DEFAULT_ACCENT_COLOR
+                                    )
+                                }
+                            },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier
+                                .heightIn(min = 36.dp)
+                                .testTag("hud_color_reset_defaults")
+                        ) {
+                            Text("Reset", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+                Text(
+                    text = "Customize active lyrics, surrounding words, and reposition highlight independently.",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // 3-target segmented selector: [ Active | Inactive | Accent ]
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                    border = BorderStroke(
+                        width = 1.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.40f)
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(3.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        val targets = listOf(
+                            HudColorTarget.ACTIVE_LYRIC to "Active",
+                            HudColorTarget.INACTIVE_LYRIC to "Inactive",
+                            HudColorTarget.ACCENT to "Accent"
+                        )
+                        targets.forEach { (target, shortLabel) ->
+                            val isSelected = selectedColorTarget == target
+                            val targetArgb = when (target) {
+                                HudColorTarget.ACTIVE_LYRIC -> livePreferences.hudActiveLyricColor
+                                HudColorTarget.INACTIVE_LYRIC -> livePreferences.hudInactiveLyricColor
+                                HudColorTarget.ACCENT -> livePreferences.hudAccentColor
+                            }
+                            Surface(
+                                onClick = { selectedColorTarget = target },
+                                shape = RoundedCornerShape(9.dp),
+                                color = if (isSelected) {
+                                    MaterialTheme.colorScheme.primaryContainer
+                                } else {
+                                    Color.Transparent
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 48.dp)
+                                    .testTag("hud_color_target_${target.name.lowercase()}")
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(14.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(targetArgb))
+                                            .border(
+                                                width = 1.dp,
+                                                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.65f),
+                                                shape = CircleShape
+                                            )
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = shortLabel,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        color = if (isSelected) {
+                                            MaterialTheme.colorScheme.onPrimaryContainer
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Active target details + Custom colour picker trigger
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.30f),
+                    border = BorderStroke(
+                        width = 1.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = selectedColorTarget.title,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "${HudColorSystem.labelForColor(currentTargetColor)} • ${HudColorSystem.formatHexColor(currentTargetColor)}",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            OutlinedButton(
+                                onClick = { activeColorPickerTarget = selectedColorTarget },
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                modifier = Modifier
+                                    .heightIn(min = 48.dp)
+                                    .testTag("hud_color_custom_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Palette,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Custom", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Curated colour preset swatches
+                        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                            val columns = (maxWidth / 48.dp).toInt().coerceIn(4, 8)
+                            val presetRows = remember(columns) {
+                                HudColorSystem.curatedPresets.chunked(columns)
+                            }
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                presetRows.forEach { rowPresets ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        rowPresets.forEach { preset ->
+                                            val isSelected = currentTargetColor == preset.argb
+                                            val isDarkSwatch = HudColorSystem.isDarkColor(preset.argb)
+                                            Box(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .heightIn(min = 48.dp)
+                                                    .clip(RoundedCornerShape(10.dp))
+                                                    .clickable {
+                                                        coroutineScope.launch {
+                                                            when (selectedColorTarget) {
+                                                                HudColorTarget.ACTIVE_LYRIC ->
+                                                                    playbackManager.preferencesRepository.setHudActiveLyricColor(preset.argb)
+                                                                HudColorTarget.INACTIVE_LYRIC ->
+                                                                    playbackManager.preferencesRepository.setHudInactiveLyricColor(preset.argb)
+                                                                HudColorTarget.ACCENT ->
+                                                                    playbackManager.preferencesRepository.setHudAccentColor(preset.argb)
+                                                            }
+                                                        }
+                                                    }
+                                                    .semantics {
+                                                        contentDescription = "${preset.label} colour preset"
+                                                    }
+                                                    .testTag("hud_color_preset_${preset.id}"),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(34.dp)
+                                                        .clip(CircleShape)
+                                                        .background(Color(preset.argb))
+                                                        .border(
+                                                            width = if (isSelected) 2.5.dp else 1.dp,
+                                                            color = if (isSelected) {
+                                                                MaterialTheme.colorScheme.primary
+                                                            } else {
+                                                                MaterialTheme.colorScheme.outline.copy(alpha = 0.55f)
+                                                            },
+                                                            shape = CircleShape
+                                                        ),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    if (isSelected) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.Check,
+                                                            contentDescription = null,
+                                                            tint = if (isDarkSwatch) Color.White else Color(0xFF141418),
+                                                            modifier = Modifier.size(16.dp)
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        repeat((columns - rowPresets.size).coerceAtLeast(0)) {
+                                            Spacer(modifier = Modifier.weight(1f))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Saved custom colours (persisted in DataStore)
+                        if (livePreferences.hudCustomColors.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text(
+                                text = "Saved Custom Colours",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                                val columns = (maxWidth / 48.dp).toInt().coerceIn(4, 8)
+                                val customRows = remember(livePreferences.hudCustomColors, columns) {
+                                    livePreferences.hudCustomColors.chunked(columns)
+                                }
+                                Column(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    customRows.forEachIndexed { rowIdx, rowColors ->
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            rowColors.forEachIndexed { colIdx, colorArgb ->
+                                                val globalIdx = rowIdx * columns + colIdx
+                                                val isSelected = currentTargetColor == colorArgb
+                                                val isDarkSwatch = HudColorSystem.isDarkColor(colorArgb)
+                                                Box(
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .heightIn(min = 48.dp)
+                                                        .clip(RoundedCornerShape(10.dp))
+                                                        .clickable {
+                                                            coroutineScope.launch {
+                                                                when (selectedColorTarget) {
+                                                                    HudColorTarget.ACTIVE_LYRIC ->
+                                                                        playbackManager.preferencesRepository.setHudActiveLyricColor(colorArgb)
+                                                                    HudColorTarget.INACTIVE_LYRIC ->
+                                                                        playbackManager.preferencesRepository.setHudInactiveLyricColor(colorArgb)
+                                                                    HudColorTarget.ACCENT ->
+                                                                        playbackManager.preferencesRepository.setHudAccentColor(colorArgb)
+                                                                }
+                                                            }
+                                                        }
+                                                        .semantics {
+                                                            contentDescription = "Custom colour ${HudColorSystem.formatHexColor(colorArgb)}"
+                                                        }
+                                                        .testTag("hud_color_custom_swatch_$globalIdx"),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(34.dp)
+                                                            .clip(CircleShape)
+                                                            .background(Color(colorArgb))
+                                                            .border(
+                                                                width = if (isSelected) 2.5.dp else 1.dp,
+                                                                color = if (isSelected) {
+                                                                    MaterialTheme.colorScheme.primary
+                                                                } else {
+                                                                    MaterialTheme.colorScheme.outline.copy(alpha = 0.55f)
+                                                                },
+                                                                shape = CircleShape
+                                                            ),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        if (isSelected) {
+                                                            Icon(
+                                                                imageVector = Icons.Default.Check,
+                                                                contentDescription = null,
+                                                                tint = if (isDarkSwatch) Color.White else Color(0xFF141418),
+                                                                modifier = Modifier.size(16.dp)
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            repeat((columns - rowColors.size).coerceAtLeast(0)) {
+                                                Spacer(modifier = Modifier.weight(1f))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Non-blocking contrast warning + optional 1-tap readable defaults
+                val contrastWarning = remember(
+                    isBackdropEnabled,
+                    livePreferences.hudBackdropStyle,
+                    localBackdropOpacity,
+                    livePreferences.hudActiveLyricColor,
+                    livePreferences.hudInactiveLyricColor
+                ) {
+                    HudColorSystem.evaluateReadability(
+                        backdropEnabled = isBackdropEnabled,
+                        backdropStyle = livePreferences.hudBackdropStyle,
+                        backdropOpacity = localBackdropOpacity,
+                        activeColor = livePreferences.hudActiveLyricColor,
+                        inactiveColor = livePreferences.hudInactiveLyricColor
+                    )
+                }
+
+                if (contrastWarning != null) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("hud_color_contrast_warning"),
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.55f),
+                        border = BorderStroke(
+                            width = 1.dp,
+                            color = MaterialTheme.colorScheme.error.copy(alpha = 0.35f)
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.Top,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Info,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onErrorContainer,
+                                    modifier = Modifier
+                                        .padding(top = 1.dp)
+                                        .size(18.dp)
+                                )
+                                Text(
+                                    text = contrastWarning.message,
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                OutlinedButton(
+                                    onClick = {
+                                        coroutineScope.launch {
+                                            playbackManager.preferencesRepository.applyHudColorPair(
+                                                activeColorArgb = contrastWarning.suggestedActiveColor,
+                                                inactiveColorArgb = contrastWarning.suggestedInactiveColor
+                                            )
+                                        }
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                    modifier = Modifier
+                                        .heightIn(min = 48.dp)
+                                        .testTag("hud_color_apply_readable_defaults")
+                                ) {
+                                    Text(
+                                        text = "Apply readable defaults",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold
                                     )
                                 }
                             }
@@ -2915,6 +3374,34 @@ fun SettingsScreen(
             HudOrientationInfoDialog(
                 snapshot = orientationInfo,
                 onDismiss = { showOrientationInfoDialog = false }
+            )
+        }
+
+        val pickerTarget = activeColorPickerTarget
+        if (pickerTarget != null) {
+            val initialColor = when (pickerTarget) {
+                HudColorTarget.ACTIVE_LYRIC -> livePreferences.hudActiveLyricColor
+                HudColorTarget.INACTIVE_LYRIC -> livePreferences.hudInactiveLyricColor
+                HudColorTarget.ACCENT -> livePreferences.hudAccentColor
+            }
+            HudColorPickerDialog(
+                target = pickerTarget,
+                initialColorArgb = initialColor,
+                onDismiss = { activeColorPickerTarget = null },
+                onColorConfirmed = { pickedArgb ->
+                    coroutineScope.launch {
+                        when (pickerTarget) {
+                            HudColorTarget.ACTIVE_LYRIC ->
+                                playbackManager.preferencesRepository.setHudActiveLyricColor(pickedArgb)
+                            HudColorTarget.INACTIVE_LYRIC ->
+                                playbackManager.preferencesRepository.setHudInactiveLyricColor(pickedArgb)
+                            HudColorTarget.ACCENT ->
+                                playbackManager.preferencesRepository.setHudAccentColor(pickedArgb)
+                        }
+                        playbackManager.preferencesRepository.saveCustomHudColor(pickedArgb)
+                    }
+                    activeColorPickerTarget = null
+                }
             )
         }
     }
