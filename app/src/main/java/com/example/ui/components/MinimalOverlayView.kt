@@ -5,11 +5,21 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.LinearGradient
 import android.graphics.Paint
+import android.graphics.Shader
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.text.TextPaint
 import android.util.TypedValue
+import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.view.animation.DecelerateInterpolator
 import androidx.core.content.res.ResourcesCompat
@@ -19,6 +29,7 @@ import com.example.service.HudOrientation
 import com.example.service.HudOverlayProfile
 import com.example.service.HudPositioningEngine
 import kotlin.math.abs
+import kotlin.math.hypot
 import kotlin.math.roundToInt
 
 @SuppressLint("ViewConstructor")
@@ -34,32 +45,32 @@ class MinimalOverlayView(
 
     // Pre-allocated paints to guarantee zero object allocation during onDraw
     private val wordActivePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
+        color = ACTIVE_LYRIC_COLOR
         textAlign = Paint.Align.LEFT
         isFakeBoldText = true
     }
 
     private val wordInactivePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(115, 255, 255, 255) // 45% opacity for readable un-sung words
+        color = INACTIVE_LYRIC_COLOR
         textAlign = Paint.Align.LEFT
         isFakeBoldText = true
     }
 
     private val previousTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
+        color = INACTIVE_LYRIC_COLOR
         textAlign = Paint.Align.LEFT
         isFakeBoldText = true
     }
 
     private val wordGlowPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
+        color = ACTIVE_LYRIC_COLOR
         textAlign = Paint.Align.LEFT
         isFakeBoldText = true
-        setShadowLayer(14f, 0f, 0f, Color.argb(220, 255, 255, 255))
+        setShadowLayer(10f, 0f, 0f, Color.argb(ACTIVE_GLOW_ALPHA, 255, 255, 255))
     }
 
     private val blurRevealPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
+        color = ACTIVE_LYRIC_COLOR
         textAlign = Paint.Align.LEFT
         isFakeBoldText = true
     }
@@ -77,13 +88,23 @@ class MinimalOverlayView(
     }
 
     // Pre-allocated HUD Backdrop paints & RectF buffers (zero object allocations in onDraw)
+    private val backdropGlassShadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        color = Color.BLACK
+    }
+
     private val backdropFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
-        color = Color.rgb(18, 18, 22)
+        color = SOLID_BACKDROP_COLOR
     }
 
     private val backdropGlassSheenPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
+        color = Color.WHITE
+    }
+
+    private val backdropGlassInnerRimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
         color = Color.WHITE
     }
 
@@ -97,10 +118,45 @@ class MinimalOverlayView(
         )
     }
 
+    // Subtle hold-to-reposition feedback paints (pre-allocated)
+    private val holdHaloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        color = Color.WHITE
+    }
+
+    private val holdOutlinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        color = Color.WHITE
+    }
+
+    private val holdFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.WHITE
+    }
+
+    private val holdDotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.WHITE
+    }
+
+    // Cached Glass shader keys to prevent per-frame shader allocations
+    private var cachedGlassTop = Float.NaN
+    private var cachedGlassBottom = Float.NaN
+    private var cachedGlassSheenAlpha = -1
+    private var cachedGlassBorderTop = Float.NaN
+    private var cachedGlassBorderBottom = Float.NaN
+    private var cachedGlassBorderAlpha = -1
+    private var cachedGlassInnerTop = Float.NaN
+    private var cachedGlassInnerBottom = Float.NaN
+    private var cachedGlassInnerAlpha = -1
+
     private val currentBackdropRect = android.graphics.RectF()
     private val previousBackdropRect = android.graphics.RectF()
     private val drawnBackdropRect = android.graphics.RectF()
+    private val shadowBackdropRect = android.graphics.RectF()
+    private val innerRimBackdropRect = android.graphics.RectF()
     private val borderBackdropRect = android.graphics.RectF()
+    private val holdFeedbackRect = android.graphics.RectF()
 
     var primaryColor: Int = Color.WHITE
         set(value) {
@@ -144,6 +200,7 @@ class MinimalOverlayView(
     private var maxScrollY: Float = 0f
     private var targetScrollY: Float = 0f
     private var currentScrollY: Float = 0f
+    private var previousScrollY: Float = 0f
 
     // Horizontal auto-scroll state for single-line mode
     private var maxScrollX: Float = 0f
@@ -335,10 +392,14 @@ class MinimalOverlayView(
                     animProgress = 1f
                 }
                 previousScrollX = currentScrollX
+                previousScrollY = currentScrollY
                 currentScrollX = 0f
                 targetScrollX = 0f
-                text = newText
-                recalculateLayout()
+                if (text != newText) {
+                    text = newText
+                } else {
+                    recalculateLayout()
+                }
                 if (isPlaying) {
                     startLoopIfNeeded()
                 }
@@ -496,9 +557,9 @@ class MinimalOverlayView(
     var textShadowEnabled: Boolean = true
         set(value) {
             field = value
-            updateShadow(wordActivePaint, value)
-            updateShadow(wordInactivePaint, value)
-            updateShadow(previousTextPaint, value)
+            updateShadow(wordActivePaint, value, isSubordinate = false)
+            updateShadow(wordInactivePaint, value, isSubordinate = true)
+            updateShadow(previousTextPaint, value, isSubordinate = true)
             invalidate()
         }
 
@@ -596,16 +657,20 @@ class MinimalOverlayView(
 
     var isDragMode: Boolean = false
         set(value) {
-            field = value
-            if (!value) {
-                activeTouchTarget = TouchTarget.NONE
+            if (field != value) {
+                field = value
+                cancelHoldGesture(revertActivePosition = false)
+                if (!value) {
+                    activeTouchTarget = TouchTarget.NONE
+                }
+                invalidate()
             }
-            invalidate()
         }
 
     var activeOrientation: HudOrientation = HudOrientation.PORTRAIT
     var displayGeometry: HudDisplayGeometry? = null
     var minBackdropHeightPx: Int = 0
+    var isPointOnInteractiveControl: ((x: Float, y: Float) -> Boolean)? = null
 
     // Touch and drag/resize tracking
     private enum class TouchTarget { NONE, MOVE, RESIZE_TOP, RESIZE_BOTTOM, RESIZE_LEFT, RESIZE_RIGHT, RESIZE_TL, RESIZE_TR, RESIZE_BL, RESIZE_BR }
@@ -618,12 +683,113 @@ class MinimalOverlayView(
     private var initialTouchX = 0f
     private var initialTouchY = 0f
 
+    // Two-second hold-to-reposition controller & subtle visual/haptic feedback
+    // Use generous stationary tolerance for a 2000ms finger hold while still cancelling deliberate slides
+    private val touchSlopPx = maxOf(
+        ViewConfiguration.get(context).scaledTouchSlop * 2.5f,
+        TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 20f, resources.displayMetrics)
+    )
+    private val holdGestureController = HudHoldGestureController(touchSlopPx = touchSlopPx)
+    private val holdHandler = Handler(Looper.getMainLooper())
+    private var holdAttemptToken: Long = 0L
+    private var scheduledHoldToken: Long = -1L
+    private var holdFeedbackProgress: Float = 0f
+    private var holdFeedbackAnimator: ValueAnimator? = null
+    private val holdTimeoutRunnable = Runnable {
+        if (scheduledHoldToken != holdAttemptToken) {
+            return@Runnable
+        }
+        if (!isAttachedToWindow || visibility != VISIBLE || isDragMode) {
+            holdGestureController.reset()
+            return@Runnable
+        }
+        if (holdGestureController.onHoldTimeout()) {
+            dragOrientation = displayGeometry?.orientation ?: activeOrientation
+            initialX = layoutParams.x
+            initialY = layoutParams.y
+            initialW = if (layoutParams.width > 0) layoutParams.width else width
+            initialH = if (layoutParams.height > 0) layoutParams.height else height
+            initialTouchX = holdGestureController.activationRawX
+            initialTouchY = holdGestureController.activationRawY
+
+            triggerHoldActivatedHaptic()
+            animateHoldFeedback(active = true)
+        }
+    }
+
+    private fun triggerHoldActivatedHaptic() {
+        val handledByView = try {
+            performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+        } catch (_: Throwable) {
+            false
+        }
+        if (!handledByView) {
+            try {
+                val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    context.getSystemService(VibratorManager::class.java)?.defaultVibrator
+                } else {
+                    @Suppress("DEPRECATION")
+                    context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+                }
+                if (vibrator?.hasVibrator() == true) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        vibrator.vibrate(VibrationEffect.createOneShot(22L, VibrationEffect.DEFAULT_AMPLITUDE))
+                    } else {
+                        @Suppress("DEPRECATION")
+                        vibrator.vibrate(22L)
+                    }
+                }
+            } catch (_: Throwable) {}
+        }
+    }
+
+    private fun cancelScheduledHoldCallback() {
+        holdAttemptToken++
+        holdHandler.removeCallbacks(holdTimeoutRunnable)
+    }
+
+    private fun animateHoldFeedback(active: Boolean) {
+        holdFeedbackAnimator?.cancel()
+        val target = if (active) 1f else 0f
+        if (abs(holdFeedbackProgress - target) < 0.01f) {
+            holdFeedbackProgress = target
+            invalidate()
+            return
+        }
+        holdFeedbackAnimator = ValueAnimator.ofFloat(holdFeedbackProgress, target).apply {
+            duration = if (active) 180L else 140L
+            interpolator = DecelerateInterpolator(1.5f)
+            addUpdateListener { anim ->
+                holdFeedbackProgress = anim.animatedValue as Float
+                invalidate()
+            }
+            start()
+        }
+    }
+
+    private fun cancelHoldGesture(revertActivePosition: Boolean) {
+        cancelScheduledHoldCallback()
+        val wasHoldActive = holdGestureController.onCancel()
+        if (wasHoldActive && revertActivePosition && isAttachedToWindow) {
+            layoutParams.x = initialX
+            layoutParams.y = initialY
+            try {
+                windowManager.updateViewLayout(this, layoutParams)
+            } catch (_: Exception) {}
+        }
+        if (wasHoldActive || holdFeedbackProgress > 0f) {
+            animateHoldFeedback(active = false)
+        }
+    }
+
     fun cancelActiveDrag() {
         activeTouchTarget = TouchTarget.NONE
+        cancelHoldGesture(revertActivePosition = false)
     }
 
     init {
         setBackgroundColor(Color.TRANSPARENT)
+        isHapticFeedbackEnabled = true
         val initialPx = TypedValue.applyDimension(
             TypedValue.COMPLEX_UNIT_SP,
             textSizeSp,
@@ -634,14 +800,18 @@ class MinimalOverlayView(
         previousTextPaint.textSize = initialPx
         wordGlowPaint.textSize = initialPx
         blurRevealPaint.textSize = initialPx
-        updateShadow(wordActivePaint, textShadowEnabled)
-        updateShadow(wordInactivePaint, textShadowEnabled)
-        updateShadow(previousTextPaint, textShadowEnabled)
+        updateShadow(wordActivePaint, textShadowEnabled, isSubordinate = false)
+        updateShadow(wordInactivePaint, textShadowEnabled, isSubordinate = true)
+        updateShadow(previousTextPaint, textShadowEnabled, isSubordinate = true)
     }
 
-    private fun updateShadow(paint: Paint, enabled: Boolean) {
+    private fun updateShadow(paint: Paint, enabled: Boolean, isSubordinate: Boolean = false) {
         if (enabled) {
-            paint.setShadowLayer(6f, 0f, 2f, Color.argb(200, 0, 0, 0))
+            if (isSubordinate) {
+                paint.setShadowLayer(3.5f, 0f, 1.5f, Color.argb(INACTIVE_SHADOW_ALPHA, 0, 0, 0))
+            } else {
+                paint.setShadowLayer(5.5f, 0f, 1.5f, Color.argb(ACTIVE_SHADOW_ALPHA, 0, 0, 0))
+            }
         } else {
             paint.clearShadowLayer()
         }
@@ -816,7 +986,10 @@ class MinimalOverlayView(
     }
 
     private fun drawHudBackdropIfNeeded(canvas: Canvas, currentStyle: String) {
-        if (!hudBackdropEnabled || hudBackdropOpacity <= 0f) return
+        if (!hudBackdropEnabled || hudBackdropOpacity <= 0f) {
+            drawnBackdropRect.setEmpty()
+            return
+        }
 
         val hasCurrent = populateBackdropRectForLines(currentLayoutLines, currentScrollY, currentBackdropRect)
         val isTransitioning = animProgress < 1f &&
@@ -824,12 +997,15 @@ class MinimalOverlayView(
             currentStyle != "INSTANT" &&
             currentStyle != "TYPEWRITER"
         val hasPrevious = if (isTransitioning) {
-            populateBackdropRectForLines(previousLayoutLines, 0f, previousBackdropRect)
+            populateBackdropRectForLines(previousLayoutLines, previousScrollY, previousBackdropRect)
         } else {
             false
         }
 
-        if (!hasCurrent && !hasPrevious) return
+        if (!hasCurrent && !hasPrevious) {
+            drawnBackdropRect.setEmpty()
+            return
+        }
 
         if (hasCurrent && hasPrevious) {
             val t = animProgress.coerceIn(0f, 1f)
@@ -847,19 +1023,31 @@ class MinimalOverlayView(
 
         val density = resources.displayMetrics.density
         val clampedOpacity = hudBackdropOpacity.coerceIn(0f, 1f)
-        val isGlass = hudBackdropStyle.trim().equals("GLASS", ignoreCase = true)
+        val appearance = computeBackdropAppearance(hudBackdropStyle, clampedOpacity)
         val maxRadiusPx = (minOf(drawnBackdropRect.width(), drawnBackdropRect.height()) / 2f).coerceAtLeast(0f)
         val cornerRadiusPx = (hudBackdropCornerRadiusDp.coerceIn(0f, 32f) * density).coerceIn(0f, maxRadiusPx)
 
-        val fillColor = if (isGlass) GLASS_BACKDROP_COLOR else SOLID_BACKDROP_COLOR
-        val fillAlpha = if (isGlass) {
-            (clampedOpacity * 245f).roundToInt().coerceIn(0, 255)
-        } else {
-            (clampedOpacity * 255f).roundToInt().coerceIn(0, 255)
+        if (appearance.isGlass && appearance.glassElevationShadowAlpha > 0) {
+            val shadowStrokePx = (1.5f * density).coerceAtLeast(1.25f)
+            val shadowOffset = shadowStrokePx / 2f
+            shadowBackdropRect.set(
+                (drawnBackdropRect.left - shadowOffset).coerceAtLeast(0f),
+                (drawnBackdropRect.top - shadowOffset * 0.5f).coerceAtLeast(0f),
+                (drawnBackdropRect.right + shadowOffset).coerceAtMost(width.toFloat()),
+                (drawnBackdropRect.bottom + shadowOffset).coerceAtMost(height.toFloat())
+            )
+            backdropGlassShadowPaint.strokeWidth = shadowStrokePx
+            backdropGlassShadowPaint.alpha = appearance.glassElevationShadowAlpha
+            canvas.drawRoundRect(
+                shadowBackdropRect,
+                (cornerRadiusPx + shadowOffset).coerceAtLeast(0f),
+                (cornerRadiusPx + shadowOffset).coerceAtLeast(0f),
+                backdropGlassShadowPaint
+            )
         }
 
-        backdropFillPaint.color = fillColor
-        backdropFillPaint.alpha = fillAlpha
+        backdropFillPaint.color = appearance.fillColor
+        backdropFillPaint.alpha = appearance.fillAlpha
         canvas.drawRoundRect(
             drawnBackdropRect,
             cornerRadiusPx,
@@ -867,11 +1055,28 @@ class MinimalOverlayView(
             backdropFillPaint
         )
 
-        if (isGlass) {
-            val sheenAlpha = (clampedOpacity * 22f).roundToInt().coerceIn(0, 36)
+        if (appearance.isGlass) {
+            val sheenAlpha = appearance.glassSheenAlpha
             if (sheenAlpha > 0) {
-                backdropGlassSheenPaint.color = Color.WHITE
-                backdropGlassSheenPaint.alpha = sheenAlpha
+                if (cachedGlassTop != drawnBackdropRect.top ||
+                    cachedGlassBottom != drawnBackdropRect.bottom ||
+                    cachedGlassSheenAlpha != sheenAlpha ||
+                    backdropGlassSheenPaint.shader == null
+                ) {
+                    cachedGlassTop = drawnBackdropRect.top
+                    cachedGlassBottom = drawnBackdropRect.bottom
+                    cachedGlassSheenAlpha = sheenAlpha
+                    backdropGlassSheenPaint.shader = LinearGradient(
+                        0f,
+                        drawnBackdropRect.top,
+                        0f,
+                        drawnBackdropRect.bottom.coerceAtLeast(drawnBackdropRect.top + 1f),
+                        buildGlassFrostGradientColors(sheenAlpha),
+                        GLASS_FROST_STOPS,
+                        Shader.TileMode.CLAMP
+                    )
+                }
+                backdropGlassSheenPaint.alpha = 255
                 canvas.drawRoundRect(
                     drawnBackdropRect,
                     cornerRadiusPx,
@@ -880,9 +1085,47 @@ class MinimalOverlayView(
                 )
             }
 
-            val borderAlpha = (clampedOpacity * 68f).roundToInt().coerceIn(0, 90)
+            val borderWidthPx = (1f * density).coerceAtLeast(1f)
+            val innerAlpha = appearance.glassInnerHighlightAlpha
+            if (innerAlpha > 0 && drawnBackdropRect.height() > borderWidthPx * 4f) {
+                val innerInset = borderWidthPx + (0.65f * density).coerceAtLeast(0.75f)
+                innerRimBackdropRect.set(
+                    drawnBackdropRect.left + innerInset,
+                    drawnBackdropRect.top + innerInset,
+                    (drawnBackdropRect.right - innerInset).coerceAtLeast(drawnBackdropRect.left + innerInset),
+                    (drawnBackdropRect.bottom - innerInset).coerceAtLeast(drawnBackdropRect.top + innerInset)
+                )
+                val innerRadius = (cornerRadiusPx - innerInset).coerceAtLeast(0f)
+                if (cachedGlassInnerTop != innerRimBackdropRect.top ||
+                    cachedGlassInnerBottom != innerRimBackdropRect.bottom ||
+                    cachedGlassInnerAlpha != innerAlpha ||
+                    backdropGlassInnerRimPaint.shader == null
+                ) {
+                    cachedGlassInnerTop = innerRimBackdropRect.top
+                    cachedGlassInnerBottom = innerRimBackdropRect.bottom
+                    cachedGlassInnerAlpha = innerAlpha
+                    backdropGlassInnerRimPaint.shader = LinearGradient(
+                        0f,
+                        innerRimBackdropRect.top,
+                        0f,
+                        innerRimBackdropRect.bottom.coerceAtLeast(innerRimBackdropRect.top + 1f),
+                        buildGlassInnerHighlightColors(innerAlpha),
+                        GLASS_INNER_HIGHLIGHT_STOPS,
+                        Shader.TileMode.CLAMP
+                    )
+                }
+                backdropGlassInnerRimPaint.strokeWidth = (0.75f * density).coerceAtLeast(1f)
+                backdropGlassInnerRimPaint.alpha = 255
+                canvas.drawRoundRect(
+                    innerRimBackdropRect,
+                    innerRadius,
+                    innerRadius,
+                    backdropGlassInnerRimPaint
+                )
+            }
+
+            val borderAlpha = appearance.borderAlpha
             if (borderAlpha > 0) {
-                val borderWidthPx = (1f * density).coerceAtLeast(1f)
                 val halfStroke = borderWidthPx / 2f
                 borderBackdropRect.set(
                     drawnBackdropRect.left + halfStroke,
@@ -891,9 +1134,26 @@ class MinimalOverlayView(
                     drawnBackdropRect.bottom - halfStroke
                 )
                 val borderRadius = (cornerRadiusPx - halfStroke).coerceAtLeast(0f)
+                if (cachedGlassBorderTop != borderBackdropRect.top ||
+                    cachedGlassBorderBottom != borderBackdropRect.bottom ||
+                    cachedGlassBorderAlpha != borderAlpha ||
+                    backdropBorderPaint.shader == null
+                ) {
+                    cachedGlassBorderTop = borderBackdropRect.top
+                    cachedGlassBorderBottom = borderBackdropRect.bottom
+                    cachedGlassBorderAlpha = borderAlpha
+                    backdropBorderPaint.shader = LinearGradient(
+                        0f,
+                        borderBackdropRect.top,
+                        0f,
+                        borderBackdropRect.bottom.coerceAtLeast(borderBackdropRect.top + 1f),
+                        buildGlassBorderGradientColors(borderAlpha),
+                        GLASS_BORDER_STOPS,
+                        Shader.TileMode.CLAMP
+                    )
+                }
                 backdropBorderPaint.strokeWidth = borderWidthPx
-                backdropBorderPaint.color = Color.WHITE
-                backdropBorderPaint.alpha = borderAlpha
+                backdropBorderPaint.alpha = 255
                 canvas.drawRoundRect(
                     borderBackdropRect,
                     borderRadius,
@@ -901,6 +1161,10 @@ class MinimalOverlayView(
                     backdropBorderPaint
                 )
             }
+        } else {
+            backdropGlassSheenPaint.shader = null
+            backdropGlassInnerRimPaint.shader = null
+            backdropBorderPaint.shader = null
         }
     }
 
@@ -1244,14 +1508,18 @@ class MinimalOverlayView(
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
+        cancelActiveDrag()
         stopLoop()
         transitionAnimator?.cancel()
         transitionAnimator = null
+        holdFeedbackAnimator?.cancel()
+        holdFeedbackAnimator = null
     }
 
     override fun onVisibilityChanged(changedView: View, visibility: Int) {
         super.onVisibilityChanged(changedView, visibility)
         if (visibility != VISIBLE) {
+            cancelActiveDrag()
             stopLoop()
         } else if (isPlaying) {
             startLoopIfNeeded()
@@ -1313,20 +1581,24 @@ class MinimalOverlayView(
         canvas.save()
         canvas.clipRect(paddingHorizontal, 0f, width - paddingHorizontal, height.toFloat())
 
-        // 1. If transition is running, draw outgoing previous line
-        val baseAlpha = (255 * textOpacity).toInt().coerceIn(0, 255)
+        // 1. Unified color & alpha hierarchy across active, subordinate, and outgoing lines
+        val isFadeStyle = currentStyle == "FADE" || currentStyle == "BLUR_REVEAL"
+        val isAnimatedTransition = currentStyle == "KARAOKE" || currentStyle == "SMOOTH_SLIDE" || isFadeStyle
+        val hierarchy = computeLyricColorHierarchy(
+            textOpacity = textOpacity,
+            animProgress = if (isAnimatedTransition) animProgress else 1f,
+            isFadeStyle = isFadeStyle
+        )
+        val baseAlpha = hierarchy.baseAlpha
+
         if (animProgress < 1f && previousLayoutLines.isNotEmpty() && currentStyle != "INSTANT" && currentStyle != "TYPEWRITER") {
             val outgoingOffsetY = if (currentStyle == "KARAOKE" || currentStyle == "SMOOTH_SLIDE") {
                 -animProgress * 24f
             } else {
                 0f
             }
-            val outgoingAlpha = if (currentStyle == "FADE" || currentStyle == "BLUR_REVEAL") {
-                ((1f - animProgress) * baseAlpha).toInt().coerceIn(0, 255)
-            } else {
-                ((1f - animProgress) * (baseAlpha * 0.35f)).toInt().coerceIn(0, 255)
-            }
-            previousTextPaint.alpha = outgoingAlpha
+            previousTextPaint.color = INACTIVE_LYRIC_COLOR
+            previousTextPaint.alpha = hierarchy.outgoingAlpha
             canvas.save()
             if (singleLineMode && previousScrollX > 0f) {
                 canvas.translate(-previousScrollX, 0f)
@@ -1343,9 +1615,8 @@ class MinimalOverlayView(
         val incomingOffsetY = if (animProgress < 1f && (currentStyle == "KARAOKE" || currentStyle == "SMOOTH_SLIDE")) {
             (1f - animProgress) * 18f
         } else 0f
-        val incomingAlpha = if (animProgress < 1f && (currentStyle == "KARAOKE" || currentStyle == "SMOOTH_SLIDE" || currentStyle == "FADE" || currentStyle == "BLUR_REVEAL")) {
-            (animProgress * baseAlpha).toInt().coerceIn(0, 255)
-        } else baseAlpha
+        val incomingAlpha = hierarchy.activeAlpha
+        val inactiveAlpha = hierarchy.inactiveAlpha
         val posMs = getCalculatedPositionMs()
         val isWordSynced = activeLyricLine?.isWordSynced == true
 
@@ -1357,9 +1628,12 @@ class MinimalOverlayView(
         when (currentStyle) {
             "KARAOKE" -> {
                 if (isWordSynced && activeLyricLine?.words?.isNotEmpty() == true) {
-                    // 1. Word-synchronized lyrics: Apple-style progressive highlight
-                    wordInactivePaint.alpha = (incomingAlpha * 0.35f).toInt().coerceIn(0, 255)
+                    // 1. Word-synchronized lyrics: crisp active highlight + readable soft-white un-sung words
+                    wordInactivePaint.color = INACTIVE_LYRIC_COLOR
+                    wordInactivePaint.alpha = inactiveAlpha
+                    wordActivePaint.color = ACTIVE_LYRIC_COLOR
                     wordActivePaint.alpha = incomingAlpha
+                    wordGlowPaint.color = ACTIVE_LYRIC_COLOR
                     wordGlowPaint.alpha = incomingAlpha
 
                     // Determine the single active visual line index
@@ -1434,8 +1708,9 @@ class MinimalOverlayView(
                     }
                     val totalDuration = (lineEnd - lineStart).coerceIn(1200L, 12000L)
 
-                    // A: Always display ALL lines with low opacity below (inactive/base layer)
-                    wordInactivePaint.alpha = (incomingAlpha * 0.35f).toInt().coerceIn(0, 255)
+                    // A: Always display ALL lines with clean soft-white subordinate alpha (never muddy dark grey)
+                    wordInactivePaint.color = INACTIVE_LYRIC_COLOR
+                    wordInactivePaint.alpha = inactiveAlpha
                     for (line in currentLayoutLines) {
                         val drawY = line.baselineY - currentScrollY + incomingOffsetY
                         for (w in line.words) {
@@ -1661,23 +1936,99 @@ class MinimalOverlayView(
             canvas.drawRect(width / 2f - edgePillW / 2f, height - edgePillH, width / 2f + edgePillW / 2f, height.toFloat(), editHandlePaint) // Bottom
             canvas.drawRect(0f, height / 2f - edgePillW / 2f, edgePillH, height / 2f + edgePillW / 2f, editHandlePaint) // Left
             canvas.drawRect(width - edgePillH, height / 2f - edgePillW / 2f, width.toFloat(), height / 2f + edgePillW / 2f, editHandlePaint) // Right
+        } else if (holdFeedbackProgress > 0.01f) {
+            drawHoldRepositionFeedback(canvas)
+        }
+    }
+
+    private fun drawHoldRepositionFeedback(canvas: Canvas) {
+        val density = resources.displayMetrics.density
+        val prog = holdFeedbackProgress.coerceIn(0f, 1f)
+        val strokePx = (2.25f * density).coerceAtLeast(2f)
+        val halfStroke = strokePx / 2f
+
+        val radiusPx: Float
+        if (hudBackdropEnabled && hudBackdropOpacity > 0f && drawnBackdropRect.width() > 0f && drawnBackdropRect.height() > 0f) {
+            val padOut = 3f * density
+            holdFeedbackRect.set(
+                (drawnBackdropRect.left - padOut).coerceAtLeast(halfStroke),
+                (drawnBackdropRect.top - padOut).coerceAtLeast(halfStroke),
+                (drawnBackdropRect.right + padOut).coerceAtMost(width - halfStroke),
+                (drawnBackdropRect.bottom + padOut).coerceAtMost(height - halfStroke)
+            )
+            val maxR = (minOf(holdFeedbackRect.width(), holdFeedbackRect.height()) / 2f).coerceAtLeast(0f)
+            radiusPx = (hudBackdropCornerRadiusDp.coerceIn(0f, 32f) * density + padOut).coerceIn(0f, maxR)
+        } else {
+            val padInset = halfStroke + 2f
+            holdFeedbackRect.set(
+                padInset,
+                padInset,
+                (width - padInset).coerceAtLeast(padInset),
+                (height - padInset).coerceAtLeast(padInset)
+            )
+            val maxR = (minOf(holdFeedbackRect.width(), holdFeedbackRect.height()) / 2f).coerceAtLeast(0f)
+            radiusPx = (16f * density).coerceIn(0f, maxR)
+        }
+
+        holdFillPaint.color = androidx.core.graphics.ColorUtils.setAlphaComponent(
+            primaryColor,
+            (42f * prog).roundToInt().coerceIn(0, 48)
+        )
+        canvas.drawRoundRect(holdFeedbackRect, radiusPx, radiusPx, holdFillPaint)
+
+        holdHaloPaint.strokeWidth = strokePx + (2.5f * density)
+        holdHaloPaint.color = androidx.core.graphics.ColorUtils.setAlphaComponent(
+            primaryColor,
+            (64f * prog).roundToInt().coerceIn(0, 80)
+        )
+        canvas.drawRoundRect(holdFeedbackRect, radiusPx, radiusPx, holdHaloPaint)
+
+        holdOutlinePaint.strokeWidth = strokePx
+        holdOutlinePaint.color = androidx.core.graphics.ColorUtils.setAlphaComponent(
+            primaryColor,
+            (235f * prog).roundToInt().coerceIn(0, 245)
+        )
+        canvas.drawRoundRect(holdFeedbackRect, radiusPx, radiusPx, holdOutlinePaint)
+
+        val dotRadius = (3.5f * density).coerceAtLeast(3f) * prog
+        val inset = maxOf(radiusPx * 0.42f, 8f * density)
+        holdDotPaint.color = androidx.core.graphics.ColorUtils.setAlphaComponent(
+            Color.WHITE,
+            (235f * prog).roundToInt().coerceIn(0, 245)
+        )
+        canvas.drawCircle(holdFeedbackRect.left + inset, holdFeedbackRect.top + inset, dotRadius, holdDotPaint)
+        canvas.drawCircle(holdFeedbackRect.right - inset, holdFeedbackRect.top + inset, dotRadius, holdDotPaint)
+        canvas.drawCircle(holdFeedbackRect.left + inset, holdFeedbackRect.bottom - inset, dotRadius, holdDotPaint)
+        canvas.drawCircle(holdFeedbackRect.right - inset, holdFeedbackRect.bottom - inset, dotRadius, holdDotPaint)
+    }
+
+    private fun getPointerRawX(event: MotionEvent, pointerIndex: Int): Float {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            event.getRawX(pointerIndex)
+        } else {
+            event.rawX + (event.getX(pointerIndex) - event.x)
+        }
+    }
+
+    private fun getPointerRawY(event: MotionEvent, pointerIndex: Int): Float {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            event.getRawY(pointerIndex)
+        } else {
+            event.rawY + (event.getY(pointerIndex) - event.y)
         }
     }
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (!isDragMode) {
-            if (event.action == MotionEvent.ACTION_UP) {
-                onResyncRequested?.invoke()
-            }
-            return false
+            return handleNormalTouchEvent(event)
         }
 
         val x = event.x
         val y = event.y
         val touchMargin = 40f
 
-        when (event.action) {
+        when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 dragOrientation = displayGeometry?.orientation ?: activeOrientation
                 initialX = layoutParams.x
@@ -1799,27 +2150,11 @@ class MinimalOverlayView(
                     TouchTarget.NONE -> {}
                 }
 
-                if (geom != null) {
-                    val safeResolved = HudPositioningEngine.resolveBounds(
-                        profile = HudOverlayProfile(targetX, targetY, targetW, targetH),
-                        geometry = geom,
-                        minBackdropHeightPx = minBackdropHeightPx
-                    )
-                    layoutParams.x = safeResolved.x
-                    layoutParams.y = safeResolved.y
-                    layoutParams.width = safeResolved.widthPx
-                    layoutParams.height = safeResolved.effectiveHeightPx
-                } else {
-                    layoutParams.x = targetX
-                    layoutParams.y = targetY
-                    layoutParams.width = targetW
-                    layoutParams.height = targetH
+                val sizeChanged = targetW != layoutParams.width || targetH != layoutParams.height
+                applyUpdatedWindowBounds(targetX, targetY, targetW, targetH)
+                if (sizeChanged) {
+                    recalculateLayout()
                 }
-
-                try {
-                    windowManager.updateViewLayout(this, layoutParams)
-                } catch (_: Exception) {}
-                recalculateLayout()
                 return true
             }
 
@@ -1836,9 +2171,280 @@ class MinimalOverlayView(
         return super.onTouchEvent(event)
     }
 
+    private fun handleNormalTouchEvent(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                cancelScheduledHoldCallback()
+                val pointerId = event.getPointerId(0)
+                val onControl = isPointOnInteractiveControl?.invoke(event.x, event.y) == true
+                val started = holdGestureController.onDown(
+                    rawX = getPointerRawX(event, 0),
+                    rawY = getPointerRawY(event, 0),
+                    pointerId = pointerId,
+                    isOnInteractiveControl = onControl
+                )
+                if (started) {
+                    scheduledHoldToken = holdAttemptToken
+                    holdHandler.postDelayed(holdTimeoutRunnable, holdGestureController.holdDurationMs)
+                }
+                return started
+            }
+
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                if (holdGestureController.onMultiPointerDown()) {
+                    cancelScheduledHoldCallback()
+                }
+                return holdGestureController.state != HudHoldGestureController.State.IDLE
+            }
+
+            MotionEvent.ACTION_MOVE -> {
+                val ptrIndex = event.findPointerIndex(holdGestureController.activePointerId)
+                if (ptrIndex < 0) return false
+                val rawX = getPointerRawX(event, ptrIndex)
+                val rawY = getPointerRawY(event, ptrIndex)
+
+                return when (holdGestureController.state) {
+                    HudHoldGestureController.State.PENDING_HOLD -> {
+                        if (holdGestureController.onMove(rawX, rawY)) {
+                            cancelScheduledHoldCallback()
+                        }
+                        true
+                    }
+                    HudHoldGestureController.State.ACTIVE_REPOSITION -> {
+                        val dx = (rawX - initialTouchX).toInt()
+                        val dy = (rawY - initialTouchY).toInt()
+                        val geom = displayGeometry
+                        val constraints = geom?.let {
+                            HudPositioningEngine.computeConstraints(
+                                geometry = it,
+                                currentWidthPx = initialW,
+                                currentEffectiveHeightPx = initialH,
+                                minBackdropHeightPx = minBackdropHeightPx
+                            )
+                        }
+                        val minX = constraints?.minX ?: -2000
+                        val maxRight = constraints?.minSafeRightPx ?: Int.MAX_VALUE
+                        val minY = constraints?.minY ?: 0
+                        val maxBottom = constraints?.maxSafeBottomPx ?: Int.MAX_VALUE
+                        val moveMaxX = if (maxRight < Int.MAX_VALUE) (maxRight - initialW).coerceAtLeast(minX) else 2000
+                        val moveMaxY = if (maxBottom < Int.MAX_VALUE) (maxBottom - initialH).coerceAtLeast(minY) else 3000
+
+                        val targetX = (initialX + dx).coerceIn(minX, moveMaxX)
+                        val targetY = (initialY + dy).coerceIn(minY, moveMaxY)
+                        applyUpdatedWindowBounds(targetX, targetY, initialW, initialH)
+                        true
+                    }
+                    HudHoldGestureController.State.CANCELLED_BEFORE_HOLD -> true
+                    HudHoldGestureController.State.IDLE -> false
+                }
+            }
+
+            MotionEvent.ACTION_POINTER_UP -> {
+                val liftedIndex = event.actionIndex
+                val liftedId = event.getPointerId(liftedIndex)
+                if (liftedId == holdGestureController.activePointerId) {
+                    finishHoldPointerUp()
+                }
+                return true
+            }
+
+            MotionEvent.ACTION_UP -> {
+                finishHoldPointerUp()
+                return true
+            }
+
+            MotionEvent.ACTION_CANCEL -> {
+                cancelHoldGesture(revertActivePosition = true)
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun finishHoldPointerUp() {
+        cancelScheduledHoldCallback()
+        when (holdGestureController.onUp()) {
+            HudHoldGestureController.UpResult.TRIGGER_TAP -> {
+                onResyncRequested?.invoke()
+            }
+            HudHoldGestureController.UpResult.COMMIT_REPOSITION -> {
+                val finalW = if (layoutParams.width > 0) layoutParams.width else width
+                val finalH = if (layoutParams.height > 0) layoutParams.height else height
+                onBoundsChanged(dragOrientation, layoutParams.x, layoutParams.y, finalW, finalH)
+                animateHoldFeedback(active = false)
+            }
+            HudHoldGestureController.UpResult.NONE -> {
+                if (holdFeedbackProgress > 0f) {
+                    animateHoldFeedback(active = false)
+                }
+            }
+        }
+    }
+
+    private fun applyUpdatedWindowBounds(targetX: Int, targetY: Int, targetW: Int, targetH: Int) {
+        val geom = displayGeometry
+        if (geom != null) {
+            val safeResolved = HudPositioningEngine.resolveBounds(
+                profile = HudOverlayProfile(targetX, targetY, targetW, targetH),
+                geometry = geom,
+                minBackdropHeightPx = minBackdropHeightPx
+            )
+            layoutParams.x = safeResolved.x
+            layoutParams.y = safeResolved.y
+            layoutParams.width = safeResolved.widthPx
+            layoutParams.height = safeResolved.effectiveHeightPx
+        } else {
+            layoutParams.x = targetX
+            layoutParams.y = targetY
+            layoutParams.width = targetW
+            layoutParams.height = targetH
+        }
+
+        try {
+            windowManager.updateViewLayout(this, layoutParams)
+        } catch (_: Exception) {}
+    }
+
     companion object {
         const val SOLID_BACKDROP_COLOR: Int = 0xFF121216.toInt()
-        const val GLASS_BACKDROP_COLOR: Int = 0xFF181A22.toInt()
+        const val GLASS_BACKDROP_COLOR: Int = 0xFF161A24.toInt()
+        const val GLASS_FILL_ALPHA_MAX: Float = 224f
+        const val GLASS_SHEEN_ALPHA_MAX: Float = 44f
+        const val GLASS_BORDER_ALPHA_MAX: Float = 118f
+        const val GLASS_ELEVATION_SHADOW_ALPHA_MAX: Float = 52f
+        const val GLASS_INNER_HIGHLIGHT_ALPHA_MAX: Float = 54f
+
+        val GLASS_FROST_STOPS = floatArrayOf(0f, 0.38f, 0.72f, 1f)
+        val GLASS_BORDER_STOPS = floatArrayOf(0f, 0.45f, 1f)
+        val GLASS_INNER_HIGHLIGHT_STOPS = floatArrayOf(0f, 0.42f, 1f)
+
+        const val ACTIVE_LYRIC_COLOR: Int = 0xFFFFFFFF.toInt()
+        const val INACTIVE_LYRIC_COLOR: Int = 0xFFF2F5FA.toInt()
+        const val INACTIVE_LYRIC_ALPHA_RATIO: Float = 0.64f
+        const val OUTGOING_LYRIC_ALPHA_RATIO: Float = 0.44f
+        const val ACTIVE_SHADOW_ALPHA: Int = 215
+        const val INACTIVE_SHADOW_ALPHA: Int = 95
+        const val ACTIVE_GLOW_ALPHA: Int = 185
+
+        data class BackdropAppearanceSpec(
+            val isGlass: Boolean,
+            val fillColor: Int,
+            val fillAlpha: Int,
+            val glassSheenAlpha: Int,
+            val borderAlpha: Int,
+            val glassElevationShadowAlpha: Int,
+            val glassInnerHighlightAlpha: Int
+        )
+
+        data class LyricColorHierarchy(
+            val baseAlpha: Int,
+            val activeAlpha: Int,
+            val inactiveAlpha: Int,
+            val outgoingAlpha: Int,
+            val activeColor: Int = ACTIVE_LYRIC_COLOR,
+            val inactiveColor: Int = INACTIVE_LYRIC_COLOR
+        )
+
+        fun computeBackdropAppearance(style: String, opacity: Float): BackdropAppearanceSpec {
+            val clampedOpacity = opacity.coerceIn(0f, 1f)
+            val isGlass = style.trim().equals("GLASS", ignoreCase = true)
+            val fillColor = if (isGlass) GLASS_BACKDROP_COLOR else SOLID_BACKDROP_COLOR
+            val fillAlpha = if (isGlass) {
+                (clampedOpacity * GLASS_FILL_ALPHA_MAX).roundToInt().coerceIn(0, 255)
+            } else {
+                (clampedOpacity * 255f).roundToInt().coerceIn(0, 255)
+            }
+            val glassSheenAlpha = if (isGlass) {
+                (clampedOpacity * GLASS_SHEEN_ALPHA_MAX).roundToInt().coerceIn(0, 44)
+            } else {
+                0
+            }
+            val borderAlpha = if (isGlass) {
+                (clampedOpacity * GLASS_BORDER_ALPHA_MAX).roundToInt().coerceIn(0, 120)
+            } else {
+                0
+            }
+            val elevationShadowAlpha = if (isGlass) {
+                (clampedOpacity * GLASS_ELEVATION_SHADOW_ALPHA_MAX).roundToInt().coerceIn(0, 64)
+            } else {
+                0
+            }
+            val innerHighlightAlpha = if (isGlass) {
+                (clampedOpacity * GLASS_INNER_HIGHLIGHT_ALPHA_MAX).roundToInt().coerceIn(0, 68)
+            } else {
+                0
+            }
+            return BackdropAppearanceSpec(
+                isGlass = isGlass,
+                fillColor = fillColor,
+                fillAlpha = fillAlpha,
+                glassSheenAlpha = glassSheenAlpha,
+                borderAlpha = borderAlpha,
+                glassElevationShadowAlpha = elevationShadowAlpha,
+                glassInnerHighlightAlpha = innerHighlightAlpha
+            )
+        }
+
+        private fun argbColor(alpha: Int, red: Int, green: Int, blue: Int): Int {
+            return ((alpha.coerceIn(0, 255) shl 24) or
+                (red.coerceIn(0, 255) shl 16) or
+                (green.coerceIn(0, 255) shl 8) or
+                blue.coerceIn(0, 255))
+        }
+
+        fun buildGlassFrostGradientColors(sheenAlpha: Int): IntArray {
+            val safe = sheenAlpha.coerceIn(0, 255)
+            val upperMid = (safe * 0.34f).roundToInt().coerceIn(0, 255)
+            val lowerMid = (safe * 0.14f).roundToInt().coerceIn(0, 255)
+            val bottom = (safe * 0.30f).roundToInt().coerceIn(0, 255)
+            return intArrayOf(
+                argbColor(safe, 255, 255, 255),
+                argbColor(upperMid, 238, 244, 255),
+                argbColor(lowerMid, 218, 228, 248),
+                argbColor(bottom, 206, 220, 245)
+            )
+        }
+
+        fun buildGlassBorderGradientColors(borderAlpha: Int): IntArray {
+            val safe = borderAlpha.coerceIn(0, 255)
+            val mid = (safe * 0.38f).roundToInt().coerceIn(0, 255)
+            val bottom = (safe * 0.56f).roundToInt().coerceIn(0, 255)
+            return intArrayOf(
+                argbColor(safe, 255, 255, 255),
+                argbColor(mid, 230, 238, 252),
+                argbColor(bottom, 202, 216, 242)
+            )
+        }
+
+        fun buildGlassInnerHighlightColors(innerAlpha: Int): IntArray {
+            val safe = innerAlpha.coerceIn(0, 255)
+            val mid = (safe * 0.18f).roundToInt().coerceIn(0, 255)
+            return intArrayOf(
+                argbColor(safe, 255, 255, 255),
+                argbColor(mid, 236, 244, 255),
+                argbColor(0, 220, 232, 255)
+            )
+        }
+
+        fun computeLyricColorHierarchy(
+            textOpacity: Float,
+            animProgress: Float = 1f,
+            isFadeStyle: Boolean = false
+        ): LyricColorHierarchy {
+            val clampedOpacity = textOpacity.coerceIn(0.15f, 1.0f)
+            val clampedProgress = animProgress.coerceIn(0f, 1f)
+            val baseAlpha = (255f * clampedOpacity).roundToInt().coerceIn(0, 255)
+            val activeAlpha = (baseAlpha * clampedProgress).roundToInt().coerceIn(0, 255)
+            val inactiveAlpha = (activeAlpha * INACTIVE_LYRIC_ALPHA_RATIO).roundToInt().coerceIn(0, 255)
+            val outgoingRatio = if (isFadeStyle) 1f else OUTGOING_LYRIC_ALPHA_RATIO
+            val outgoingAlpha = (baseAlpha * (1f - clampedProgress) * outgoingRatio).roundToInt().coerceIn(0, 255)
+            return LyricColorHierarchy(
+                baseAlpha = baseAlpha,
+                activeAlpha = activeAlpha,
+                inactiveAlpha = inactiveAlpha,
+                outgoingAlpha = outgoingAlpha
+            )
+        }
 
         data class BackdropRenderSpec(
             val left: Float,
@@ -1852,7 +2458,9 @@ class MinimalOverlayView(
             val borderColor: Int,
             val borderAlpha: Int,
             val borderWidthPx: Float,
-            val glassSheenAlpha: Int
+            val glassSheenAlpha: Int,
+            val glassElevationShadowAlpha: Int = 0,
+            val glassInnerHighlightAlpha: Int = 0
         ) {
             val width: Float get() = (right - left).coerceAtLeast(0f)
             val height: Float get() = (bottom - top).coerceAtLeast(0f)
@@ -1898,16 +2506,7 @@ class MinimalOverlayView(
 
             val maxRadiusPx = (minOf(right - left, bottom - top) / 2f).coerceAtLeast(0f)
             val cornerRadiusPx = (cornerRadiusDp.coerceIn(0f, 32f) * safeDensity).coerceIn(0f, maxRadiusPx)
-            val isGlass = style.trim().equals("GLASS", ignoreCase = true)
-
-            val fillColor = if (isGlass) GLASS_BACKDROP_COLOR else SOLID_BACKDROP_COLOR
-            val fillAlpha = if (isGlass) {
-                (clampedOpacity * 245f).roundToInt().coerceIn(0, 255)
-            } else {
-                (clampedOpacity * 255f).roundToInt().coerceIn(0, 255)
-            }
-            val borderAlpha = if (isGlass) (clampedOpacity * 68f).roundToInt().coerceIn(0, 90) else 0
-            val glassSheenAlpha = if (isGlass) (clampedOpacity * 22f).roundToInt().coerceIn(0, 36) else 0
+            val appearance = computeBackdropAppearance(style, clampedOpacity)
             val borderWidthPx = (1f * safeDensity).coerceAtLeast(1f)
 
             return BackdropRenderSpec(
@@ -1916,13 +2515,15 @@ class MinimalOverlayView(
                 right = right,
                 bottom = bottom,
                 cornerRadiusPx = cornerRadiusPx,
-                fillColor = fillColor,
-                fillAlpha = fillAlpha,
-                showBorder = isGlass && borderAlpha > 0,
+                fillColor = appearance.fillColor,
+                fillAlpha = appearance.fillAlpha,
+                showBorder = appearance.isGlass && appearance.borderAlpha > 0,
                 borderColor = Color.WHITE,
-                borderAlpha = borderAlpha,
+                borderAlpha = appearance.borderAlpha,
                 borderWidthPx = borderWidthPx,
-                glassSheenAlpha = glassSheenAlpha
+                glassSheenAlpha = appearance.glassSheenAlpha,
+                glassElevationShadowAlpha = appearance.glassElevationShadowAlpha,
+                glassInnerHighlightAlpha = appearance.glassInnerHighlightAlpha
             )
         }
 
@@ -1938,5 +2539,121 @@ class MinimalOverlayView(
             }
             return boundaries.toIntArray()
         }
+    }
+}
+
+class HudHoldGestureController(
+    private val touchSlopPx: Float,
+    val holdDurationMs: Long = HOLD_REPOSITION_DELAY_MS
+) {
+    enum class State {
+        IDLE,
+        PENDING_HOLD,
+        CANCELLED_BEFORE_HOLD,
+        ACTIVE_REPOSITION
+    }
+
+    enum class UpResult {
+        NONE,
+        TRIGGER_TAP,
+        COMMIT_REPOSITION
+    }
+
+    var state: State = State.IDLE
+        private set
+    var activePointerId: Int = INVALID_POINTER_ID
+        private set
+    var downRawX: Float = 0f
+        private set
+    var downRawY: Float = 0f
+        private set
+    var activationRawX: Float = 0f
+        private set
+    var activationRawY: Float = 0f
+        private set
+
+    fun onDown(
+        rawX: Float,
+        rawY: Float,
+        pointerId: Int,
+        isOnInteractiveControl: Boolean = false
+    ): Boolean {
+        if (isOnInteractiveControl) {
+            reset()
+            return false
+        }
+        activePointerId = pointerId
+        downRawX = rawX
+        downRawY = rawY
+        activationRawX = rawX
+        activationRawY = rawY
+        state = State.PENDING_HOLD
+        return true
+    }
+
+    /** Returns true if finger movement beyond touch slop cancelled a pending hold. */
+    fun onMove(rawX: Float, rawY: Float): Boolean {
+        return when (state) {
+            State.PENDING_HOLD -> {
+                activationRawX = rawX
+                activationRawY = rawY
+                val dist = hypot(rawX - downRawX, rawY - downRawY)
+                if (dist > touchSlopPx) {
+                    state = State.CANCELLED_BEFORE_HOLD
+                    true
+                } else {
+                    false
+                }
+            }
+            State.ACTIVE_REPOSITION,
+            State.IDLE,
+            State.CANCELLED_BEFORE_HOLD -> false
+        }
+    }
+
+    fun onHoldTimeout(): Boolean {
+        if (state != State.PENDING_HOLD) return false
+        state = State.ACTIVE_REPOSITION
+        return true
+    }
+
+    /** Returns true if a secondary pointer cancelled a pending hold. */
+    fun onMultiPointerDown(): Boolean {
+        if (state == State.PENDING_HOLD) {
+            state = State.CANCELLED_BEFORE_HOLD
+            return true
+        }
+        return false
+    }
+
+    fun onUp(): UpResult {
+        val result = when (state) {
+            State.PENDING_HOLD -> UpResult.TRIGGER_TAP
+            State.ACTIVE_REPOSITION -> UpResult.COMMIT_REPOSITION
+            State.IDLE, State.CANCELLED_BEFORE_HOLD -> UpResult.NONE
+        }
+        reset()
+        return result
+    }
+
+    /** Returns true if an active reposition was interrupted. */
+    fun onCancel(): Boolean {
+        val wasActive = state == State.ACTIVE_REPOSITION
+        reset()
+        return wasActive
+    }
+
+    fun reset() {
+        state = State.IDLE
+        activePointerId = INVALID_POINTER_ID
+        downRawX = 0f
+        downRawY = 0f
+        activationRawX = 0f
+        activationRawY = 0f
+    }
+
+    companion object {
+        const val HOLD_REPOSITION_DELAY_MS = 2000L
+        const val INVALID_POINTER_ID = -1
     }
 }

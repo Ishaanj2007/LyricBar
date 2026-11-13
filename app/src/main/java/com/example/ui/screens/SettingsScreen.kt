@@ -61,6 +61,7 @@ import com.example.service.MediaPlaybackManager
 import com.example.ui.components.CalmThemedBackground
 import com.example.ui.components.FrostedCard
 import com.example.ui.components.LocalHazeState
+import com.example.ui.components.MinimalOverlayView
 import com.example.ui.theme.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -173,7 +174,7 @@ fun SettingsScreen(
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = if (userPreferences.isDragRepositionMode) "Touch enabled: drag & resize overlay anywhere on screen" else "Tap-through: touches pass directly to underlying apps",
+                            text = if (userPreferences.isDragRepositionMode) "Touch enabled: drag & resize overlay anywhere on screen" else "Hold HUD 2s to reposition; toggle ON for resize handles",
                             fontSize = 12.sp,
                             color = if (userPreferences.isDragRepositionMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -424,59 +425,125 @@ fun SettingsScreen(
                         .testTag("hud_backdrop_live_preview"),
                     contentAlignment = Alignment.Center
                 ) {
-                    val previewShape = RoundedCornerShape(localCornerRadiusDp.roundToInt().coerceIn(0, 32).dp)
-                    val isGlassPreview = livePreferences.hudBackdropStyle == HudBackdropStyle.GLASS
+                    val cornerDp = localCornerRadiusDp.roundToInt().coerceIn(0, 32)
+                    val previewShape = RoundedCornerShape(cornerDp.dp)
+                    val innerPreviewShape = RoundedCornerShape((cornerDp - 1).coerceAtLeast(0).dp)
                     val clampedPreviewOpacity = localBackdropOpacity.coerceIn(0f, 1f)
-                    val previewBackdropModifier = if (isBackdropEnabled && clampedPreviewOpacity > 0f) {
-                        val baseColor = if (isGlassPreview) {
-                            Color(0xFF181A22).copy(alpha = (clampedPreviewOpacity * 0.96f).coerceIn(0f, 1f))
-                        } else {
-                            Color(0xFF121216).copy(alpha = clampedPreviewOpacity)
+                    val appearance = remember(livePreferences.hudBackdropStyle, clampedPreviewOpacity) {
+                        MinimalOverlayView.computeBackdropAppearance(
+                            style = livePreferences.hudBackdropStyle.name,
+                            opacity = clampedPreviewOpacity
+                        )
+                    }
+                    val lyricColors = remember(livePreferences.overlayTextOpacity) {
+                        MinimalOverlayView.computeLyricColorHierarchy(
+                            textOpacity = livePreferences.overlayTextOpacity
+                        )
+                    }
+                    val baseFillColor = Color(appearance.fillColor).copy(
+                        alpha = (appearance.fillAlpha / 255f).coerceIn(0f, 1f)
+                    )
+                    val frostColorStops = remember(appearance.glassSheenAlpha) {
+                        val colors = MinimalOverlayView.buildGlassFrostGradientColors(appearance.glassSheenAlpha)
+                        Array(colors.size) { idx ->
+                            MinimalOverlayView.GLASS_FROST_STOPS[idx] to Color(colors[idx])
                         }
+                    }
+                    val borderColorStops = remember(appearance.borderAlpha) {
+                        val colors = MinimalOverlayView.buildGlassBorderGradientColors(appearance.borderAlpha)
+                        Array(colors.size) { idx ->
+                            MinimalOverlayView.GLASS_BORDER_STOPS[idx] to Color(colors[idx])
+                        }
+                    }
+                    val innerHighlightStops = remember(appearance.glassInnerHighlightAlpha) {
+                        val colors = MinimalOverlayView.buildGlassInnerHighlightColors(appearance.glassInnerHighlightAlpha)
+                        Array(colors.size) { idx ->
+                            MinimalOverlayView.GLASS_INNER_HIGHLIGHT_STOPS[idx] to Color(colors[idx])
+                        }
+                    }
+
+                    val isShowingBackdrop = isBackdropEnabled && clampedPreviewOpacity > 0f
+                    val previewOuterModifier = if (isShowingBackdrop) {
                         Modifier
                             .clip(previewShape)
-                            .background(baseColor, previewShape)
+                            .background(baseFillColor, previewShape)
                             .then(
-                                if (isGlassPreview) {
-                                    Modifier.border(
-                                        width = 1.dp,
-                                        color = Color.White.copy(alpha = (clampedPreviewOpacity * 0.27f).coerceIn(0f, 0.35f)),
-                                        shape = previewShape
-                                    )
+                                if (appearance.isGlass) {
+                                    Modifier
+                                        .background(
+                                            brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                                                colorStops = frostColorStops
+                                            ),
+                                            shape = previewShape
+                                        )
+                                        .border(
+                                            width = 1.dp,
+                                            brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                                                colorStops = borderColorStops
+                                            ),
+                                            shape = previewShape
+                                        )
                                 } else {
                                     Modifier
                                 }
                             )
-                            .padding(
-                                horizontal = localHorizontalPaddingDp.roundToInt().coerceIn(0, 32).dp,
-                                vertical = localVerticalPaddingDp.roundToInt().coerceIn(0, 24).dp
-                            )
                     } else {
-                        Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        Modifier
                     }
 
                     Box(
-                        modifier = previewBackdropModifier,
+                        modifier = previewOuterModifier,
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = "I thought I saw your face today",
-                            color = Color.White.copy(alpha = livePreferences.overlayTextOpacity.coerceIn(0.15f, 1f)),
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            textAlign = TextAlign.Center,
-                            style = LocalTextStyle.current.copy(
-                                shadow = if (livePreferences.textShadowEnabled) {
-                                    androidx.compose.ui.graphics.Shadow(
-                                        color = Color.Black.copy(alpha = 0.78f),
-                                        offset = androidx.compose.ui.geometry.Offset(0f, 2f),
-                                        blurRadius = 6f
+                        if (isShowingBackdrop && appearance.isGlass && appearance.glassInnerHighlightAlpha > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .matchParentSize()
+                                    .padding(1.dp)
+                                    .border(
+                                        width = 0.75.dp,
+                                        brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                                            colorStops = innerHighlightStops
+                                        ),
+                                        shape = innerPreviewShape
                                     )
-                                } else {
-                                    null
-                                }
                             )
-                        )
+                        }
+                        val contentPaddingModifier = if (isShowingBackdrop) {
+                            Modifier.padding(
+                                horizontal = localHorizontalPaddingDp.roundToInt().coerceIn(0, 32).dp,
+                                vertical = localVerticalPaddingDp.roundToInt().coerceIn(0, 24).dp
+                            )
+                        } else {
+                            Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        }
+                        Box(
+                            modifier = contentPaddingModifier,
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "I thought I saw your face today",
+                                color = Color(lyricColors.activeColor).copy(
+                                    alpha = (lyricColors.activeAlpha / 255f).coerceIn(0f, 1f)
+                                ),
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                textAlign = TextAlign.Center,
+                                style = LocalTextStyle.current.copy(
+                                    shadow = if (livePreferences.textShadowEnabled) {
+                                        androidx.compose.ui.graphics.Shadow(
+                                            color = Color.Black.copy(
+                                                alpha = MinimalOverlayView.ACTIVE_SHADOW_ALPHA / 255f
+                                            ),
+                                            offset = androidx.compose.ui.geometry.Offset(0f, 1.5f),
+                                            blurRadius = 5.5f
+                                        )
+                                    } else {
+                                        null
+                                    }
+                                )
+                            )
+                        }
                     }
                 }
 
@@ -2910,8 +2977,10 @@ private fun AnimationStylePreview(
                             val isCurrent = idx == activeWordIndex
                             val wordColor = when {
                                 isCurrent -> MaterialTheme.colorScheme.primary
-                                isSung -> Color.White.copy(alpha = textOpacity)
-                                else -> Color.White.copy(alpha = 0.35f * textOpacity)
+                                isSung -> Color(MinimalOverlayView.ACTIVE_LYRIC_COLOR).copy(alpha = textOpacity)
+                                else -> Color(MinimalOverlayView.INACTIVE_LYRIC_COLOR).copy(
+                                    alpha = MinimalOverlayView.INACTIVE_LYRIC_ALPHA_RATIO * textOpacity
+                                )
                             }
                             Text(
                                 text = "$w ",
@@ -2962,10 +3031,10 @@ private fun AnimationStylePreview(
                     ) {
                         if (animProgress.value < 1f && prevLineIdx in sampleLines.indices) {
                             val outgoingOffsetY = (-animProgress.value * 20).dp
-                            val outgoingAlpha = ((1f - animProgress.value) * (textOpacity * 0.35f)).coerceIn(0f, 1f)
+                            val outgoingAlpha = ((1f - animProgress.value) * (textOpacity * MinimalOverlayView.OUTGOING_LYRIC_ALPHA_RATIO)).coerceIn(0f, 1f)
                             Text(
                                 text = sampleLines[prevLineIdx],
-                                color = Color.White.copy(alpha = outgoingAlpha),
+                                color = Color(MinimalOverlayView.INACTIVE_LYRIC_COLOR).copy(alpha = outgoingAlpha),
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 13.sp,
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,

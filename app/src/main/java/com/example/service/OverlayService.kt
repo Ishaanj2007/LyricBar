@@ -147,8 +147,7 @@ class OverlayService : Service() {
         val flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
             WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-            (if (isDragMode) 0 else WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
 
         val params = WindowManager.LayoutParams(
             placeholderBounds.widthPx,
@@ -235,6 +234,7 @@ class OverlayService : Service() {
         val view = overlayView ?: return
         if (!overlayEnabled) {
             cancelVisibilityAnimation()
+            view.cancelActiveDrag()
             view.visibility = android.view.View.GONE
             view.alpha = 0f
             view.scaleX = 0.97f
@@ -310,7 +310,8 @@ class OverlayService : Service() {
             }
             lastTargetVisible = false
 
-            // Ensure lyric scrolling and playback-dependent animations stop immediately when playback is inactive
+            // Ensure lyric scrolling, active drag, and playback-dependent animations stop immediately when playback is inactive
+            view.cancelActiveDrag()
             view.stopLoop()
 
             // Cancel any entrance animation safely
@@ -377,14 +378,10 @@ class OverlayService : Service() {
         val view = overlayView ?: return
         val params = layoutParams ?: return
 
-        var flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+        val flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
             WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-
-        if (!isDragMode) {
-            flags = flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-        }
 
         params.flags = flags
         view.isDragMode = isDragMode
@@ -660,6 +657,7 @@ class OverlayService : Service() {
         } catch (_: Exception) {}
         overlayView?.let {
             try {
+                it.cancelActiveDrag()
                 it.stopLoop()
                 windowManager?.removeView(it)
             } catch (_: Exception) {}

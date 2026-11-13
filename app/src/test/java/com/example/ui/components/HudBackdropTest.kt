@@ -136,8 +136,29 @@ class HudBackdropTest {
             textBottom = 108f
         )
 
+        val specSolid = MinimalOverlayView.computeBackdropSpec(
+            enabled = true,
+            style = "SOLID",
+            opacity = 0.65f,
+            cornerRadiusDp = 18f,
+            horizontalPaddingDp = 16f,
+            verticalPaddingDp = 10f,
+            density = 2.5f,
+            viewWidth = 850,
+            viewHeight = 160,
+            textLeft = 180f,
+            textTop = 52f,
+            textRight = 670f,
+            textBottom = 108f
+        )
+
         assertNotNull(specGlass)
+        assertNotNull(specSolid)
         assertEquals(MinimalOverlayView.GLASS_BACKDROP_COLOR, specGlass!!.fillColor)
+        assertTrue(
+            "Refined Glass backdrop must stay more translucent than Solid at equal opacity",
+            specGlass.fillAlpha < specSolid!!.fillAlpha
+        )
         assertTrue("Glass style must display a subtle soft border", specGlass.showBorder)
         assertTrue("Glass border alpha should be positive and subtle", specGlass.borderAlpha in 20..80)
         assertTrue("Glass sheen alpha should be positive and subtle", specGlass.glassSheenAlpha in 8..30)
@@ -319,4 +340,93 @@ class HudBackdropTest {
         assertEquals(24, reEnabledState.hudBackdropHorizontalPaddingDp)
         assertEquals(16, reEnabledState.hudBackdropVerticalPaddingDp)
     }
+
+    @Test
+    fun `shared Glass backdrop appearance includes inner highlight, elevation shadow, and matches computeBackdropSpec`() {
+        val appearance = MinimalOverlayView.computeBackdropAppearance(style = "GLASS", opacity = 0.65f)
+        val spec = MinimalOverlayView.computeBackdropSpec(
+            enabled = true,
+            style = "GLASS",
+            opacity = 0.65f,
+            cornerRadiusDp = 18f,
+            horizontalPaddingDp = 16f,
+            verticalPaddingDp = 10f,
+            density = 2.0f,
+            viewWidth = 850,
+            viewHeight = 160,
+            textLeft = 200f,
+            textTop = 50f,
+            textRight = 650f,
+            textBottom = 100f
+        )
+
+        assertNotNull(spec)
+        assertTrue(appearance.isGlass)
+        assertEquals(appearance.fillColor, spec!!.fillColor)
+        assertEquals(appearance.fillAlpha, spec.fillAlpha)
+        assertEquals(appearance.glassSheenAlpha, spec.glassSheenAlpha)
+        assertEquals(appearance.borderAlpha, spec.borderAlpha)
+        assertEquals(appearance.glassElevationShadowAlpha, spec.glassElevationShadowAlpha)
+        assertEquals(appearance.glassInnerHighlightAlpha, spec.glassInnerHighlightAlpha)
+        assertTrue("Glass should add subtle depth shadow separation", appearance.glassElevationShadowAlpha > 0)
+        assertTrue("Glass should add top inner highlight", appearance.glassInnerHighlightAlpha > 0)
+
+        val frostColors = MinimalOverlayView.buildGlassFrostGradientColors(appearance.glassSheenAlpha)
+        val borderColors = MinimalOverlayView.buildGlassBorderGradientColors(appearance.borderAlpha)
+        val innerColors = MinimalOverlayView.buildGlassInnerHighlightColors(appearance.glassInnerHighlightAlpha)
+        assertEquals(MinimalOverlayView.GLASS_FROST_STOPS.size, frostColors.size)
+        assertEquals(MinimalOverlayView.GLASS_BORDER_STOPS.size, borderColors.size)
+        assertEquals(MinimalOverlayView.GLASS_INNER_HIGHLIGHT_STOPS.size, innerColors.size)
+
+        val solidAppearance = MinimalOverlayView.computeBackdropAppearance(style = "SOLID", opacity = 0.65f)
+        assertFalse(solidAppearance.isGlass)
+        assertEquals(0, solidAppearance.glassElevationShadowAlpha)
+        assertEquals(0, solidAppearance.glassInnerHighlightAlpha)
+    }
+
+    @Test
+    fun `lyric color hierarchy keeps active lyrics crisp white and subordinate words clearly readable`() {
+        val fullOpacity = MinimalOverlayView.computeLyricColorHierarchy(
+            textOpacity = 1.0f,
+            animProgress = 1.0f,
+            isFadeStyle = false
+        )
+        assertEquals(MinimalOverlayView.ACTIVE_LYRIC_COLOR, fullOpacity.activeColor)
+        assertEquals(MinimalOverlayView.INACTIVE_LYRIC_COLOR, fullOpacity.inactiveColor)
+        assertEquals(255, fullOpacity.activeAlpha)
+        assertTrue(
+            "Subordinate words must exceed 55% visibility at full text opacity so they never look muddy",
+            fullOpacity.inactiveAlpha >= 150
+        )
+        assertTrue(
+            "Active lyrics must remain noticeably brighter than subordinate words",
+            fullOpacity.activeAlpha > fullOpacity.inactiveAlpha
+        )
+        assertTrue(
+            "Subordinate shadow alpha must stay lighter than active shadow alpha",
+            MinimalOverlayView.INACTIVE_SHADOW_ALPHA < MinimalOverlayView.ACTIVE_SHADOW_ALPHA
+        )
+
+        val halfOpacity = MinimalOverlayView.computeLyricColorHierarchy(
+            textOpacity = 0.5f,
+            animProgress = 1.0f,
+            isFadeStyle = false
+        )
+        assertTrue("User text opacity preference must scale both active and subordinate alpha proportionally", halfOpacity.activeAlpha in 126..129)
+        assertTrue(halfOpacity.inactiveAlpha < fullOpacity.inactiveAlpha)
+        assertTrue(halfOpacity.activeAlpha > halfOpacity.inactiveAlpha)
+
+        val midTransitionSlide = MinimalOverlayView.computeLyricColorHierarchy(
+            textOpacity = 1.0f,
+            animProgress = 0.5f,
+            isFadeStyle = false
+        )
+        val midTransitionFade = MinimalOverlayView.computeLyricColorHierarchy(
+            textOpacity = 1.0f,
+            animProgress = 0.5f,
+            isFadeStyle = true
+        )
+        assertTrue(midTransitionSlide.outgoingAlpha < midTransitionFade.outgoingAlpha)
+    }
 }
+

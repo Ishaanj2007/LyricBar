@@ -79,6 +79,7 @@ import com.example.domain.parser.LrcParser
 import com.example.service.MediaPlaybackManager
 import com.example.ui.components.FrostedCard
 import com.example.ui.components.LocalHazeState
+import com.example.ui.components.MinimalOverlayView
 import com.example.ui.components.rememberArtworkBitmap
 import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.Dispatchers
@@ -1512,10 +1513,10 @@ private fun LyricsLinesLazyColumn(
             val isPast = activeIndex != -1 && index < activeIndex
 
             val targetAlpha = when {
-                !lyrics.isSynced -> 0.90f
+                !lyrics.isSynced -> 0.92f
                 isActive -> 1.0f
-                isPast -> 0.52f
-                else -> 0.68f
+                isPast -> 0.56f
+                else -> 0.72f
             }
             val alpha by animateFloatAsState(
                 targetValue = targetAlpha,
@@ -2287,7 +2288,7 @@ private fun WordSyncedLyricText(
                 val wordColor = if (wordProg >= 1f) {
                     onSurfaceColor
                 } else if (wordProg <= 0f) {
-                    onSurfaceColor.copy(alpha = 0.35f)
+                    onSurfaceColor.copy(alpha = MinimalOverlayView.INACTIVE_LYRIC_ALPHA_RATIO)
                 } else {
                     themePrimary
                 }
