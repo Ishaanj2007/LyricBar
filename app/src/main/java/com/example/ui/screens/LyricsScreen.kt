@@ -408,7 +408,7 @@ fun LyricsScreen(
                     borderAlpha = 0.20f,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 6.dp)
+                        .padding(bottom = 4.dp)
                 ) {
                     Row(
                         modifier = Modifier
@@ -541,7 +541,7 @@ fun LyricsScreen(
                         borderAlpha = 0.20f,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(bottom = 6.dp)
+                            .padding(bottom = 4.dp)
                     ) {
                         Row(
                             modifier = Modifier
@@ -582,7 +582,7 @@ fun LyricsScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(2.dp))
 
                 // Lyrics Content Area
                 val lyrics = currentLyrics
@@ -743,7 +743,7 @@ fun LyricsScreen(
                             LazyColumn(
                                 state = listState,
                                 modifier = Modifier.fillMaxSize(),
-                                contentPadding = PaddingValues(top = 10.dp, bottom = 240.dp)
+                                contentPadding = PaddingValues(top = 6.dp, bottom = 240.dp)
                             ) {
                                 itemsIndexed(
                                     items = lyrics.lines,
@@ -776,7 +776,7 @@ fun LyricsScreen(
 
                                     val lineModifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(vertical = if (isActive) 4.dp else 2.dp)
+                                        .padding(vertical = if (isActive) 3.dp else 2.dp)
                                         .graphicsLayer {
                                             scaleX = lineScale
                                             scaleY = lineScale
@@ -804,7 +804,7 @@ fun LyricsScreen(
                                                 .fillMaxWidth()
                                                 .padding(
                                                     horizontal = 14.dp,
-                                                    vertical = if (isActive) 10.dp else 5.dp
+                                                    vertical = if (isActive) 8.dp else 5.dp
                                                 ),
                                             horizontalAlignment = Alignment.End
                                         ) {

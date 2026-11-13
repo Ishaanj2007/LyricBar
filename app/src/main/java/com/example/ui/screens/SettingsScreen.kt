@@ -4,8 +4,9 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
-import android.provider.Settings
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -33,6 +34,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.abs
@@ -45,7 +47,6 @@ import com.example.data.preferences.ThemePreset
 import com.example.data.preferences.UserPreferences
 import com.example.data.repository.CompositeLyricsRepository
 import com.example.service.MediaPlaybackManager
-import com.example.service.OverlayService
 import com.example.ui.components.CalmThemedBackground
 import com.example.ui.components.FrostedCard
 import com.example.ui.components.LocalHazeState
@@ -151,56 +152,12 @@ fun SettingsScreen(
                 // SECTION 1: FLOATING OVERLAY & TIMELINE
                 SettingsAccordionCard(
                     title = "Floating Overlay & Timeline",
-                    subtitle = if (userPreferences.overlayEnabled) "Active • Pure white lyrics ON" else "Off • Floating overlay disabled",
+                    subtitle = if (livePreferences.overlayEnabled) "Active • Pure white lyrics ON" else "Off • Floating overlay disabled",
                     icon = Icons.Default.Layers,
                     isExpanded = "overlay" in expandedSections,
                     onToggle = { toggleSection("overlay") }
                 ) {
                     Column(modifier = Modifier.padding(18.dp)) {
-                // Toggle: Overlay Enabled
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Show Floating Overlay",
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = "Draws pure white floating lyrics over other apps",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(
-                        checked = userPreferences.overlayEnabled,
-                        onCheckedChange = { enabled ->
-                            coroutineScope.launch {
-                                playbackManager.preferencesRepository.setOverlayEnabled(enabled)
-                                if (enabled) {
-                                    if (Settings.canDrawOverlays(context)) {
-                                        OverlayService.start(context)
-                                    } else {
-                                        val intent = Intent(
-                                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                            Uri.parse("package:${context.packageName}")
-                                        )
-                                        context.startActivity(intent)
-                                    }
-                                } else {
-                                    OverlayService.stop(context)
-                                }
-                            }
-                        },
-                        modifier = Modifier.testTag("settings_overlay_switch")
-                    )
-                }
-
-                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-
                 // Toggle: 2D Drag & Reposition Mode
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -431,7 +388,7 @@ fun SettingsScreen(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
                 // Live Preview Box
                 Text(
@@ -445,7 +402,7 @@ fun SettingsScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 84.dp)
+                        .heightIn(min = 74.dp)
                         .clip(RoundedCornerShape(14.dp))
                         .background(
                             brush = androidx.compose.ui.graphics.Brush.linearGradient(
@@ -461,7 +418,7 @@ fun SettingsScreen(
                             color = Color.White.copy(alpha = 0.10f),
                             shape = RoundedCornerShape(14.dp)
                         )
-                        .padding(horizontal = 12.dp, vertical = 14.dp)
+                        .padding(horizontal = 12.dp, vertical = 10.dp)
                         .testTag("hud_backdrop_live_preview"),
                     contentAlignment = Alignment.Center
                 ) {
@@ -521,14 +478,15 @@ fun SettingsScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
                 val controlsAlpha = if (isBackdropEnabled) 1f else 0.48f
+                var isBackdropAdvancedExpanded by rememberSaveable { mutableStateOf(false) }
 
                 Column(
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    // Backdrop Style Selector: [ Solid ] [ Glass ]
+                    // Compact Segmented Backdrop Style Selector: [ Solid | Glass ]
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -555,41 +513,66 @@ fun SettingsScreen(
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    Row(
+                    Surface(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.50f),
+                        border = BorderStroke(
+                            width = 1.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+                        )
                     ) {
-                        HudBackdropStyle.entries.forEach { styleOption ->
-                            val isSelected = livePreferences.hudBackdropStyle == styleOption
-                            FilledTonalButton(
-                                onClick = {
-                                    coroutineScope.launch {
-                                        playbackManager.preferencesRepository.setHudBackdropStyle(styleOption)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(3.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            HudBackdropStyle.entries.forEach { styleOption ->
+                                val isSelected = livePreferences.hudBackdropStyle == styleOption
+                                Surface(
+                                    onClick = {
+                                        coroutineScope.launch {
+                                            playbackManager.preferencesRepository.setHudBackdropStyle(styleOption)
+                                        }
+                                    },
+                                    enabled = isBackdropEnabled,
+                                    shape = RoundedCornerShape(9.dp),
+                                    color = if (isSelected) {
+                                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = controlsAlpha)
+                                    } else {
+                                        Color.Transparent
+                                    },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .heightIn(min = 44.dp)
+                                        .testTag("hud_backdrop_style_${styleOption.name.lowercase()}")
+                                ) {
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                                    ) {
+                                        Text(
+                                            text = styleOption.title,
+                                            fontSize = 13.sp,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            color = (if (isSelected) {
+                                                MaterialTheme.colorScheme.onPrimaryContainer
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            }).copy(alpha = controlsAlpha)
+                                        )
                                     }
-                                },
-                                enabled = isBackdropEnabled,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("hud_backdrop_style_${styleOption.name.lowercase()}"),
-                                colors = ButtonDefaults.filledTonalButtonColors(
-                                    containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                                    contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
-                                ),
-                                shape = RoundedCornerShape(10.dp),
-                                contentPadding = PaddingValues(vertical = 10.dp)
-                            ) {
-                                Text(
-                                    text = styleOption.title,
-                                    fontSize = 13.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                                )
+                                }
                             }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                    // Opacity Slider (0% - 100%, step 5%, default 65%)
+                    // Primary Adjustment: Opacity Slider (0% - 100%, step 5%, default 65%)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -625,119 +608,186 @@ fun SettingsScreen(
                             .testTag("hud_backdrop_opacity_slider")
                     )
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
 
-                    // Corner Radius Slider (0dp - 32dp, step 2dp, default 18dp)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Corner Radius",
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 13.sp,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = controlsAlpha)
-                        )
-                        Text(
-                            text = "${localCornerRadiusDp.roundToInt()}dp",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = controlsAlpha)
-                        )
-                    }
-                    Slider(
-                        value = localCornerRadiusDp,
-                        onValueChange = { raw ->
-                            val snapped = ((raw / 2f).roundToInt() * 2).coerceIn(0, 32)
-                            localCornerRadiusDp = snapped.toFloat()
-                            coroutineScope.launch {
-                                playbackManager.preferencesRepository.setHudBackdropCornerRadiusDp(snapped)
-                            }
-                        },
-                        enabled = isBackdropEnabled,
-                        valueRange = 0f..32f,
-                        steps = 15,
+                    // Collapsed-by-default Advanced adjustments (Corner Radius, Horizontal Padding, Vertical Padding)
+                    val advancedChevronRotation = if (isBackdropAdvancedExpanded) 180f else 0f
+                    Surface(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .testTag("hud_backdrop_corner_radius_slider")
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    // Horizontal Padding Slider (0dp - 32dp, step 2dp, default 16dp)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                            .animateContentSize(),
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                        border = BorderStroke(
+                            width = 1.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                        )
                     ) {
-                        Text(
-                            text = "Horizontal Padding",
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 13.sp,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = controlsAlpha)
-                        )
-                        Text(
-                            text = "${localHorizontalPaddingDp.roundToInt()}dp",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = controlsAlpha)
-                        )
-                    }
-                    Slider(
-                        value = localHorizontalPaddingDp,
-                        onValueChange = { raw ->
-                            val snapped = ((raw / 2f).roundToInt() * 2).coerceIn(0, 32)
-                            localHorizontalPaddingDp = snapped.toFloat()
-                            coroutineScope.launch {
-                                playbackManager.preferencesRepository.setHudBackdropHorizontalPaddingDp(snapped)
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 48.dp)
+                                    .clickable {
+                                        isBackdropAdvancedExpanded = !isBackdropAdvancedExpanded
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                                    .testTag("hud_backdrop_advanced_toggle"),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Advanced adjustments",
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 13.sp,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = "${localCornerRadiusDp.roundToInt()}dp radius • ${localHorizontalPaddingDp.roundToInt()}×${localVerticalPaddingDp.roundToInt()}dp padding",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Icon(
+                                    imageVector = Icons.Default.ExpandMore,
+                                    contentDescription = if (isBackdropAdvancedExpanded) "Collapse advanced adjustments" else "Expand advanced adjustments",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier
+                                        .size(20.dp)
+                                        .rotate(advancedChevronRotation)
+                                )
                             }
-                        },
-                        enabled = isBackdropEnabled,
-                        valueRange = 0f..32f,
-                        steps = 15,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("hud_backdrop_horizontal_padding_slider")
-                    )
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                            AnimatedVisibility(visible = isBackdropAdvancedExpanded) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(start = 12.dp, end = 12.dp, bottom = 10.dp)
+                                ) {
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(bottom = 10.dp),
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                                    )
 
-                    // Vertical Padding Slider (0dp - 24dp, step 2dp, default 10dp)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Vertical Padding",
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 13.sp,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = controlsAlpha)
-                        )
-                        Text(
-                            text = "${localVerticalPaddingDp.roundToInt()}dp",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = controlsAlpha)
-                        )
-                    }
-                    Slider(
-                        value = localVerticalPaddingDp,
-                        onValueChange = { raw ->
-                            val snapped = ((raw / 2f).roundToInt() * 2).coerceIn(0, 24)
-                            localVerticalPaddingDp = snapped.toFloat()
-                            coroutineScope.launch {
-                                playbackManager.preferencesRepository.setHudBackdropVerticalPaddingDp(snapped)
+                                    // Corner Radius Slider (0dp - 32dp, step 2dp, default 18dp)
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "Corner Radius",
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 13.sp,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = controlsAlpha)
+                                        )
+                                        Text(
+                                            text = "${localCornerRadiusDp.roundToInt()}dp",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp,
+                                            color = MaterialTheme.colorScheme.primary.copy(alpha = controlsAlpha)
+                                        )
+                                    }
+                                    Slider(
+                                        value = localCornerRadiusDp,
+                                        onValueChange = { raw ->
+                                            val snapped = ((raw / 2f).roundToInt() * 2).coerceIn(0, 32)
+                                            localCornerRadiusDp = snapped.toFloat()
+                                            coroutineScope.launch {
+                                                playbackManager.preferencesRepository.setHudBackdropCornerRadiusDp(snapped)
+                                            }
+                                        },
+                                        enabled = isBackdropEnabled,
+                                        valueRange = 0f..32f,
+                                        steps = 15,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("hud_backdrop_corner_radius_slider")
+                                    )
+
+                                    Spacer(modifier = Modifier.height(6.dp))
+
+                                    // Horizontal Padding Slider (0dp - 32dp, step 2dp, default 16dp)
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "Horizontal Padding",
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 13.sp,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = controlsAlpha)
+                                        )
+                                        Text(
+                                            text = "${localHorizontalPaddingDp.roundToInt()}dp",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp,
+                                            color = MaterialTheme.colorScheme.primary.copy(alpha = controlsAlpha)
+                                        )
+                                    }
+                                    Slider(
+                                        value = localHorizontalPaddingDp,
+                                        onValueChange = { raw ->
+                                            val snapped = ((raw / 2f).roundToInt() * 2).coerceIn(0, 32)
+                                            localHorizontalPaddingDp = snapped.toFloat()
+                                            coroutineScope.launch {
+                                                playbackManager.preferencesRepository.setHudBackdropHorizontalPaddingDp(snapped)
+                                            }
+                                        },
+                                        enabled = isBackdropEnabled,
+                                        valueRange = 0f..32f,
+                                        steps = 15,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("hud_backdrop_horizontal_padding_slider")
+                                    )
+
+                                    Spacer(modifier = Modifier.height(6.dp))
+
+                                    // Vertical Padding Slider (0dp - 24dp, step 2dp, default 10dp)
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "Vertical Padding",
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 13.sp,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = controlsAlpha)
+                                        )
+                                        Text(
+                                            text = "${localVerticalPaddingDp.roundToInt()}dp",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp,
+                                            color = MaterialTheme.colorScheme.primary.copy(alpha = controlsAlpha)
+                                        )
+                                    }
+                                    Slider(
+                                        value = localVerticalPaddingDp,
+                                        onValueChange = { raw ->
+                                            val snapped = ((raw / 2f).roundToInt() * 2).coerceIn(0, 24)
+                                            localVerticalPaddingDp = snapped.toFloat()
+                                            coroutineScope.launch {
+                                                playbackManager.preferencesRepository.setHudBackdropVerticalPaddingDp(snapped)
+                                            }
+                                        },
+                                        enabled = isBackdropEnabled,
+                                        valueRange = 0f..24f,
+                                        steps = 11,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("hud_backdrop_vertical_padding_slider")
+                                    )
+                                }
                             }
-                        },
-                        enabled = isBackdropEnabled,
-                        valueRange = 0f..24f,
-                        steps = 11,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("hud_backdrop_vertical_padding_slider")
-                    )
+                        }
+                    }
                 }
 
                 HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))

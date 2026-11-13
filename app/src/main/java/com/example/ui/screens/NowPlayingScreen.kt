@@ -9,6 +9,7 @@ import android.net.Uri
 import android.provider.Settings
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FastOutLinearInEasing
@@ -362,19 +363,13 @@ internal fun formatNowPlayingTimestamp(timeMs: Long): String {
 }
 
 /**
- * Inspects the active [MediaController] for Shuffle and Repeat capabilities and states
- * without fabricating state when the external player does not expose or support them.
+ * Inspects the active [MediaController] for Previous, Next, and Seek capabilities
+ * without fabricating state when the external player does not expose them.
  */
 private data class TransportCapabilities(
     val canSkipPrevious: Boolean = false,
     val canSkipNext: Boolean = false,
-    val canSeek: Boolean = false,
-    val shuffleAction: PlaybackState.CustomAction? = null,
-    val isShuffleSupported: Boolean = false,
-    val isShuffleActive: Boolean = false,
-    val repeatAction: PlaybackState.CustomAction? = null,
-    val isRepeatSupported: Boolean = false,
-    val repeatMode: Int = 0 // 0 = off, 1 = all, 2 = one
+    val canSeek: Boolean = false
 )
 
 private fun resolveTransportCapabilities(
@@ -392,53 +387,10 @@ private fun resolveTransportCapabilities(
         val canNext = actions == 0L || (actions and PlaybackState.ACTION_SKIP_TO_NEXT) != 0L
         val canSeek = totalDurationMs > 0L && (actions == 0L || (actions and PlaybackState.ACTION_SEEK_TO) != 0L)
 
-        val customActions = pbState?.customActions.orEmpty()
-        val shuffleCustom = customActions.firstOrNull { action ->
-            action.action.contains("shuffle", ignoreCase = true) ||
-                action.name.toString().contains("shuffle", ignoreCase = true)
-        }
-        val repeatCustom = customActions.firstOrNull { action ->
-            action.action.contains("repeat", ignoreCase = true) ||
-                action.name.toString().contains("repeat", ignoreCase = true)
-        }
-
-        val pbExtras = pbState?.extras
-        val ctrlExtras = controller.extras
-
-        val rawShuffle = pbExtras?.getInt("android.media.session.extra.SHUFFLE_MODE", -1)
-            ?.takeIf { it != -1 }
-            ?: ctrlExtras?.getInt("android.media.session.extra.SHUFFLE_MODE", -1)
-                ?.takeIf { it != -1 }
-
-        val rawRepeat = pbExtras?.getInt("android.media.session.extra.REPEAT_MODE", -1)
-            ?.takeIf { it != -1 }
-            ?: ctrlExtras?.getInt("android.media.session.extra.REPEAT_MODE", -1)
-                ?.takeIf { it != -1 }
-
-        val shuffleActiveFromName = shuffleCustom?.let { act ->
-            val combined = "${act.action} ${act.name}".lowercase()
-            combined.contains("on") || combined.contains("active") || combined.contains("disable") || combined.contains("unshuffle")
-        } ?: false
-
-        val repeatModeFromName = repeatCustom?.let { act ->
-            val combined = "${act.action} ${act.name}".lowercase()
-            when {
-                combined.contains("one") || combined.contains("single") || combined.contains("track") -> 2
-                combined.contains("all") || combined.contains("context") || combined.contains("active") -> 1
-                else -> 0
-            }
-        } ?: 0
-
         TransportCapabilities(
             canSkipPrevious = canPrev,
             canSkipNext = canNext,
-            canSeek = canSeek,
-            shuffleAction = shuffleCustom,
-            isShuffleSupported = shuffleCustom != null,
-            isShuffleActive = if (rawShuffle != null) rawShuffle > 0 else shuffleActiveFromName,
-            repeatAction = repeatCustom,
-            isRepeatSupported = repeatCustom != null,
-            repeatMode = if (rawRepeat != null && rawRepeat > 0) rawRepeat.coerceIn(1, 2) else repeatModeFromName
+            canSeek = canSeek
         )
     } catch (_: Throwable) {
         TransportCapabilities(
@@ -757,27 +709,11 @@ fun NowPlayingScreen(
                             transportCaps = transportCaps,
                             playButtonOuterDp = metrics.playButtonOuterDp,
                             playButtonInnerDp = metrics.playButtonInnerDp,
-                            secondaryControlDp = metrics.secondaryControlDp,
+                            isNarrowWidth = metrics.isNarrowWidth,
                             primaryColor = primaryColor,
                             onPlayPause = { playbackManager.playPause() },
                             onPrevious = { playbackManager.previous() },
-                            onNext = { playbackManager.next() },
-                            onShuffle = {
-                                val action = transportCaps.shuffleAction
-                                if (action != null) {
-                                    try {
-                                        playbackManager.activeController?.transportControls?.sendCustomAction(action, null)
-                                    } catch (_: Throwable) {}
-                                }
-                            },
-                            onRepeat = {
-                                val action = transportCaps.repeatAction
-                                if (action != null) {
-                                    try {
-                                        playbackManager.activeController?.transportControls?.sendCustomAction(action, null)
-                                    } catch (_: Throwable) {}
-                                }
-                            }
+                            onNext = { playbackManager.next() }
                         )
                     }
                 }
@@ -868,7 +804,7 @@ fun NowPlayingScreen(
                             Spacer(modifier = Modifier.height(metrics.sectionSpacingDp.dp))
                         }
 
-                        // 3. Bottom Stack: Live Lyrics Card + Playback Progress Bar + 5-Button Playback Controls
+                        // 3. Bottom Stack: Live Lyrics Card + Playback Progress Bar + Centered Playback Controls
                         Column(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalAlignment = Alignment.CenterHorizontally
@@ -916,27 +852,11 @@ fun NowPlayingScreen(
                                 transportCaps = transportCaps,
                                 playButtonOuterDp = metrics.playButtonOuterDp,
                                 playButtonInnerDp = metrics.playButtonInnerDp,
-                                secondaryControlDp = metrics.secondaryControlDp,
+                                isNarrowWidth = metrics.isNarrowWidth,
                                 primaryColor = primaryColor,
                                 onPlayPause = { playbackManager.playPause() },
                                 onPrevious = { playbackManager.previous() },
-                                onNext = { playbackManager.next() },
-                                onShuffle = {
-                                    val action = transportCaps.shuffleAction
-                                    if (action != null) {
-                                        try {
-                                            playbackManager.activeController?.transportControls?.sendCustomAction(action, null)
-                                        } catch (_: Throwable) {}
-                                    }
-                                },
-                                onRepeat = {
-                                    val action = transportCaps.repeatAction
-                                    if (action != null) {
-                                        try {
-                                            playbackManager.activeController?.transportControls?.sendCustomAction(action, null)
-                                        } catch (_: Throwable) {}
-                                    }
-                                }
+                                onNext = { playbackManager.next() }
                             )
                         }
                     }
@@ -1261,7 +1181,7 @@ private fun NowPlayingLiveLyricsPanel(
                 .fillMaxWidth()
                 .padding(
                     horizontal = 18.dp,
-                    vertical = if (isCompact) 11.dp else 15.dp
+                    vertical = if (isCompact) 9.dp else 11.dp
                 ),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -1320,32 +1240,36 @@ private fun NowPlayingLiveLyricsPanel(
                 }
             }
 
-            Spacer(modifier = Modifier.height(if (isCompact) 8.dp else 12.dp))
+            Spacer(modifier = Modifier.height(if (isCompact) 4.dp else 6.dp))
 
-            // Preceding lyric line (when available during active vocal lines)
-            AnimatedContent(
-                targetState = cardState.prevLine,
-                transitionSpec = {
-                    fadeIn(animationSpec = tween(180, easing = LinearOutSlowInEasing))
-                        .togetherWith(fadeOut(animationSpec = tween(140, easing = FastOutLinearInEasing)))
-                },
-                label = "prev_lyric_transition"
-            ) { prevText ->
-                if (!prevText.isNullOrBlank() && !isCompact) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = prevText,
-                            style = LyricBarTypography.contextualLyricStyle(
-                                fontOption = userPreferences.selectedFont,
-                                fontSize = 12.5.sp,
-                                color = Color.White.copy(alpha = 0.50f)
-                            ),
-                            textAlign = TextAlign.Center,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        Spacer(modifier = Modifier.height(3.dp))
+            // Preceding lyric line (only composed when non-compact so empty states reserve zero space)
+            if (!isCompact) {
+                AnimatedContent(
+                    targetState = cardState.prevLine,
+                    transitionSpec = {
+                        (fadeIn(animationSpec = tween(180, easing = LinearOutSlowInEasing))
+                            .togetherWith(fadeOut(animationSpec = tween(140, easing = FastOutLinearInEasing))))
+                            .using(SizeTransform(clip = false))
+                    },
+                    contentAlignment = Alignment.Center,
+                    label = "prev_lyric_transition"
+                ) { prevText ->
+                    if (!prevText.isNullOrBlank()) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = prevText,
+                                style = LyricBarTypography.contextualLyricStyle(
+                                    fontOption = userPreferences.selectedFont,
+                                    fontSize = 12.5.sp,
+                                    color = Color.White.copy(alpha = 0.50f)
+                                ),
+                                textAlign = TextAlign.Center,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                        }
                     }
                 }
             }
@@ -1354,13 +1278,15 @@ private fun NowPlayingLiveLyricsPanel(
             AnimatedContent(
                 targetState = cardState.primaryLine,
                 transitionSpec = {
-                    (fadeIn(animationSpec = tween(220, easing = LinearOutSlowInEasing)) +
+                    ((fadeIn(animationSpec = tween(220, easing = LinearOutSlowInEasing)) +
                         slideInVertically(animationSpec = tween(220, easing = LinearOutSlowInEasing)) { height -> height / 4 })
                         .togetherWith(
                             fadeOut(animationSpec = tween(160, easing = FastOutLinearInEasing)) +
                                 slideOutVertically(animationSpec = tween(160, easing = FastOutLinearInEasing)) { height -> -height / 4 }
-                        )
+                        ))
+                        .using(SizeTransform(clip = false))
                 },
+                contentAlignment = Alignment.Center,
                 label = "primary_lyric_transition"
             ) { lyricText ->
                 Text(
@@ -1384,14 +1310,16 @@ private fun NowPlayingLiveLyricsPanel(
             AnimatedContent(
                 targetState = cardState.secondaryLine,
                 transitionSpec = {
-                    fadeIn(animationSpec = tween(200, easing = LinearOutSlowInEasing))
-                        .togetherWith(fadeOut(animationSpec = tween(150, easing = FastOutLinearInEasing)))
+                    (fadeIn(animationSpec = tween(200, easing = LinearOutSlowInEasing))
+                        .togetherWith(fadeOut(animationSpec = tween(150, easing = FastOutLinearInEasing))))
+                        .using(SizeTransform(clip = false))
                 },
+                contentAlignment = Alignment.Center,
                 label = "secondary_lyric_transition"
             ) { secText ->
                 if (!secText.isNullOrBlank()) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Spacer(modifier = Modifier.height(5.dp))
+                        Spacer(modifier = Modifier.height(3.dp))
                         Text(
                             text = secText,
                             style = LyricBarTypography.contextualLyricStyle(
@@ -1410,7 +1338,7 @@ private fun NowPlayingLiveLyricsPanel(
 
             // Subtle instrumental waveform indicator matching the reference design
             if (cardState.showInstrumentalWaveform) {
-                Spacer(modifier = Modifier.height(if (isCompact) 8.dp else 12.dp))
+                Spacer(modifier = Modifier.height(if (isCompact) 6.dp else 8.dp))
                 InstrumentalWaveformIndicator(primaryColor = primaryColor)
             }
         }
@@ -1629,63 +1557,23 @@ private fun NowPlayingControlsRow(
     transportCaps: TransportCapabilities,
     playButtonOuterDp: Float,
     playButtonInnerDp: Float,
-    secondaryControlDp: Float,
+    isNarrowWidth: Boolean,
     primaryColor: Color,
     onPlayPause: () -> Unit,
     onPrevious: () -> Unit,
-    onNext: () -> Unit,
-    onShuffle: () -> Unit,
-    onRepeat: () -> Unit
+    onNext: () -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 6.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
+        horizontalArrangement = Arrangement.spacedBy(
+            space = if (isNarrowWidth) 22.dp else 28.dp,
+            alignment = Alignment.CenterHorizontally
+        ),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // 1. Shuffle (Compact translucent circular glass button)
-        Box(
-            modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Surface(
-                onClick = onShuffle,
-                enabled = transportCaps.isShuffleSupported,
-                shape = CircleShape,
-                color = if (transportCaps.isShuffleActive) {
-                    primaryColor.copy(alpha = 0.22f)
-                } else {
-                    Color.White.copy(alpha = 0.08f)
-                },
-                border = BorderStroke(
-                    width = 0.75.dp,
-                    color = if (transportCaps.isShuffleActive) {
-                        primaryColor.copy(alpha = 0.45f)
-                    } else {
-                        Color.White.copy(alpha = 0.14f)
-                    }
-                ),
-                modifier = Modifier
-                    .size(secondaryControlDp.dp)
-                    .testTag("now_playing_shuffle_button")
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = Icons.Default.Shuffle,
-                        contentDescription = "Shuffle",
-                        tint = when {
-                            transportCaps.isShuffleActive -> primaryColor
-                            transportCaps.isShuffleSupported -> Color.White.copy(alpha = 0.88f)
-                            else -> Color.White.copy(alpha = 0.42f)
-                        },
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
-        }
-
-        // 2. Previous
+        // 1. Previous
         IconButton(
             onClick = onPrevious,
             enabled = transportCaps.canSkipPrevious,
@@ -1703,7 +1591,7 @@ private fun NowPlayingControlsRow(
             )
         }
 
-        // 3. Large Central Play/Pause Button with Subtle Outer Halo Ring
+        // 2. Large Central Play/Pause Button with Subtle Outer Halo Ring
         val playScale by animateFloatAsState(
             targetValue = if (isPlaying) 1.0f else 0.97f,
             animationSpec = tween(durationMillis = 180),
@@ -1760,7 +1648,7 @@ private fun NowPlayingControlsRow(
             }
         }
 
-        // 4. Next
+        // 3. Next
         IconButton(
             onClick = onNext,
             enabled = transportCaps.canSkipNext,
@@ -1776,52 +1664,6 @@ private fun NowPlayingControlsRow(
                 ),
                 modifier = Modifier.size(32.dp)
             )
-        }
-
-        // 5. Repeat (Compact translucent circular glass button)
-        Box(
-            modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            val isRepeatActive = transportCaps.repeatMode > 0
-            Surface(
-                onClick = onRepeat,
-                enabled = transportCaps.isRepeatSupported,
-                shape = CircleShape,
-                color = if (isRepeatActive) {
-                    primaryColor.copy(alpha = 0.22f)
-                } else {
-                    Color.White.copy(alpha = 0.08f)
-                },
-                border = BorderStroke(
-                    width = 0.75.dp,
-                    color = if (isRepeatActive) {
-                        primaryColor.copy(alpha = 0.45f)
-                    } else {
-                        Color.White.copy(alpha = 0.14f)
-                    }
-                ),
-                modifier = Modifier
-                    .size(secondaryControlDp.dp)
-                    .testTag("now_playing_repeat_button")
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = if (transportCaps.repeatMode == 2) {
-                            Icons.Default.RepeatOne
-                        } else {
-                            Icons.Default.Repeat
-                        },
-                        contentDescription = "Repeat",
-                        tint = when {
-                            isRepeatActive -> primaryColor
-                            transportCaps.isRepeatSupported -> Color.White.copy(alpha = 0.88f)
-                            else -> Color.White.copy(alpha = 0.42f)
-                        },
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
         }
     }
 }
