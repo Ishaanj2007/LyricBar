@@ -77,7 +77,8 @@ private fun rememberHistoryArtworkBitmap(uriString: String?, key: String): Bitma
 
 @Composable
 fun HistoryScreen(
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    hasBottomNavPill: Boolean = true
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -125,7 +126,7 @@ fun HistoryScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .widthIn(max = 680.dp)
+                    .widthIn(max = if (hasBottomNavPill) 680.dp else 880.dp)
             ) {
                 // Top Header: Title, Track Counter Chip, and Actions
                 Row(
@@ -288,7 +289,7 @@ fun HistoryScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(bottom = 96.dp),
+                            .padding(bottom = if (hasBottomNavPill) 96.dp else 16.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         FrostedCard(
@@ -341,7 +342,7 @@ fun HistoryScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(bottom = 96.dp),
+                            .padding(bottom = if (hasBottomNavPill) 96.dp else 16.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         FrostedCard(
@@ -400,7 +401,7 @@ fun HistoryScreen(
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
-                        contentPadding = PaddingValues(top = 4.dp, bottom = 128.dp)
+                        contentPadding = PaddingValues(top = 4.dp, bottom = if (hasBottomNavPill) 128.dp else 24.dp)
                     ) {
                         groupedHistory.forEach { (group, entries) ->
                             item(key = "header_${group.name}", contentType = "header") {

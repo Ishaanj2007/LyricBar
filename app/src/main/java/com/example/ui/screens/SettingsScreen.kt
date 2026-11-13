@@ -60,7 +60,8 @@ import kotlinx.coroutines.launch
 fun SettingsScreen(
     playbackManager: MediaPlaybackManager,
     userPreferences: UserPreferences,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    hasBottomNavPill: Boolean = true
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -86,71 +87,14 @@ fun SettingsScreen(
         }
     }
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.06f))
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.statusBars)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 12.dp)
-                .padding(bottom = 120.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .widthIn(max = 680.dp)
-            ) {
-                // Header with title, subtitle, and Expand/Collapse All
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 8.dp, bottom = 16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text(
-                            text = "Settings",
-                            style = MaterialTheme.typography.headlineMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = "Preferences, appearance & overlays",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+    val configuration = LocalConfiguration.current
+    val screenWidthDp = configuration.screenWidthDp
+    val screenHeightDp = configuration.screenHeightDp
+    val density = LocalDensity.current.density
 
-                    TextButton(
-                        onClick = {
-                            expandedSections = if (expandedSections.size == allSectionKeys.size) {
-                                emptySet()
-                            } else {
-                                allSectionKeys.toSet()
-                            }
-                        }
-                    ) {
-                        Text(
-                            text = if (expandedSections.size == allSectionKeys.size) "Collapse All" else "Expand All",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                }
-
-                val configuration = LocalConfiguration.current
-                val screenWidthDp = configuration.screenWidthDp
-                val screenHeightDp = configuration.screenHeightDp
-                val density = LocalDensity.current.density
-
-                // SECTION 1: FLOATING OVERLAY & TIMELINE
-                SettingsAccordionCard(
+    val sectionOverlay: @Composable () -> Unit = {
+        // SECTION 1: FLOATING OVERLAY & TIMELINE
+        SettingsAccordionCard(
                     title = "Floating Overlay & Timeline",
                     subtitle = if (livePreferences.overlayEnabled) "Active • Pure white lyrics ON" else "Off • Floating overlay disabled",
                     icon = Icons.Default.Layers,
@@ -840,9 +784,9 @@ fun SettingsScreen(
                 }
             }
         }
+    }
 
-        Spacer(modifier = Modifier.height(14.dp))
-
+    val sectionAnimation: @Composable () -> Unit = {
         // SECTION 2: LYRICS ANIMATION STYLE
         SettingsAccordionCard(
             title = "Lyrics Animation Style",
@@ -1474,9 +1418,9 @@ fun SettingsScreen(
                 )
             }
         }
+    }
 
-        Spacer(modifier = Modifier.height(14.dp))
-
+    val sectionSizeAlign: @Composable () -> Unit = {
         // SECTION 3: OVERLAY SIZE & ALIGNMENT
         SettingsAccordionCard(
             title = "Overlay Size & Alignment",
@@ -1653,9 +1597,9 @@ fun SettingsScreen(
                 }
             }
         }
+    }
 
-        Spacer(modifier = Modifier.height(14.dp))
-
+    val sectionPosition: @Composable () -> Unit = {
         // SECTION 4: OVERLAY POSITION (RESPONSIVE 2-ROW CONTROLLER WITH SLIDERS AND MICRO-NUDGES)
         SettingsAccordionCard(
             title = "Overlay Position",
@@ -1830,9 +1774,9 @@ fun SettingsScreen(
                 }
             }
         }
+    }
 
-        Spacer(modifier = Modifier.height(14.dp))
-
+    val sectionTheme: @Composable () -> Unit = {
         // SECTION 5: THEME & MATERIAL STYLE
         SettingsAccordionCard(
             title = "Theme & Material Style",
@@ -2012,9 +1956,9 @@ fun SettingsScreen(
                 }
             }
         }
+    }
 
-        Spacer(modifier = Modifier.height(14.dp))
-
+    val sectionTypography: @Composable () -> Unit = {
         // SECTION 6: TYPOGRAPHY
         SettingsAccordionCard(
             title = "Typography",
@@ -2067,14 +2011,20 @@ fun SettingsScreen(
                                 }
                             },
                             modifier = Modifier.weight(1f),
-                            contentPadding = PaddingValues(horizontal = 2.dp, vertical = 6.dp),
+                            contentPadding = PaddingValues(horizontal = 0.dp, vertical = 6.dp),
                             colors = ButtonDefaults.filledTonalButtonColors(
                                 containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
                                 contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
                             ),
                             shape = RoundedCornerShape(8.dp)
                         ) {
-                            Text(text = "${spVal}sp", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                text = "${spVal}sp",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Clip
+                            )
                         }
                     }
                 }
@@ -2151,7 +2101,13 @@ fun SettingsScreen(
                             ),
                             shape = RoundedCornerShape(8.dp)
                         ) {
-                            Text(text = label, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                text = label,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
                     }
                 }
@@ -2299,9 +2255,9 @@ fun SettingsScreen(
                 }
             }
         }
+    }
 
-        Spacer(modifier = Modifier.height(14.dp))
-
+    val sectionLyricsProvider: @Composable () -> Unit = {
         // SECTION 7: LYRICS PROVIDER
         SettingsAccordionCard(
             title = "Lyrics Provider",
@@ -2388,9 +2344,9 @@ fun SettingsScreen(
                 }
             }
         }
+    }
 
-        Spacer(modifier = Modifier.height(14.dp))
-
+    val sectionData: @Composable () -> Unit = {
         // SECTION 8: PLAYBACK & DATA MANAGEMENT
         SettingsAccordionCard(
             title = "Automation & Cache",
@@ -2473,11 +2429,18 @@ fun SettingsScreen(
                             }
                         },
                         modifier = Modifier.weight(1f).testTag("clear_cache_button"),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
                         shape = RoundedCornerShape(10.dp)
                     ) {
                         Icon(Icons.Default.DeleteOutline, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Clear Cache", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
+                        Text(
+                            "Clear Cache",
+                            color = MaterialTheme.colorScheme.primary,
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
 
                     OutlinedButton(
@@ -2487,11 +2450,18 @@ fun SettingsScreen(
                             }
                         },
                         modifier = Modifier.weight(1f).testTag("clear_history_button"),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
                         shape = RoundedCornerShape(10.dp)
                     ) {
                         Icon(Icons.Default.History, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Clear History", color = MaterialTheme.colorScheme.secondary, fontSize = 12.sp)
+                        Text(
+                            "Clear History",
+                            color = MaterialTheme.colorScheme.secondary,
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                 }
 
@@ -2505,10 +2475,10 @@ fun SettingsScreen(
                 }
             }
         }
+    }
 
-        Spacer(modifier = Modifier.height(14.dp))
-
-        // SECTION 8: ABOUT & DEVELOPER
+    val sectionAbout: @Composable () -> Unit = {
+        // SECTION 9: ABOUT & DEVELOPER
         SettingsAccordionCard(
             title = "About & Developer",
             subtitle = "Version ${com.example.BuildConfig.VERSION_NAME} • By ${DeveloperConfig.DEVELOPER_NAME}",
@@ -2601,8 +2571,120 @@ fun SettingsScreen(
                 }
             }
         }
+    }
 
-                Spacer(modifier = Modifier.height(32.dp))
+    BoxWithConstraints(
+        modifier = modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.06f))
+    ) {
+        val isTwoColumn = maxWidth >= 660.dp
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .then(if (hasBottomNavPill) Modifier.windowInsetsPadding(WindowInsets.statusBars) else Modifier)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = if (isTwoColumn) 24.dp else 20.dp, vertical = 12.dp)
+                .padding(bottom = if (hasBottomNavPill) 120.dp else 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = if (isTwoColumn) 1080.dp else 640.dp)
+            ) {
+                // Header with title, subtitle, and Expand/Collapse All
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(
+                            top = if (isTwoColumn) 2.dp else 8.dp,
+                            bottom = if (isTwoColumn) 14.dp else 16.dp
+                        ),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Settings",
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Preferences, appearance & overlays",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    TextButton(
+                        onClick = {
+                            expandedSections = if (expandedSections.size == allSectionKeys.size) {
+                                emptySet()
+                            } else {
+                                allSectionKeys.toSet()
+                            }
+                        }
+                    ) {
+                        Text(
+                            text = if (expandedSections.size == allSectionKeys.size) "Collapse All" else "Expand All",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+
+                if (isTwoColumn) {
+                    // Two-column landscape/tablet composition (single shared vertical scroll)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            sectionOverlay()
+                            sectionAnimation()
+                            sectionSizeAlign()
+                            sectionPosition()
+                        }
+
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            sectionLyricsProvider()
+                            sectionTheme()
+                            sectionTypography()
+                            sectionData()
+                            sectionAbout()
+                        }
+                    }
+                } else {
+                    // Single-column composition (Portrait & compact landscape < 660dp)
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        sectionOverlay()
+                        sectionAnimation()
+                        sectionSizeAlign()
+                        sectionPosition()
+                        sectionTheme()
+                        sectionTypography()
+                        sectionLyricsProvider()
+                        sectionData()
+                        sectionAbout()
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(if (hasBottomNavPill) 32.dp else 8.dp))
             }
         }
 
@@ -3025,12 +3107,16 @@ private fun ThemePresetCard(
                 text = title,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = cardAlpha)
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = cardAlpha),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
             Text(
                 text = subtitle,
                 fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = cardAlpha)
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = cardAlpha),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }

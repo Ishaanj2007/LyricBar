@@ -111,7 +111,11 @@ internal data class NowPlayingResponsiveMetrics(
     val playButtonOuterDp: Float,
     val playButtonInnerDp: Float,
     val secondaryControlDp: Float,
-    val sectionSpacingDp: Float
+    val sectionSpacingDp: Float,
+    val badgeToLyricsPaddingDp: Float = 6f,
+    val artworkToInfoPaddingDp: Float = 10f,
+    val lyricsToProgressPaddingDp: Float = 12f,
+    val progressToControlsPaddingDp: Float = 12f
 )
 
 /**
@@ -123,15 +127,18 @@ internal fun computeResponsiveNowPlayingMetrics(
     availableHeightDp: Float,
     fontScale: Float
 ): NowPlayingResponsiveMetrics {
+    val rawIsLandscape = availableWidthDp > availableHeightDp &&
+        (availableHeightDp < 540f || availableWidthDp >= 640f)
     val safeW = availableWidthDp.coerceAtLeast(280f)
-    val safeH = availableHeightDp.coerceAtLeast(360f)
+    val safeH = availableHeightDp.coerceAtLeast(if (rawIsLandscape) 260f else 360f)
     val safeFontScale = fontScale.coerceIn(0.85f, 2.0f)
 
-    val isLandscape = safeW > safeH && safeH < 540f
+    val isLandscape = rawIsLandscape
     val isNarrowWidth = safeW < 350f
-    val isShortHeight = !isLandscape && (safeH < 680f || (safeH < 740f && safeFontScale >= 1.3f))
+    val isShortHeight = !isLandscape && (safeH < 660f || (safeH < 720f && safeFontScale >= 1.3f))
 
     val horizontalPaddingDp = when {
+        isLandscape -> if (safeW >= 900f) 28f else 18f
         safeW < 340f -> 14f
         safeW < 380f -> 18f
         else -> 22f
@@ -140,49 +147,89 @@ internal fun computeResponsiveNowPlayingMetrics(
     val contentWidth = (safeW - horizontalPaddingDp * 2f).coerceAtMost(500f)
 
     // Width-based artwork proportion:
-    // Compact devices: ~65-72% of available content width
-    // Normal devices: ~68-75% of available content width
+    // Compact devices: ~66-70% of available content width
+    // Normal devices: ~74-75% of available content width
     // Constrained to a reasonable maximum dimension so it never dominates large screens.
     val widthFraction = when {
         isNarrowWidth -> 0.66f
         safeW <= 375f -> 0.70f
-        safeW <= 430f -> 0.74f
+        safeW <= 430f -> 0.75f
         else -> 0.72f
     }
-    val widthBasedArt = (contentWidth * widthFraction).coerceIn(120f, 300f)
+    val widthBasedArt = if (isLandscape) {
+        ((safeW - horizontalPaddingDp * 2f) * 0.42f - 24f).coerceIn(96f, 280f)
+    } else {
+        (contentWidth * widthFraction).coerceIn(120f, 300f)
+    }
 
-    // Reserve vertical space for Header (~42dp), Song Info (~76dp), Live Lyrics Card (~128dp),
-    // Seek Bar (~44dp), Playback Controls (~76dp), Bottom Nav clearance (~86dp), and spacings.
-    val nonArtworkVerticalEstimate = (448f + (safeFontScale - 1.0f).coerceAtLeast(0f) * 95f)
+    // Reserve vertical space for Header (~44dp), Song Info (~80dp), Live Lyrics Card (~112dp),
+    // Seek Bar (~44dp), Playback Controls (~74dp), and core semantic spacings (~50dp).
+    val nonArtworkVerticalEstimate = (404f + (safeFontScale - 1.0f).coerceAtLeast(0f) * 95f)
     val heightBasedArt = if (isLandscape) {
-        (safeH - 150f).coerceIn(120f, 240f)
+        if (safeH >= 540f) {
+            (safeH * 0.34f).coerceIn(180f, 280f)
+        } else {
+            ((safeH - 180f) * 0.92f).coerceIn(96f, 220f)
+        }
     } else {
         (safeH - nonArtworkVerticalEstimate).coerceIn(128f, 300f)
     }
 
     val artworkSizeDp = minOf(widthBasedArt, heightBasedArt)
-    val requiresScrollFallback = !isLandscape && (safeH < 620f || (safeH - nonArtworkVerticalEstimate) < 135f)
+    val requiresScrollFallback = !isLandscape && (safeH < 610f || (safeH - nonArtworkVerticalEstimate) < 136f)
 
-    val headerTitleSp = if (isNarrowWidth) 18f else 20f
+    val headerTitleSp = when {
+        isLandscape && safeH < 360f -> 17f
+        isLandscape -> 19f
+        isNarrowWidth -> 18f
+        else -> 20f
+    }
     val titleFontSizeSp = when {
+        isLandscape && safeH < 360f -> 17.5f
+        isLandscape && safeH < 500f -> 19.5f
         isShortHeight || isNarrowWidth -> 20f
         else -> 23f
     }
-    val artistFontSizeSp = if (isShortHeight || isNarrowWidth) 13.5f else 15f
+    val artistFontSizeSp = when {
+        isLandscape && safeH < 360f -> 13f
+        isLandscape && safeH < 500f -> 14f
+        isShortHeight || isNarrowWidth -> 13.5f
+        else -> 15f
+    }
     val activeLyricFontSizeSp = when {
+        isLandscape && safeH < 380f -> 17f
+        isLandscape -> 19f
         isShortHeight -> 17f
         isNarrowWidth -> 18f
         else -> 19.5f
     }
 
-    val playButtonOuterDp = if (isShortHeight || isNarrowWidth) 70f else 78f
-    val playButtonInnerDp = if (isShortHeight || isNarrowWidth) 58f else 66f
-    val secondaryControlDp = if (isShortHeight || isNarrowWidth) 40f else 44f
-    val sectionSpacingDp = when {
-        isShortHeight -> 8f
-        safeH < 780f -> 11f
-        else -> 14f
+    val playButtonOuterDp = when {
+        isLandscape && safeH < 390f -> 62f
+        isLandscape && safeH < 500f -> 68f
+        isShortHeight || isNarrowWidth -> 70f
+        else -> 78f
     }
+    val playButtonInnerDp = when {
+        isLandscape && safeH < 390f -> 52f
+        isLandscape && safeH < 500f -> 58f
+        isShortHeight || isNarrowWidth -> 58f
+        else -> 66f
+    }
+    val secondaryControlDp = if ((isLandscape && safeH < 390f) || isShortHeight || isNarrowWidth) 40f else 44f
+    val sectionSpacingDp = when {
+        isLandscape && safeH < 380f -> 8f
+        isLandscape -> 12f
+        isShortHeight -> 8f
+        safeH < 780f -> 10f
+        else -> 12f
+    }
+
+    // Dynamic paddings proportional to available viewport height (safeH)
+    val artworkToInfoPaddingDp = (safeH * 0.015f).coerceIn(8f, 13f)
+    val badgeToLyricsPaddingDp = (safeH * 0.014f).coerceIn(7f, 12f)
+    val lyricsToProgressPaddingDp = (safeH * 0.014f).coerceIn(8f, 12f)
+    val progressToControlsPaddingDp = (safeH * 0.016f).coerceIn(9f, 14f)
 
     return NowPlayingResponsiveMetrics(
         isLandscape = isLandscape,
@@ -198,7 +245,11 @@ internal fun computeResponsiveNowPlayingMetrics(
         playButtonOuterDp = playButtonOuterDp,
         playButtonInnerDp = playButtonInnerDp,
         secondaryControlDp = secondaryControlDp,
-        sectionSpacingDp = sectionSpacingDp
+        sectionSpacingDp = sectionSpacingDp,
+        badgeToLyricsPaddingDp = badgeToLyricsPaddingDp,
+        artworkToInfoPaddingDp = artworkToInfoPaddingDp,
+        lyricsToProgressPaddingDp = lyricsToProgressPaddingDp,
+        progressToControlsPaddingDp = progressToControlsPaddingDp
     )
 }
 
@@ -406,7 +457,8 @@ fun NowPlayingScreen(
     playbackManager: MediaPlaybackManager,
     userPreferences: UserPreferences,
     onNavigateToLyrics: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    hasBottomNavPill: Boolean = true
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -574,37 +626,232 @@ fun NowPlayingScreen(
     val density = LocalDensity.current
     val activeHazeState = parentHazeState ?: fallbackHazeState
 
+    val bottomClearance = if (hasBottomNavPill) {
+        if (density.fontScale >= 1.25f) 86.dp else 82.dp
+    } else {
+        4.dp
+    }
+
     val content: @Composable () -> Unit = {
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.statusBars)
-                .windowInsetsPadding(WindowInsets.navigationBars)
-                .padding(bottom = 80.dp) // Reserved clearance for floating bottom navigation pill
+                .then(
+                    if (hasBottomNavPill) {
+                        Modifier
+                            .windowInsetsPadding(WindowInsets.statusBars)
+                            .windowInsetsPadding(WindowInsets.navigationBars)
+                    } else {
+                        Modifier
+                    }
+                )
+                .padding(bottom = bottomClearance),
+            contentAlignment = Alignment.TopCenter
         ) {
-            val metrics = remember(maxWidth, maxHeight, density.fontScale) {
+            val availableWidth = maxWidth
+            val availableHeight = maxHeight
+            val metrics = remember(availableWidth, availableHeight, density.fontScale) {
                 computeResponsiveNowPlayingMetrics(
-                    availableWidthDp = maxWidth.value,
-                    availableHeightDp = maxHeight.value,
+                    availableWidthDp = availableWidth.value,
+                    availableHeightDp = availableHeight.value,
                     fontScale = density.fontScale
                 )
             }
 
             if (metrics.isLandscape) {
-                // Balanced Two-Column Arrangement for Landscape
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = metrics.horizontalPaddingDp.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(20.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                // Intentional Two-Column Landscape Composition:
+                // Left = Header (branding + HUD toggle) + Album Artwork + Song Title, Artist & Provider Badge
+                // Right = Live Lyrics Card + Playback Progress Bar + Previous / Play-Pause / Next Controls
+                val toggleOverlayAction: (Boolean) -> Unit = { enabled ->
+                    coroutineScope.launch {
+                        if (enabled) {
+                            if (Settings.canDrawOverlays(context)) {
+                                playbackManager.preferencesRepository.setOverlayEnabled(true)
+                                OverlayService.start(context)
+                            } else {
+                                pendingOverlayEnable = true
+                                val intent = Intent(
+                                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                    Uri.parse("package:${context.packageName}")
+                                )
+                                context.startActivity(intent)
+                            }
+                        } else {
+                            pendingOverlayEnable = false
+                            playbackManager.preferencesRepository.setOverlayEnabled(false)
+                            OverlayService.stop(context)
+                        }
+                    }
+                }
+                val isUltraCompactLandscape = availableHeight < 305.dp || (density.fontScale >= 1.35f && availableHeight < 350.dp)
+                val isShortLandscape = availableHeight < 380.dp
+                val isCompactBadgeLandscape = availableHeight < 460.dp
+                val isTightArtworkGap = availableHeight < 420.dp
+                val isWideLandscape = availableWidth >= 840.dp
+                val landscapeVerticalGap = if (isShortLandscape) 8.dp else 14.dp
+
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
                 ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .widthIn(max = 1040.dp)
+                            .padding(
+                                horizontal = metrics.horizontalPaddingDp.dp,
+                                vertical = if (isShortLandscape) 4.dp else 10.dp
+                            ),
+                        horizontalArrangement = Arrangement.spacedBy(if (isWideLandscape) 28.dp else 18.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Left Column: Header pinned cleanly at top, Artwork + Track Info centered in remaining space
+                        Column(
+                            modifier = Modifier
+                                .weight(0.44f)
+                                .fillMaxHeight(),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            NowPlayingTopHeader(
+                                overlayEnabled = userPreferences.overlayEnabled,
+                                headerTitleSp = metrics.headerTitleSp,
+                                primaryColor = primaryColor,
+                                onToggleOverlay = toggleOverlayAction
+                            )
+
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth()
+                                    .verticalScroll(rememberScrollState()),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                if (isUltraCompactLandscape) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        NowPlayingArtworkHero(
+                                            artworkSizeDp = minOf(metrics.artworkSizeDp, 100f),
+                                            track = track,
+                                            artworkImageBitmap = artworkImageBitmap,
+                                            artworkGlowBitmap = artworkGlowBitmap,
+                                            hasSession = hasSession,
+                                            primaryColor = primaryColor
+                                        )
+                                        NowPlayingSongInfoSection(
+                                            track = track,
+                                            sourceBadgeText = sourceBadgeText,
+                                            titleFontSizeSp = metrics.titleFontSizeSp,
+                                            artistFontSizeSp = metrics.artistFontSizeSp,
+                                            primaryColor = primaryColor,
+                                            horizontalAlignment = Alignment.Start,
+                                            compactBadge = true,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                } else {
+                                    NowPlayingArtworkHero(
+                                        artworkSizeDp = metrics.artworkSizeDp,
+                                        track = track,
+                                        artworkImageBitmap = artworkImageBitmap,
+                                        artworkGlowBitmap = artworkGlowBitmap,
+                                        hasSession = hasSession,
+                                        primaryColor = primaryColor
+                                    )
+
+                                    Spacer(modifier = Modifier.height(if (isTightArtworkGap) 8.dp else 12.dp))
+
+                                    NowPlayingSongInfoSection(
+                                        track = track,
+                                        sourceBadgeText = sourceBadgeText,
+                                        titleFontSizeSp = metrics.titleFontSizeSp,
+                                        artistFontSizeSp = metrics.artistFontSizeSp,
+                                        primaryColor = primaryColor,
+                                        compactBadge = isCompactBadgeLandscape
+                                    )
+                                }
+                            }
+                        }
+
+                        // Right Column: Live Lyrics Card -> Progress Bar -> Playback Controls
+                        Box(
+                            modifier = Modifier
+                                .weight(0.56f)
+                                .fillMaxHeight(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .widthIn(max = 520.dp)
+                                    .verticalScroll(rememberScrollState()),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(landscapeVerticalGap)
+                            ) {
+                                NowPlayingLiveLyricsPanel(
+                                    cardState = lyricsCardState,
+                                    userPreferences = userPreferences,
+                                    activeLyricFontSizeSp = metrics.activeLyricFontSizeSp,
+                                    isCompact = isCompactBadgeLandscape,
+                                    primaryColor = primaryColor,
+                                    hazeState = activeHazeState,
+                                    onNavigateToLyrics = onNavigateToLyrics
+                                )
+
+                                NowPlayingProgressSection(
+                                    currentPlaybackPosMs = currentPlaybackPosMs,
+                                    totalDurationMs = totalDurationMs,
+                                    hasTrackOrSession = hasSession || track != null,
+                                    canSeek = transportCaps.canSeek,
+                                    isDraggingSeek = isDraggingSeek,
+                                    dragSeekFraction = dragSeekFraction,
+                                    onDragChange = { fraction ->
+                                        isDraggingSeek = true
+                                        dragSeekFraction = fraction
+                                    },
+                                    onDragFinished = {
+                                        if (totalDurationMs > 0L) {
+                                            val targetMs = (dragSeekFraction * totalDurationMs).toLong()
+                                            playbackManager.seekTo(targetMs)
+                                        }
+                                        isDraggingSeek = false
+                                    },
+                                    primaryColor = primaryColor,
+                                    hazeState = activeHazeState
+                                )
+
+                                NowPlayingControlsRow(
+                                    hasSession = hasSession,
+                                    hasTrack = track != null,
+                                    isPlaying = isPlaying,
+                                    transportCaps = transportCaps,
+                                    playButtonOuterDp = metrics.playButtonOuterDp,
+                                    playButtonInnerDp = metrics.playButtonInnerDp,
+                                    isNarrowWidth = metrics.isNarrowWidth,
+                                    primaryColor = primaryColor,
+                                    onPlayPause = { playbackManager.playPause() },
+                                    onPrevious = { playbackManager.previous() },
+                                    onNext = { playbackManager.next() }
+                                )
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Portrait / Standard / Foldable Responsive Hierarchy
+                if (metrics.requiresScrollFallback) {
                     Column(
                         modifier = Modifier
-                            .weight(0.45f)
-                            .fillMaxHeight(),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.SpaceBetween
+                            .widthIn(max = 500.dp)
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState())
+                            .padding(horizontal = metrics.horizontalPaddingDp.dp, vertical = 6.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         NowPlayingTopHeader(
                             overlayEnabled = userPreferences.overlayEnabled,
@@ -633,29 +880,19 @@ fun NowPlayingScreen(
                             }
                         )
 
-                        Box(
-                            modifier = Modifier.weight(1f),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            NowPlayingArtworkHero(
-                                artworkSizeDp = metrics.artworkSizeDp,
-                                track = track,
-                                artworkImageBitmap = artworkImageBitmap,
-                                artworkGlowBitmap = artworkGlowBitmap,
-                                hasSession = hasSession,
-                                primaryColor = primaryColor
-                            )
-                        }
-                    }
+                        Spacer(modifier = Modifier.height(metrics.sectionSpacingDp.dp))
 
-                    Column(
-                        modifier = Modifier
-                            .weight(0.55f)
-                            .fillMaxHeight()
-                            .verticalScroll(rememberScrollState()),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
+                        NowPlayingArtworkHero(
+                            artworkSizeDp = metrics.artworkSizeDp,
+                            track = track,
+                            artworkImageBitmap = artworkImageBitmap,
+                            artworkGlowBitmap = artworkGlowBitmap,
+                            hasSession = hasSession,
+                            primaryColor = primaryColor
+                        )
+
+                        Spacer(modifier = Modifier.height(metrics.artworkToInfoPaddingDp.dp))
+
                         NowPlayingSongInfoSection(
                             track = track,
                             sourceBadgeText = sourceBadgeText,
@@ -664,7 +901,7 @@ fun NowPlayingScreen(
                             primaryColor = primaryColor
                         )
 
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(metrics.badgeToLyricsPaddingDp.dp))
 
                         NowPlayingLiveLyricsPanel(
                             cardState = lyricsCardState,
@@ -676,7 +913,7 @@ fun NowPlayingScreen(
                             onNavigateToLyrics = onNavigateToLyrics
                         )
 
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(metrics.lyricsToProgressPaddingDp.dp))
 
                         NowPlayingProgressSection(
                             currentPlaybackPosMs = currentPlaybackPosMs,
@@ -700,7 +937,7 @@ fun NowPlayingScreen(
                             hazeState = activeHazeState
                         )
 
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(metrics.progressToControlsPaddingDp.dp))
 
                         NowPlayingControlsRow(
                             hasSession = hasSession,
@@ -715,33 +952,19 @@ fun NowPlayingScreen(
                             onPrevious = { playbackManager.previous() },
                             onNext = { playbackManager.next() }
                         )
-                    }
-                }
-            } else {
-                // Portrait / Standard / Foldable Responsive Hierarchy
-                val scrollMod = if (metrics.requiresScrollFallback) {
-                    Modifier.verticalScroll(rememberScrollState())
-                } else {
-                    Modifier
-                }
 
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .then(scrollMod)
-                        .padding(horizontal = metrics.horizontalPaddingDp.dp, vertical = 6.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                } else {
+                    // Balanced Portrait Composition:
+                    // Artwork & metadata stay tightly associated; lyrics, progress & controls stay visually grouped;
+                    // outer cushions & minor badge-to-lyrics flex absorb surplus viewport height evenly.
                     Column(
                         modifier = Modifier
+                            .widthIn(max = 500.dp)
                             .fillMaxSize()
-                            .widthIn(max = 500.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = if (metrics.requiresScrollFallback) {
-                            Arrangement.Top
-                        } else {
-                            Arrangement.SpaceBetween
-                        }
+                            .padding(horizontal = metrics.horizontalPaddingDp.dp, vertical = 6.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         // 1. Top Header: Branding + HUD Toggle
                         NowPlayingTopHeader(
@@ -771,94 +994,88 @@ fun NowPlayingScreen(
                             }
                         )
 
-                        if (metrics.requiresScrollFallback) {
-                            Spacer(modifier = Modifier.height(metrics.sectionSpacingDp.dp))
-                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Spacer(modifier = Modifier.weight(0.45f))
 
-                        // 2. Centered Album Artwork + Song Information + Source Badge
-                        Column(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            NowPlayingArtworkHero(
-                                artworkSizeDp = metrics.artworkSizeDp,
-                                track = track,
-                                artworkImageBitmap = artworkImageBitmap,
-                                artworkGlowBitmap = artworkGlowBitmap,
-                                hasSession = hasSession,
-                                primaryColor = primaryColor
-                            )
+                        // 2. Album Artwork Hero (intrinsic square size, not isolated in an oversized Box)
+                        NowPlayingArtworkHero(
+                            artworkSizeDp = metrics.artworkSizeDp,
+                            track = track,
+                            artworkImageBitmap = artworkImageBitmap,
+                            artworkGlowBitmap = artworkGlowBitmap,
+                            hasSession = hasSession,
+                            primaryColor = primaryColor
+                        )
 
-                            Spacer(modifier = Modifier.height((metrics.sectionSpacingDp + 4f).dp))
+                        Spacer(modifier = Modifier.height(metrics.artworkToInfoPaddingDp.dp))
 
-                            NowPlayingSongInfoSection(
-                                track = track,
-                                sourceBadgeText = sourceBadgeText,
-                                titleFontSizeSp = metrics.titleFontSizeSp,
-                                artistFontSizeSp = metrics.artistFontSizeSp,
-                                primaryColor = primaryColor
-                            )
-                        }
+                        // 3 & 4. Song Title, Artist & Lyrics Provider Badge
+                        NowPlayingSongInfoSection(
+                            track = track,
+                            sourceBadgeText = sourceBadgeText,
+                            titleFontSizeSp = metrics.titleFontSizeSp,
+                            artistFontSizeSp = metrics.artistFontSizeSp,
+                            primaryColor = primaryColor
+                        )
 
-                        if (metrics.requiresScrollFallback) {
-                            Spacer(modifier = Modifier.height(metrics.sectionSpacingDp.dp))
-                        }
+                        Spacer(modifier = Modifier.height(metrics.badgeToLyricsPaddingDp.dp))
+                        Spacer(modifier = Modifier.weight(0.25f))
 
-                        // 3. Bottom Stack: Live Lyrics Card + Playback Progress Bar + Centered Playback Controls
-                        Column(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            NowPlayingLiveLyricsPanel(
-                                cardState = lyricsCardState,
-                                userPreferences = userPreferences,
-                                activeLyricFontSizeSp = metrics.activeLyricFontSizeSp,
-                                isCompact = metrics.isShortHeight,
-                                primaryColor = primaryColor,
-                                hazeState = activeHazeState,
-                                onNavigateToLyrics = onNavigateToLyrics
-                            )
+                        // 5. Live Lyrics Card
+                        NowPlayingLiveLyricsPanel(
+                            cardState = lyricsCardState,
+                            userPreferences = userPreferences,
+                            activeLyricFontSizeSp = metrics.activeLyricFontSizeSp,
+                            isCompact = metrics.isShortHeight,
+                            primaryColor = primaryColor,
+                            hazeState = activeHazeState,
+                            onNavigateToLyrics = onNavigateToLyrics
+                        )
 
-                            Spacer(modifier = Modifier.height(metrics.sectionSpacingDp.dp))
+                        Spacer(modifier = Modifier.height(metrics.lyricsToProgressPaddingDp.dp))
 
-                            NowPlayingProgressSection(
-                                currentPlaybackPosMs = currentPlaybackPosMs,
-                                totalDurationMs = totalDurationMs,
-                                hasTrackOrSession = hasSession || track != null,
-                                canSeek = transportCaps.canSeek,
-                                isDraggingSeek = isDraggingSeek,
-                                dragSeekFraction = dragSeekFraction,
-                                onDragChange = { fraction ->
-                                    isDraggingSeek = true
-                                    dragSeekFraction = fraction
-                                },
-                                onDragFinished = {
-                                    if (totalDurationMs > 0L) {
-                                        val targetMs = (dragSeekFraction * totalDurationMs).toLong()
-                                        playbackManager.seekTo(targetMs)
-                                    }
-                                    isDraggingSeek = false
-                                },
-                                primaryColor = primaryColor,
-                                hazeState = activeHazeState
-                            )
+                        // 6. Playback Progress Bar & Timestamps
+                        NowPlayingProgressSection(
+                            currentPlaybackPosMs = currentPlaybackPosMs,
+                            totalDurationMs = totalDurationMs,
+                            hasTrackOrSession = hasSession || track != null,
+                            canSeek = transportCaps.canSeek,
+                            isDraggingSeek = isDraggingSeek,
+                            dragSeekFraction = dragSeekFraction,
+                            onDragChange = { fraction ->
+                                isDraggingSeek = true
+                                dragSeekFraction = fraction
+                            },
+                            onDragFinished = {
+                                if (totalDurationMs > 0L) {
+                                    val targetMs = (dragSeekFraction * totalDurationMs).toLong()
+                                    playbackManager.seekTo(targetMs)
+                                }
+                                isDraggingSeek = false
+                            },
+                            primaryColor = primaryColor,
+                            hazeState = activeHazeState
+                        )
 
-                            Spacer(modifier = Modifier.height(metrics.sectionSpacingDp.dp))
+                        Spacer(modifier = Modifier.height(metrics.progressToControlsPaddingDp.dp))
 
-                            NowPlayingControlsRow(
-                                hasSession = hasSession,
-                                hasTrack = track != null,
-                                isPlaying = isPlaying,
-                                transportCaps = transportCaps,
-                                playButtonOuterDp = metrics.playButtonOuterDp,
-                                playButtonInnerDp = metrics.playButtonInnerDp,
-                                isNarrowWidth = metrics.isNarrowWidth,
-                                primaryColor = primaryColor,
-                                onPlayPause = { playbackManager.playPause() },
-                                onPrevious = { playbackManager.previous() },
-                                onNext = { playbackManager.next() }
-                            )
-                        }
+                        // 7. Previous, Play/Pause & Next Controls
+                        NowPlayingControlsRow(
+                            hasSession = hasSession,
+                            hasTrack = track != null,
+                            isPlaying = isPlaying,
+                            transportCaps = transportCaps,
+                            playButtonOuterDp = metrics.playButtonOuterDp,
+                            playButtonInnerDp = metrics.playButtonInnerDp,
+                            isNarrowWidth = metrics.isNarrowWidth,
+                            primaryColor = primaryColor,
+                            onPlayPause = { playbackManager.playPause() },
+                            onPrevious = { playbackManager.previous() },
+                            onNext = { playbackManager.next() }
+                        )
+
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.weight(0.65f))
                     }
                 }
             }
@@ -1078,20 +1295,24 @@ private fun NowPlayingSongInfoSection(
     sourceBadgeText: String?,
     titleFontSizeSp: Float,
     artistFontSizeSp: Float,
-    primaryColor: Color
+    primaryColor: Color,
+    modifier: Modifier = Modifier,
+    horizontalAlignment: Alignment.Horizontal = Alignment.CenterHorizontally,
+    compactBadge: Boolean = false
 ) {
+    val textAlign = if (horizontalAlignment == Alignment.Start) TextAlign.Start else TextAlign.Center
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .padding(horizontal = if (horizontalAlignment == Alignment.Start) 0.dp else 8.dp),
+        horizontalAlignment = horizontalAlignment
     ) {
         Text(
             text = track?.title ?: "No Music Playing",
             fontSize = titleFontSizeSp.sp,
             fontWeight = FontWeight.Bold,
             color = Color.White,
-            textAlign = TextAlign.Center,
+            textAlign = textAlign,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier
@@ -1106,7 +1327,7 @@ private fun NowPlayingSongInfoSection(
             fontSize = artistFontSizeSp.sp,
             fontWeight = FontWeight.Medium,
             color = Color.White.copy(alpha = 0.76f),
-            textAlign = TextAlign.Center,
+            textAlign = textAlign,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier
@@ -1115,7 +1336,7 @@ private fun NowPlayingSongInfoSection(
         )
 
         if (!sourceBadgeText.isNullOrBlank()) {
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(if (compactBadge) 6.dp else 8.dp))
             Surface(
                 shape = RoundedCornerShape(50),
                 color = Color.White.copy(alpha = 0.10f),
@@ -1123,19 +1344,22 @@ private fun NowPlayingSongInfoSection(
                 modifier = Modifier.testTag("now_playing_source_badge")
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                    modifier = Modifier.padding(
+                        horizontal = if (compactBadge) 10.dp else 12.dp,
+                        vertical = if (compactBadge) 3.dp else 4.dp
+                    ),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.PlayCircle,
                         contentDescription = null,
                         tint = primaryColor,
-                        modifier = Modifier.size(13.dp)
+                        modifier = Modifier.size(if (compactBadge) 12.dp else 13.dp)
                     )
                     Text(
                         text = sourceBadgeText,
-                        fontSize = 11.5.sp,
+                        fontSize = if (compactBadge) 11.sp else 11.5.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = Color.White.copy(alpha = 0.92f),
                         maxLines = 1,
@@ -1155,7 +1379,8 @@ private fun NowPlayingLiveLyricsPanel(
     isCompact: Boolean,
     primaryColor: Color,
     hazeState: HazeState?,
-    onNavigateToLyrics: () -> Unit
+    onNavigateToLyrics: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val badgeColor = if (cardState.isBadgeAccent) {
         primaryColor
@@ -1171,7 +1396,7 @@ private fun NowPlayingLiveLyricsPanel(
         borderWidth = 0.75.dp,
         borderAlpha = 0.22f,
         shadowElevation = 4.dp,
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .animateContentSize(animationSpec = tween(durationMillis = 200))
             .testTag("now_playing_live_lyrics_card")
@@ -1382,7 +1607,8 @@ private fun NowPlayingProgressSection(
     onDragChange: (Float) -> Unit,
     onDragFinished: () -> Unit,
     primaryColor: Color,
-    hazeState: HazeState?
+    hazeState: HazeState?,
+    modifier: Modifier = Modifier
 ) {
     val currentFraction = when {
         isDraggingSeek -> dragSeekFraction.coerceIn(0f, 1f)
@@ -1413,7 +1639,7 @@ private fun NowPlayingProgressSection(
         borderWidth = 0.75.dp,
         borderAlpha = 0.18f,
         shadowElevation = 2.dp,
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .testTag("now_playing_progress_card")
     ) {
@@ -1561,10 +1787,11 @@ private fun NowPlayingControlsRow(
     primaryColor: Color,
     onPlayPause: () -> Unit,
     onPrevious: () -> Unit,
-    onNext: () -> Unit
+    onNext: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(

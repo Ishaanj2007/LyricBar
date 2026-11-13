@@ -30,6 +30,42 @@ class NowPlayingScreenStateAndResponsiveTest {
     }
 
     @Test
+    fun `responsive metrics dynamic vertical paddings scale with height and close gap tightly`() {
+        val heights = listOf(600f, 740f, 852f, 920f)
+        for (h in heights) {
+            val metrics = computeResponsiveNowPlayingMetrics(
+                availableWidthDp = 393f,
+                availableHeightDp = h,
+                fontScale = 1.0f
+            )
+            assertTrue(
+                "artworkToInfoPaddingDp must keep metadata closely tied to artwork (8..13dp) for height $h",
+                metrics.artworkToInfoPaddingDp in 8f..13f
+            )
+            assertTrue(
+                "badgeToLyricsPaddingDp must remain compact (7..12dp) for height $h",
+                metrics.badgeToLyricsPaddingDp in 7f..12f
+            )
+            assertTrue(
+                "lyricsToProgressPaddingDp must keep progress connected to lyrics (8..12dp) for height $h",
+                metrics.lyricsToProgressPaddingDp in 8f..12f
+            )
+            assertTrue(
+                "progressToControlsPaddingDp must keep controls connected to progress (9..14dp) for height $h",
+                metrics.progressToControlsPaddingDp in 9f..14f
+            )
+        }
+
+        val standardPhone = computeResponsiveNowPlayingMetrics(
+            availableWidthDp = 393f,
+            availableHeightDp = 716f,
+            fontScale = 1.0f
+        )
+        assertFalse("Standard portrait viewport should not require scrolling", standardPhone.requiresScrollFallback)
+        assertTrue("Standard portrait viewport preserves generous artwork size", standardPhone.artworkSizeDp >= 240f)
+    }
+
+    @Test
     fun `responsive metrics shrink artwork first on short-height devices and enable scroll fallback when tight`() {
         val tallMetrics = computeResponsiveNowPlayingMetrics(
             availableWidthDp = 393f,
@@ -65,14 +101,45 @@ class NowPlayingScreenStateAndResponsiveTest {
     }
 
     @Test
-    fun `responsive metrics detect landscape orientation cleanly`() {
-        val landscape = computeResponsiveNowPlayingMetrics(
+    fun `responsive metrics detect landscape orientation cleanly across phone and tablet sizes`() {
+        val landscape800x393 = computeResponsiveNowPlayingMetrics(
             availableWidthDp = 800f,
             availableHeightDp = 393f,
             fontScale = 1.0f
         )
-        assertTrue(landscape.isLandscape)
-        assertTrue(landscape.artworkSizeDp in 120f..240f)
+        assertTrue(landscape800x393.isLandscape)
+        assertTrue(landscape800x393.artworkSizeDp in 120f..240f)
+        assertTrue(landscape800x393.playButtonInnerDp >= 48f)
+
+        val phoneLandscapeSizes = listOf(
+            540f to 312f, // 640x360 usable after nav rail + insets
+            700f to 312f, // 800x360 usable
+            815f to 364f, // 915x412 usable
+            860f to 384f  // 960x432 usable
+        )
+        val fontScales = listOf(1.0f, 1.3f, 1.5f)
+        for ((w, h) in phoneLandscapeSizes) {
+            for (scale in fontScales) {
+                val m = computeResponsiveNowPlayingMetrics(
+                    availableWidthDp = w,
+                    availableHeightDp = h,
+                    fontScale = scale
+                )
+                assertTrue("Expected landscape for ${w}x${h}", m.isLandscape)
+                assertFalse("Should not treat landscape as portrait short height", m.isShortHeight)
+                assertTrue("Artwork size stays bounded for ${w}x${h}: ${m.artworkSizeDp}", m.artworkSizeDp in 96f..240f)
+                assertTrue("Play/Pause target must remain >= 48dp at fontScale $scale", m.playButtonInnerDp >= 48f)
+            }
+        }
+
+        val tabletLandscape = computeResponsiveNowPlayingMetrics(
+            availableWidthDp = 1170f,
+            availableHeightDp = 752f,
+            fontScale = 1.0f
+        )
+        assertTrue("1280x800 tablet landscape must use landscape layout", tabletLandscape.isLandscape)
+        assertTrue("Tablet landscape scales artwork proportionally", tabletLandscape.artworkSizeDp >= 220f)
+        assertTrue("Tablet landscape keeps full play button size", tabletLandscape.playButtonOuterDp >= 74f)
     }
 
     @Test

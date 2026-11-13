@@ -8,8 +8,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
@@ -149,71 +151,92 @@ fun AdaptiveNavRail(
     modifier: Modifier = Modifier,
     hazeState: HazeState? = null
 ) {
-    FrostedCard(
-        hazeState = hazeState,
-        shape = RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp),
-        backgroundAlpha = 0.60f,
-        blurRadius = 20.dp,
-        shadowElevation = 6.dp,
+    BoxWithConstraints(
         modifier = modifier
             .testTag("main_navigation_bar")
             .fillMaxHeight()
-            .widthIn(min = 96.dp, max = 112.dp)
     ) {
-        Column(
+        val availableHeight = maxHeight
+        val isCompactHeight = availableHeight < 440.dp
+        val railMinWidth = if (isCompactHeight) 82.dp else 96.dp
+        val railMaxWidth = if (isCompactHeight) 96.dp else 112.dp
+
+        FrostedCard(
+            hazeState = hazeState,
+            shape = RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp),
+            backgroundAlpha = 0.60f,
+            blurRadius = 20.dp,
+            shadowElevation = 6.dp,
             modifier = Modifier
                 .fillMaxHeight()
-                .padding(vertical = 24.dp, horizontal = 8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.SpaceBetween
+                .widthIn(min = railMinWidth, max = railMaxWidth)
         ) {
-            // App Branding Icon at top
             Column(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .verticalScroll(rememberScrollState())
+                    .padding(
+                        vertical = if (isCompactHeight) 10.dp else 24.dp,
+                        horizontal = if (isCompactHeight) 6.dp else 8.dp
+                    ),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.padding(bottom = 16.dp)
+                verticalArrangement = if (isCompactHeight) Arrangement.SpaceEvenly else Arrangement.SpaceBetween
             ) {
-                Surface(
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    modifier = Modifier.size(44.dp)
+                // App Branding Icon at top (hidden on ultra-short viewports < 320dp so all 4 tabs fit effortlessly)
+                if (availableHeight >= 310.dp) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(bottom = if (isCompactHeight) 6.dp else 16.dp)
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier.size(if (isCompactHeight) 32.dp else 44.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = AppTab.NOW_PLAYING.icon,
+                                    contentDescription = "LyricBar",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(if (isCompactHeight) 19.dp else 26.dp)
+                                )
+                            }
+                        }
+                        if (!isCompactHeight) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "LyricBar",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
+
+                // Tab navigation items
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(if (isCompactHeight) 4.dp else 12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.weight(1f, fill = false)
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = AppTab.NOW_PLAYING.icon,
-                            contentDescription = "LyricBar",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(26.dp)
+                    AppTab.entries.forEach { tab ->
+                        val selected = currentTab == tab
+                        NavRailItem(
+                            tab = tab,
+                            selected = selected,
+                            isCompact = isCompactHeight,
+                            onClick = { onTabSelected(tab) },
+                            modifier = Modifier.testTag("nav_tab_${tab.name.lowercase()}")
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "LyricBar",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
 
-            // Tab navigation items
-            Column(
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.weight(1f, fill = false)
-            ) {
-                AppTab.entries.forEach { tab ->
-                    val selected = currentTab == tab
-                    NavRailItem(
-                        tab = tab,
-                        selected = selected,
-                        onClick = { onTabSelected(tab) },
-                        modifier = Modifier.testTag("nav_tab_${tab.name.lowercase()}")
-                    )
+                if (!isCompactHeight) {
+                    // Bottom spacer for balance on taller tablets/desktops
+                    Spacer(modifier = Modifier.height(16.dp))
                 }
             }
-
-            // Bottom spacer for balance
-            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 }
@@ -222,6 +245,7 @@ fun AdaptiveNavRail(
 private fun NavRailItem(
     tab: AppTab,
     selected: Boolean,
+    isCompact: Boolean = false,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -242,7 +266,8 @@ private fun NavRailItem(
     Box(
         modifier = modifier
             .minimumInteractiveComponentSize()
-            .clip(RoundedCornerShape(16.dp))
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
             .clickable(
                 interactionSource = interactionSource,
                 indication = ripple(bounded = true, color = MaterialTheme.colorScheme.primary),
@@ -250,7 +275,10 @@ private fun NavRailItem(
                 onClick = onClick
             )
             .background(indicatorColor)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .padding(
+                horizontal = if (isCompact) 6.dp else 12.dp,
+                vertical = if (isCompact) 6.dp else 10.dp
+            ),
         contentAlignment = Alignment.Center
     ) {
         Column(
@@ -261,12 +289,14 @@ private fun NavRailItem(
                 imageVector = tab.icon,
                 contentDescription = tab.title,
                 tint = iconColor,
-                modifier = Modifier.size(26.dp)
+                modifier = Modifier.size(if (isCompact) 21.dp else 26.dp)
             )
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(if (isCompact) 2.dp else 4.dp))
             Text(
                 text = tab.title,
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontSize = if (isCompact) 10.sp else 11.sp
+                ),
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                 color = textColor,
                 maxLines = 1

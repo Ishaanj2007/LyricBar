@@ -145,6 +145,7 @@ fun MainAppScaffold(
                     modifier = Modifier
                         .fillMaxSize()
                         .windowInsetsPadding(WindowInsets.statusBars)
+                        .windowInsetsPadding(WindowInsets.navigationBars)
                         .windowInsetsPadding(WindowInsets.displayCutout)
                 ) {
                     AdaptiveNavRail(
@@ -162,6 +163,7 @@ fun MainAppScaffold(
                             currentTab = currentTab,
                             playbackManager = playbackManager,
                             userPreferences = userPreferences,
+                            hasBottomNavPill = false,
                             onNavigateToLyrics = { currentTab = AppTab.LYRICS }
                         )
                     }
@@ -188,6 +190,7 @@ fun MainAppScaffold(
                             currentTab = currentTab,
                             playbackManager = playbackManager,
                             userPreferences = userPreferences,
+                            hasBottomNavPill = true,
                             onNavigateToLyrics = { currentTab = AppTab.LYRICS }
                         )
                     }
@@ -216,6 +219,7 @@ private fun TabContent(
     currentTab: AppTab,
     playbackManager: com.example.service.MediaPlaybackManager,
     userPreferences: UserPreferences,
+    hasBottomNavPill: Boolean,
     onNavigateToLyrics: () -> Unit
 ) {
     AnimatedContent(targetState = currentTab, label = "tab_animation") { target ->
@@ -223,17 +227,22 @@ private fun TabContent(
             AppTab.NOW_PLAYING -> NowPlayingScreen(
                 playbackManager = playbackManager,
                 userPreferences = userPreferences,
-                onNavigateToLyrics = onNavigateToLyrics
+                onNavigateToLyrics = onNavigateToLyrics,
+                hasBottomNavPill = hasBottomNavPill
             )
             AppTab.LYRICS -> LyricsScreen(
                 playbackManager = playbackManager,
-                userPreferences = userPreferences
+                userPreferences = userPreferences,
+                hasBottomNavPill = hasBottomNavPill
             )
             AppTab.SETTINGS -> SettingsScreen(
                 playbackManager = playbackManager,
-                userPreferences = userPreferences
+                userPreferences = userPreferences,
+                hasBottomNavPill = hasBottomNavPill
             )
-            AppTab.HISTORY -> HistoryScreen()
+            AppTab.HISTORY -> HistoryScreen(
+                hasBottomNavPill = hasBottomNavPill
+            )
         }
     }
 }
