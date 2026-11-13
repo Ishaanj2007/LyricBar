@@ -5,6 +5,11 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
 import com.example.R
+import com.example.service.HudBoundsConstraints
+import com.example.service.HudDisplayGeometry
+import com.example.service.HudOrientation
+import com.example.service.HudOverlayProfile
+import com.example.service.HudPositioningEngine
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -130,10 +135,18 @@ data class UserPreferences(
     val hudBackdropCornerRadiusDp: Int = 18, // 0 to 32 dp (default 18dp)
     val hudBackdropHorizontalPaddingDp: Int = 16, // 0 to 32 dp (default 16dp)
     val hudBackdropVerticalPaddingDp: Int = 10, // 0 to 24 dp (default 10dp)
-    val overlayYPosition: Int = 180, // Full range
-    val overlayXPosition: Int = 0, // Full range
-    val overlayWidthPx: Int = 850, // Resizable overlay width
-    val overlayHeightPx: Int = 130, // Resizable overlay height
+    val overlayYPosition: Int = HudPositioningEngine.DEFAULT_PORTRAIT_Y, // Portrait Y (legacy mirror)
+    val overlayXPosition: Int = HudPositioningEngine.DEFAULT_PORTRAIT_X, // Portrait X (legacy mirror)
+    val overlayWidthPx: Int = HudPositioningEngine.DEFAULT_PORTRAIT_WIDTH_PX, // Portrait width (legacy mirror)
+    val overlayHeightPx: Int = HudPositioningEngine.DEFAULT_PORTRAIT_HEIGHT_PX, // Portrait height (legacy mirror)
+    val hudPortraitX: Int = HudPositioningEngine.DEFAULT_PORTRAIT_X,
+    val hudPortraitY: Int = HudPositioningEngine.DEFAULT_PORTRAIT_Y,
+    val hudPortraitWidth: Int = HudPositioningEngine.DEFAULT_PORTRAIT_WIDTH_PX,
+    val hudPortraitHeight: Int = HudPositioningEngine.DEFAULT_PORTRAIT_HEIGHT_PX,
+    val hudLandscapeX: Int? = null,
+    val hudLandscapeY: Int? = null,
+    val hudLandscapeWidth: Int? = null,
+    val hudLandscapeHeight: Int? = null,
     val overlayTextAlign: String = "CENTER", // "LEFT", "CENTER", "RIGHT"
     val upwardAnimationEnabled: Boolean = true,
     val animationStyle: String = OverlayAnimationStyle.KARAOKE.name,
@@ -150,7 +163,45 @@ data class UserPreferences(
     val adaptiveLyricScrolling: Boolean = true,
     val lyricScrollSpeedMultiplier: Float = 1.0f, // 1.0x to 1.5x
     val globalOffsetMs: Long = 0L
-)
+) {
+    val hasLandscapeProfile: Boolean
+        get() = hudLandscapeX != null &&
+            hudLandscapeY != null &&
+            hudLandscapeWidth != null &&
+            hudLandscapeHeight != null
+
+    fun portraitProfile(): HudOverlayProfile = HudOverlayProfile(
+        x = hudPortraitX,
+        y = hudPortraitY,
+        widthPx = hudPortraitWidth,
+        heightPx = hudPortraitHeight
+    )
+
+    fun landscapeProfileOrNull(): HudOverlayProfile? {
+        val lx = hudLandscapeX ?: return null
+        val ly = hudLandscapeY ?: return null
+        val lw = hudLandscapeWidth ?: return null
+        val lh = hudLandscapeHeight ?: return null
+        return HudOverlayProfile(
+            x = lx,
+            y = ly,
+            widthPx = lw,
+            heightPx = lh
+        )
+    }
+
+    fun resolveProfile(
+        orientation: HudOrientation,
+        displayGeometry: HudDisplayGeometry,
+        minBackdropHeightPx: Int = 0
+    ): HudOverlayProfile {
+        return when (orientation) {
+            HudOrientation.PORTRAIT -> portraitProfile()
+            HudOrientation.LANDSCAPE -> landscapeProfileOrNull()
+                ?: HudPositioningEngine.createDefaultLandscapeProfile(displayGeometry, minBackdropHeightPx)
+        }
+    }
+}
 
 class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
 
@@ -177,6 +228,14 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
         val OVERLAY_X_POS = intPreferencesKey("overlay_x_position")
         val OVERLAY_WIDTH = intPreferencesKey("overlay_width")
         val OVERLAY_HEIGHT = intPreferencesKey("overlay_height")
+        val HUD_PORTRAIT_X = intPreferencesKey("hud_portrait_x")
+        val HUD_PORTRAIT_Y = intPreferencesKey("hud_portrait_y")
+        val HUD_PORTRAIT_WIDTH = intPreferencesKey("hud_portrait_width")
+        val HUD_PORTRAIT_HEIGHT = intPreferencesKey("hud_portrait_height")
+        val HUD_LANDSCAPE_X = intPreferencesKey("hud_landscape_x")
+        val HUD_LANDSCAPE_Y = intPreferencesKey("hud_landscape_y")
+        val HUD_LANDSCAPE_WIDTH = intPreferencesKey("hud_landscape_width")
+        val HUD_LANDSCAPE_HEIGHT = intPreferencesKey("hud_landscape_height")
         val OVERLAY_TEXT_ALIGN = stringPreferencesKey("overlay_text_align")
         val UPWARD_ANIMATION = booleanPreferencesKey("upward_animation_enabled")
         val ANIMATION_STYLE = stringPreferencesKey("animation_style")
@@ -231,14 +290,33 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
                 FontOption.POPPINS
             }
 
-            val rawY = preferences[PreferencesKeys.OVERLAY_Y_POS] ?: 180
-            val clampedY = rawY.coerceIn(0, 3000)
+            val rawPortraitY = preferences[PreferencesKeys.HUD_PORTRAIT_Y]
+                ?: preferences[PreferencesKeys.OVERLAY_Y_POS]
+                ?: HudPositioningEngine.DEFAULT_PORTRAIT_Y
+            val portraitY = rawPortraitY.coerceIn(0, MAX_STORED_POS_PX)
 
-            val rawX = preferences[PreferencesKeys.OVERLAY_X_POS] ?: 0
-            val clampedX = rawX.coerceIn(-2000, 2000)
+            val rawPortraitX = preferences[PreferencesKeys.HUD_PORTRAIT_X]
+                ?: preferences[PreferencesKeys.OVERLAY_X_POS]
+                ?: HudPositioningEngine.DEFAULT_PORTRAIT_X
+            val portraitX = rawPortraitX.coerceIn(MIN_STORED_X_PX, MAX_STORED_POS_PX)
 
-            val width = preferences[PreferencesKeys.OVERLAY_WIDTH] ?: 850
-            val height = preferences[PreferencesKeys.OVERLAY_HEIGHT] ?: 130
+            val portraitWidth = (preferences[PreferencesKeys.HUD_PORTRAIT_WIDTH]
+                ?: preferences[PreferencesKeys.OVERLAY_WIDTH]
+                ?: HudPositioningEngine.DEFAULT_PORTRAIT_WIDTH_PX)
+                .coerceIn(MIN_STORED_WIDTH_PX, MAX_STORED_POS_PX)
+            val portraitHeight = (preferences[PreferencesKeys.HUD_PORTRAIT_HEIGHT]
+                ?: preferences[PreferencesKeys.OVERLAY_HEIGHT]
+                ?: HudPositioningEngine.DEFAULT_PORTRAIT_HEIGHT_PX)
+                .coerceIn(MIN_STORED_HEIGHT_PX, MAX_STORED_HEIGHT_PX)
+
+            val landscapeX = preferences[PreferencesKeys.HUD_LANDSCAPE_X]
+                ?.coerceIn(MIN_STORED_X_PX, MAX_STORED_POS_PX)
+            val landscapeY = preferences[PreferencesKeys.HUD_LANDSCAPE_Y]
+                ?.coerceIn(0, MAX_STORED_POS_PX)
+            val landscapeWidth = preferences[PreferencesKeys.HUD_LANDSCAPE_WIDTH]
+                ?.coerceIn(MIN_STORED_WIDTH_PX, MAX_STORED_POS_PX)
+            val landscapeHeight = preferences[PreferencesKeys.HUD_LANDSCAPE_HEIGHT]
+                ?.coerceIn(MIN_STORED_HEIGHT_PX, MAX_STORED_HEIGHT_PX)
 
             val rawStyle = preferences[PreferencesKeys.ANIMATION_STYLE] ?: OverlayAnimationStyle.KARAOKE.name
             val animStyle = when (rawStyle) {
@@ -272,10 +350,18 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
                 hudBackdropCornerRadiusDp = (preferences[PreferencesKeys.HUD_BACKDROP_CORNER_RADIUS_DP] ?: 18).coerceIn(0, 32),
                 hudBackdropHorizontalPaddingDp = (preferences[PreferencesKeys.HUD_BACKDROP_HORIZONTAL_PADDING_DP] ?: 16).coerceIn(0, 32),
                 hudBackdropVerticalPaddingDp = (preferences[PreferencesKeys.HUD_BACKDROP_VERTICAL_PADDING_DP] ?: 10).coerceIn(0, 24),
-                overlayYPosition = clampedY,
-                overlayXPosition = clampedX,
-                overlayWidthPx = width.coerceIn(280, 2000),
-                overlayHeightPx = height.coerceIn(60, 800),
+                overlayYPosition = portraitY,
+                overlayXPosition = portraitX,
+                overlayWidthPx = portraitWidth,
+                overlayHeightPx = portraitHeight,
+                hudPortraitX = portraitX,
+                hudPortraitY = portraitY,
+                hudPortraitWidth = portraitWidth,
+                hudPortraitHeight = portraitHeight,
+                hudLandscapeX = landscapeX,
+                hudLandscapeY = landscapeY,
+                hudLandscapeWidth = landscapeWidth,
+                hudLandscapeHeight = landscapeHeight,
                 overlayTextAlign = preferences[PreferencesKeys.OVERLAY_TEXT_ALIGN] ?: "CENTER",
                 upwardAnimationEnabled = preferences[PreferencesKeys.UPWARD_ANIMATION] ?: true,
                 animationStyle = animStyle,
@@ -406,44 +492,190 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
         dataStore.edit { it[PreferencesKeys.HUD_BACKDROP_VERTICAL_PADDING_DP] = bounded }
     }
 
-    suspend fun setOverlayPosition(x: Int, y: Int) {
-        val boundedX = x.coerceIn(-2000, 2000)
-        val boundedY = y.coerceIn(0, 3000)
+    suspend fun setOverlayPosition(
+        x: Int,
+        y: Int,
+        orientation: HudOrientation = HudOrientation.PORTRAIT
+    ) {
+        val boundedX = x.coerceIn(MIN_STORED_X_PX, MAX_STORED_POS_PX)
+        val boundedY = y.coerceIn(0, MAX_STORED_POS_PX)
         dataStore.edit {
-            it[PreferencesKeys.OVERLAY_X_POS] = boundedX
-            it[PreferencesKeys.OVERLAY_Y_POS] = boundedY
+            when (orientation) {
+                HudOrientation.PORTRAIT -> {
+                    it[PreferencesKeys.HUD_PORTRAIT_X] = boundedX
+                    it[PreferencesKeys.HUD_PORTRAIT_Y] = boundedY
+                    it[PreferencesKeys.OVERLAY_X_POS] = boundedX
+                    it[PreferencesKeys.OVERLAY_Y_POS] = boundedY
+                }
+                HudOrientation.LANDSCAPE -> {
+                    it[PreferencesKeys.HUD_LANDSCAPE_X] = boundedX
+                    it[PreferencesKeys.HUD_LANDSCAPE_Y] = boundedY
+                }
+            }
         }
     }
 
-    suspend fun setOverlayBounds(x: Int, y: Int, widthPx: Int, heightPx: Int) {
-        val boundedX = x.coerceIn(-2000, 2000)
-        val boundedY = y.coerceIn(0, 3000)
-        val boundedW = widthPx.coerceIn(280, 2000)
-        val boundedH = heightPx.coerceIn(60, 800)
+    suspend fun setOverlayBounds(
+        x: Int,
+        y: Int,
+        widthPx: Int,
+        heightPx: Int,
+        orientation: HudOrientation = HudOrientation.PORTRAIT
+    ) {
+        val boundedX = x.coerceIn(MIN_STORED_X_PX, MAX_STORED_POS_PX)
+        val boundedY = y.coerceIn(0, MAX_STORED_POS_PX)
+        val boundedW = widthPx.coerceIn(MIN_STORED_WIDTH_PX, MAX_STORED_POS_PX)
+        val boundedH = heightPx.coerceIn(MIN_STORED_HEIGHT_PX, MAX_STORED_HEIGHT_PX)
         dataStore.edit {
-            it[PreferencesKeys.OVERLAY_X_POS] = boundedX
-            it[PreferencesKeys.OVERLAY_Y_POS] = boundedY
-            it[PreferencesKeys.OVERLAY_WIDTH] = boundedW
-            it[PreferencesKeys.OVERLAY_HEIGHT] = boundedH
+            when (orientation) {
+                HudOrientation.PORTRAIT -> {
+                    it[PreferencesKeys.HUD_PORTRAIT_X] = boundedX
+                    it[PreferencesKeys.HUD_PORTRAIT_Y] = boundedY
+                    it[PreferencesKeys.HUD_PORTRAIT_WIDTH] = boundedW
+                    it[PreferencesKeys.HUD_PORTRAIT_HEIGHT] = boundedH
+                    it[PreferencesKeys.OVERLAY_X_POS] = boundedX
+                    it[PreferencesKeys.OVERLAY_Y_POS] = boundedY
+                    it[PreferencesKeys.OVERLAY_WIDTH] = boundedW
+                    it[PreferencesKeys.OVERLAY_HEIGHT] = boundedH
+                }
+                HudOrientation.LANDSCAPE -> {
+                    it[PreferencesKeys.HUD_LANDSCAPE_X] = boundedX
+                    it[PreferencesKeys.HUD_LANDSCAPE_Y] = boundedY
+                    it[PreferencesKeys.HUD_LANDSCAPE_WIDTH] = boundedW
+                    it[PreferencesKeys.HUD_LANDSCAPE_HEIGHT] = boundedH
+                }
+            }
         }
     }
 
-    suspend fun setOverlayDimensions(widthPx: Int, heightPx: Int) {
-        val boundedW = widthPx.coerceIn(280, 2000)
-        val boundedH = heightPx.coerceIn(60, 800)
+    suspend fun setOverlayDimensions(
+        widthPx: Int,
+        heightPx: Int,
+        orientation: HudOrientation = HudOrientation.PORTRAIT,
+        constraints: HudBoundsConstraints? = null
+    ) {
+        val boundedW = widthPx.coerceIn(MIN_STORED_WIDTH_PX, MAX_STORED_POS_PX)
+        val boundedH = heightPx.coerceIn(MIN_STORED_HEIGHT_PX, MAX_STORED_HEIGHT_PX)
         dataStore.edit {
-            it[PreferencesKeys.OVERLAY_WIDTH] = boundedW
-            it[PreferencesKeys.OVERLAY_HEIGHT] = boundedH
+            when (orientation) {
+                HudOrientation.PORTRAIT -> {
+                    it[PreferencesKeys.HUD_PORTRAIT_WIDTH] = boundedW
+                    it[PreferencesKeys.HUD_PORTRAIT_HEIGHT] = boundedH
+                    it[PreferencesKeys.OVERLAY_WIDTH] = boundedW
+                    it[PreferencesKeys.OVERLAY_HEIGHT] = boundedH
+                    if (constraints != null) {
+                        val curX = it[PreferencesKeys.HUD_PORTRAIT_X]
+                            ?: it[PreferencesKeys.OVERLAY_X_POS]
+                            ?: HudPositioningEngine.DEFAULT_PORTRAIT_X
+                        val curY = it[PreferencesKeys.HUD_PORTRAIT_Y]
+                            ?: it[PreferencesKeys.OVERLAY_Y_POS]
+                            ?: HudPositioningEngine.DEFAULT_PORTRAIT_Y
+                        val clampedX = curX.coerceIn(constraints.minX, constraints.maxX)
+                        val clampedY = curY.coerceIn(constraints.minY, constraints.maxY)
+                        it[PreferencesKeys.HUD_PORTRAIT_X] = clampedX
+                        it[PreferencesKeys.HUD_PORTRAIT_Y] = clampedY
+                        it[PreferencesKeys.OVERLAY_X_POS] = clampedX
+                        it[PreferencesKeys.OVERLAY_Y_POS] = clampedY
+                    }
+                }
+                HudOrientation.LANDSCAPE -> {
+                    it[PreferencesKeys.HUD_LANDSCAPE_WIDTH] = boundedW
+                    it[PreferencesKeys.HUD_LANDSCAPE_HEIGHT] = boundedH
+                    if (constraints != null) {
+                        val curX = it[PreferencesKeys.HUD_LANDSCAPE_X]
+                        val curY = it[PreferencesKeys.HUD_LANDSCAPE_Y]
+                        if (curX != null && curY != null) {
+                            it[PreferencesKeys.HUD_LANDSCAPE_X] = curX.coerceIn(constraints.minX, constraints.maxX)
+                            it[PreferencesKeys.HUD_LANDSCAPE_Y] = curY.coerceIn(constraints.minY, constraints.maxY)
+                        }
+                    }
+                }
+            }
         }
     }
 
-    suspend fun nudgeOverlayPosition(deltaX: Int, deltaY: Int) {
+    suspend fun nudgeOverlayPosition(
+        deltaX: Int,
+        deltaY: Int,
+        orientation: HudOrientation = HudOrientation.PORTRAIT,
+        constraints: HudBoundsConstraints? = null,
+        fallbackProfile: HudOverlayProfile? = null
+    ) {
         dataStore.edit {
-            val currentX = (it[PreferencesKeys.OVERLAY_X_POS] ?: 0) + deltaX
-            val currentY = (it[PreferencesKeys.OVERLAY_Y_POS] ?: 180) + deltaY
-            it[PreferencesKeys.OVERLAY_X_POS] = currentX.coerceIn(-2000, 2000)
-            it[PreferencesKeys.OVERLAY_Y_POS] = currentY.coerceIn(0, 3000)
+            val minX = constraints?.minX ?: MIN_STORED_X_PX
+            val maxX = constraints?.maxX ?: MAX_STORED_POS_PX
+            val minY = constraints?.minY ?: 0
+            val maxY = constraints?.maxY ?: MAX_STORED_POS_PX
+
+            when (orientation) {
+                HudOrientation.PORTRAIT -> {
+                    val baseX = it[PreferencesKeys.HUD_PORTRAIT_X]
+                        ?: it[PreferencesKeys.OVERLAY_X_POS]
+                        ?: fallbackProfile?.x
+                        ?: HudPositioningEngine.DEFAULT_PORTRAIT_X
+                    val baseY = it[PreferencesKeys.HUD_PORTRAIT_Y]
+                        ?: it[PreferencesKeys.OVERLAY_Y_POS]
+                        ?: fallbackProfile?.y
+                        ?: HudPositioningEngine.DEFAULT_PORTRAIT_Y
+                    val nextX = (baseX + deltaX).coerceIn(minX, maxX)
+                    val nextY = (baseY + deltaY).coerceIn(minY, maxY)
+                    it[PreferencesKeys.HUD_PORTRAIT_X] = nextX
+                    it[PreferencesKeys.HUD_PORTRAIT_Y] = nextY
+                    it[PreferencesKeys.OVERLAY_X_POS] = nextX
+                    it[PreferencesKeys.OVERLAY_Y_POS] = nextY
+                }
+                HudOrientation.LANDSCAPE -> {
+                    val baseX = it[PreferencesKeys.HUD_LANDSCAPE_X] ?: fallbackProfile?.x ?: minX
+                    val baseY = it[PreferencesKeys.HUD_LANDSCAPE_Y] ?: fallbackProfile?.y ?: minY
+                    val nextX = (baseX + deltaX).coerceIn(minX, maxX)
+                    val nextY = (baseY + deltaY).coerceIn(minY, maxY)
+                    it[PreferencesKeys.HUD_LANDSCAPE_X] = nextX
+                    it[PreferencesKeys.HUD_LANDSCAPE_Y] = nextY
+                    if (it[PreferencesKeys.HUD_LANDSCAPE_WIDTH] == null && fallbackProfile != null) {
+                        it[PreferencesKeys.HUD_LANDSCAPE_WIDTH] = fallbackProfile.widthPx.coerceIn(MIN_STORED_WIDTH_PX, MAX_STORED_POS_PX)
+                    }
+                    if (it[PreferencesKeys.HUD_LANDSCAPE_HEIGHT] == null && fallbackProfile != null) {
+                        it[PreferencesKeys.HUD_LANDSCAPE_HEIGHT] = fallbackProfile.heightPx.coerceIn(MIN_STORED_HEIGHT_PX, MAX_STORED_HEIGHT_PX)
+                    }
+                }
+            }
         }
+    }
+
+    suspend fun ensureLandscapeProfile(defaultProfile: HudOverlayProfile) {
+        val boundedX = defaultProfile.x.coerceIn(MIN_STORED_X_PX, MAX_STORED_POS_PX)
+        val boundedY = defaultProfile.y.coerceIn(0, MAX_STORED_POS_PX)
+        val boundedW = defaultProfile.widthPx.coerceIn(MIN_STORED_WIDTH_PX, MAX_STORED_POS_PX)
+        val boundedH = defaultProfile.heightPx.coerceIn(MIN_STORED_HEIGHT_PX, MAX_STORED_HEIGHT_PX)
+
+        dataStore.edit { prefs ->
+            val alreadyInitialized = prefs[PreferencesKeys.HUD_LANDSCAPE_X] != null &&
+                prefs[PreferencesKeys.HUD_LANDSCAPE_Y] != null &&
+                prefs[PreferencesKeys.HUD_LANDSCAPE_WIDTH] != null &&
+                prefs[PreferencesKeys.HUD_LANDSCAPE_HEIGHT] != null
+            if (!alreadyInitialized) {
+                if (prefs[PreferencesKeys.HUD_LANDSCAPE_X] == null) {
+                    prefs[PreferencesKeys.HUD_LANDSCAPE_X] = boundedX
+                }
+                if (prefs[PreferencesKeys.HUD_LANDSCAPE_Y] == null) {
+                    prefs[PreferencesKeys.HUD_LANDSCAPE_Y] = boundedY
+                }
+                if (prefs[PreferencesKeys.HUD_LANDSCAPE_WIDTH] == null) {
+                    prefs[PreferencesKeys.HUD_LANDSCAPE_WIDTH] = boundedW
+                }
+                if (prefs[PreferencesKeys.HUD_LANDSCAPE_HEIGHT] == null) {
+                    prefs[PreferencesKeys.HUD_LANDSCAPE_HEIGHT] = boundedH
+                }
+            }
+        }
+    }
+
+    companion object {
+        private const val MIN_STORED_X_PX = -4000
+        private const val MAX_STORED_POS_PX = 8000
+        private const val MIN_STORED_WIDTH_PX = 120
+        private const val MIN_STORED_HEIGHT_PX = 40
+        private const val MAX_STORED_HEIGHT_PX = 4000
     }
 
     suspend fun setOverlayTextAlign(align: String) {

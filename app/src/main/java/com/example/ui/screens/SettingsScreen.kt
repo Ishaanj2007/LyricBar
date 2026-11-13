@@ -20,6 +20,7 @@ import androidx.compose.ui.res.painterResource
 import com.example.R
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -32,11 +33,16 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import com.example.data.preferences.HudBackdropStyle
@@ -46,6 +52,11 @@ import com.example.data.preferences.ThemeMode
 import com.example.data.preferences.ThemePreset
 import com.example.data.preferences.UserPreferences
 import com.example.data.repository.CompositeLyricsRepository
+import androidx.compose.ui.platform.LocalView
+import com.example.service.HudDisplayMetricsProvider
+import com.example.service.HudOrientation
+import com.example.service.HudOrientationInfoSnapshot
+import com.example.service.HudPositioningEngine
 import com.example.service.MediaPlaybackManager
 import com.example.ui.components.CalmThemedBackground
 import com.example.ui.components.FrostedCard
@@ -72,6 +83,7 @@ fun SettingsScreen(
     var isFontListExpanded by rememberSaveable { mutableStateOf(false) }
     val updateManager = remember { com.example.data.updater.UpdateManager.getInstance(context) }
     var showUpdateDialog by rememberSaveable { mutableStateOf(false) }
+    var showOrientationInfoDialog by rememberSaveable { mutableStateOf(false) }
 
     val allSectionKeys = remember {
         listOf("overlay", "animation", "size_align", "position", "theme", "typography", "lyrics_provider", "data", "about")
@@ -88,9 +100,55 @@ fun SettingsScreen(
     }
 
     val configuration = LocalConfiguration.current
-    val screenWidthDp = configuration.screenWidthDp
-    val screenHeightDp = configuration.screenHeightDp
-    val density = LocalDensity.current.density
+    val view = LocalView.current
+    val densityState = LocalDensity.current
+    val density = densityState.density
+    val fontScale = densityState.fontScale
+    val displayGeometry = remember(
+        configuration.orientation,
+        configuration.screenWidthDp,
+        configuration.screenHeightDp,
+        configuration.densityDpi,
+        density
+    ) {
+        HudDisplayMetricsProvider.getOverlayDisplayGeometry(
+            context = context,
+            rootWindowInsets = view.rootWindowInsets
+        )
+    }
+    val activeOrientation = displayGeometry.orientation
+    val activeProfileLabel = if (activeOrientation == HudOrientation.LANDSCAPE) "Landscape" else "Portrait"
+    val minBackdropHeightPx = remember(
+        livePreferences.hudBackdropEnabled,
+        livePreferences.overlayTextSizeSp,
+        livePreferences.hudBackdropVerticalPaddingDp,
+        density
+    ) {
+        HudPositioningEngine.computeMinBackdropHeightPx(livePreferences, density)
+    }
+    val activeProfile = remember(activeOrientation, livePreferences, displayGeometry, minBackdropHeightPx) {
+        livePreferences.resolveProfile(activeOrientation, displayGeometry, minBackdropHeightPx)
+    }
+    val resolvedBounds = remember(activeProfile, displayGeometry, minBackdropHeightPx) {
+        HudPositioningEngine.resolveBounds(activeProfile, displayGeometry, minBackdropHeightPx)
+    }
+    val orientationInfo = remember(activeOrientation, displayGeometry, resolvedBounds) {
+        HudPositioningEngine.buildOrientationInfoSnapshot(
+            orientation = activeOrientation,
+            geometry = displayGeometry,
+            resolvedBounds = resolvedBounds
+        )
+    }
+
+    LaunchedEffect(activeOrientation, livePreferences.hasLandscapeProfile, displayGeometry, minBackdropHeightPx) {
+        if (activeOrientation == HudOrientation.LANDSCAPE && !livePreferences.hasLandscapeProfile) {
+            val defaultLandscape = HudPositioningEngine.createDefaultLandscapeProfile(
+                geometry = displayGeometry,
+                minBackdropHeightPx = minBackdropHeightPx
+            )
+            playbackManager.preferencesRepository.ensureLandscapeProfile(defaultLandscape)
+        }
+    }
 
     val sectionOverlay: @Composable () -> Unit = {
         // SECTION 1: FLOATING OVERLAY & TIMELINE
@@ -1424,20 +1482,31 @@ fun SettingsScreen(
         // SECTION 3: OVERLAY SIZE & ALIGNMENT
         SettingsAccordionCard(
             title = "Overlay Size & Alignment",
-            subtitle = "${(userPreferences.overlayWidthPx / density).roundToInt()} × ${(userPreferences.overlayHeightPx / density).roundToInt()} dp • ${userPreferences.overlayTextAlign.lowercase().replaceFirstChar { it.uppercase() }}",
+            subtitle = "$activeProfileLabel • ${(resolvedBounds.widthPx / density).roundToInt()} × ${(resolvedBounds.heightPx / density).roundToInt()} dp • ${livePreferences.overlayTextAlign.lowercase().replaceFirstChar { it.uppercase() }}",
             icon = Icons.Default.AspectRatio,
             isExpanded = "size_align" in expandedSections,
             onToggle = { toggleSection("size_align") }
         ) {
             Column(modifier = Modifier.padding(18.dp)) {
-                val currentWidthDp = (userPreferences.overlayWidthPx / density).roundToInt()
-                val currentHeightDp = (userPreferences.overlayHeightPx / density).roundToInt()
+                val maxWidthDp = (resolvedBounds.constraints.maxWidthPx / density).coerceAtLeast(181f)
+                val engineMinWidthDp = (resolvedBounds.constraints.minWidthPx / density).coerceAtLeast(100f)
+                val minWidthDp = minOf(180f, (maxWidthDp - 16f).coerceAtLeast(engineMinWidthDp))
+                    .coerceAtMost(maxWidthDp - 1f)
+                val minHeightDp = (resolvedBounds.constraints.minHeightPx / density)
+                    .coerceIn(40f, 200f)
+                val maxHeightDp = minOf(220f, resolvedBounds.constraints.maxHeightPx / density)
+                    .coerceAtLeast(minHeightDp + 1f)
 
-                var localWidthDp by remember(userPreferences.overlayWidthPx) {
-                    mutableFloatStateOf(currentWidthDp.toFloat())
+                val currentWidthDp = (resolvedBounds.widthPx / density).roundToInt().toFloat()
+                    .coerceIn(minWidthDp, maxWidthDp)
+                val currentHeightDp = (resolvedBounds.heightPx / density).roundToInt().toFloat()
+                    .coerceIn(minHeightDp, maxHeightDp)
+
+                var localWidthDp by remember(activeOrientation, resolvedBounds.widthPx, minWidthDp, maxWidthDp) {
+                    mutableFloatStateOf(currentWidthDp)
                 }
-                var localHeightDp by remember(userPreferences.overlayHeightPx) {
-                    mutableFloatStateOf(currentHeightDp.toFloat())
+                var localHeightDp by remember(activeOrientation, resolvedBounds.heightPx, minHeightDp, maxHeightDp) {
+                    mutableFloatStateOf(currentHeightDp)
                 }
 
                 // Width Slider
@@ -1461,16 +1530,27 @@ fun SettingsScreen(
                 }
 
                 Slider(
-                    value = localWidthDp,
+                    value = localWidthDp.coerceIn(minWidthDp, maxWidthDp),
                     onValueChange = { localWidthDp = it },
                     onValueChangeFinished = {
                         coroutineScope.launch {
                             val newWPx = (localWidthDp * density).roundToInt()
                             val newHPx = (localHeightDp * density).roundToInt()
-                            playbackManager.preferencesRepository.setOverlayDimensions(newWPx, newHPx)
+                            val nextConstraints = HudPositioningEngine.computeConstraints(
+                                geometry = displayGeometry,
+                                currentWidthPx = newWPx,
+                                currentEffectiveHeightPx = maxOf(newHPx, minBackdropHeightPx),
+                                minBackdropHeightPx = minBackdropHeightPx
+                            )
+                            playbackManager.preferencesRepository.setOverlayDimensions(
+                                widthPx = newWPx,
+                                heightPx = newHPx,
+                                orientation = activeOrientation,
+                                constraints = nextConstraints
+                            )
                         }
                     },
-                    valueRange = 180f..screenWidthDp.toFloat().coerceAtLeast(240f),
+                    valueRange = minWidthDp..maxWidthDp,
                     modifier = Modifier.fillMaxWidth().testTag("width_slider")
                 )
 
@@ -1497,16 +1577,27 @@ fun SettingsScreen(
                 }
 
                 Slider(
-                    value = localHeightDp,
+                    value = localHeightDp.coerceIn(minHeightDp, maxHeightDp),
                     onValueChange = { localHeightDp = it },
                     onValueChangeFinished = {
                         coroutineScope.launch {
                             val newWPx = (localWidthDp * density).roundToInt()
                             val newHPx = (localHeightDp * density).roundToInt()
-                            playbackManager.preferencesRepository.setOverlayDimensions(newWPx, newHPx)
+                            val nextConstraints = HudPositioningEngine.computeConstraints(
+                                geometry = displayGeometry,
+                                currentWidthPx = newWPx,
+                                currentEffectiveHeightPx = maxOf(newHPx, minBackdropHeightPx),
+                                minBackdropHeightPx = minBackdropHeightPx
+                            )
+                            playbackManager.preferencesRepository.setOverlayDimensions(
+                                widthPx = newWPx,
+                                heightPx = newHPx,
+                                orientation = activeOrientation,
+                                constraints = nextConstraints
+                            )
                         }
                     },
-                    valueRange = 40f..220f,
+                    valueRange = minHeightDp..maxHeightDp,
                     modifier = Modifier.fillMaxWidth().testTag("height_slider")
                 )
 
@@ -1569,9 +1660,9 @@ fun SettingsScreen(
                         "Right" to "RIGHT"
                     ).forEach { (label, alignCode) ->
                         val isSelected = when (alignCode) {
-                            "CENTER" -> userPreferences.overlayTextAlign.equals("CENTER", ignoreCase = true) ||
-                                userPreferences.overlayTextAlign.equals("CENTRE", ignoreCase = true)
-                            else -> userPreferences.overlayTextAlign.equals(alignCode, ignoreCase = true)
+                            "CENTER" -> livePreferences.overlayTextAlign.equals("CENTER", ignoreCase = true) ||
+                                livePreferences.overlayTextAlign.equals("CENTRE", ignoreCase = true)
+                            else -> livePreferences.overlayTextAlign.equals(alignCode, ignoreCase = true)
                         }
                         FilledTonalButton(
                             onClick = {
@@ -1600,32 +1691,29 @@ fun SettingsScreen(
     }
 
     val sectionPosition: @Composable () -> Unit = {
-        // SECTION 4: OVERLAY POSITION (RESPONSIVE 2-ROW CONTROLLER WITH SLIDERS AND MICRO-NUDGES)
+        // SECTION 4: OVERLAY POSITION (ORIENTATION-AWARE CONTROLLER WITH SLIDERS AND MICRO-NUDGES)
         SettingsAccordionCard(
             title = "Overlay Position",
-            subtitle = "X: ${(userPreferences.overlayXPosition / density).roundToInt()} dp • Y: ${(userPreferences.overlayYPosition / density).roundToInt()} dp",
+            subtitle = "$activeProfileLabel • X: ${(resolvedBounds.x / density).roundToInt()} dp • Y: ${(resolvedBounds.y / density).roundToInt()} dp",
             icon = Icons.Default.OpenWith,
             isExpanded = "position" in expandedSections,
             onToggle = { toggleSection("position") }
         ) {
             Column(modifier = Modifier.padding(18.dp)) {
-                val overlayWidthPx = userPreferences.overlayWidthPx
-                val overlayHeightPx = userPreferences.overlayHeightPx
+                val minXDp = resolvedBounds.constraints.minX / density
+                val maxXDp = (resolvedBounds.constraints.maxX / density).coerceAtLeast(minXDp + 1f)
 
-                val maxXPx = (screenWidthDp * density - overlayWidthPx).toInt().coerceAtLeast(0)
-                val maxXDp = (maxXPx / density).roundToInt().coerceAtLeast(50)
+                val minYDp = resolvedBounds.constraints.minY / density
+                val maxYDp = (resolvedBounds.constraints.maxY / density).coerceAtLeast(minYDp + 1f)
 
-                val maxYPx = (screenHeightDp * density - overlayHeightPx).toInt().coerceAtLeast(0)
-                val maxYDp = (maxYPx / density).roundToInt().coerceAtLeast(100)
+                val currentXDp = (resolvedBounds.x / density).roundToInt().toFloat().coerceIn(minXDp, maxXDp)
+                val currentYDp = (resolvedBounds.y / density).roundToInt().toFloat().coerceIn(minYDp, maxYDp)
 
-                val currentXDp = (userPreferences.overlayXPosition / density).roundToInt()
-                val currentYDp = (userPreferences.overlayYPosition / density).roundToInt()
-
-                var localXDp by remember(userPreferences.overlayXPosition) {
-                    mutableFloatStateOf(currentXDp.toFloat().coerceIn(0f, maxXDp.toFloat()))
+                var localXDp by remember(activeOrientation, resolvedBounds.x, minXDp, maxXDp) {
+                    mutableFloatStateOf(currentXDp)
                 }
-                var localYDp by remember(userPreferences.overlayYPosition) {
-                    mutableFloatStateOf(currentYDp.toFloat().coerceIn(0f, maxYDp.toFloat()))
+                var localYDp by remember(activeOrientation, resolvedBounds.y, minYDp, maxYDp) {
+                    mutableFloatStateOf(currentYDp)
                 }
 
                 // Row 1: Horizontal Position (X)
@@ -1641,7 +1729,7 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "${localXDp.roundToInt()} dp (${userPreferences.overlayXPosition} px)",
+                        text = "${localXDp.roundToInt()} dp (${(localXDp * density).roundToInt()} px)",
                         fontWeight = FontWeight.Bold,
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.primary
@@ -1649,15 +1737,20 @@ fun SettingsScreen(
                 }
 
                 Slider(
-                    value = localXDp,
+                    value = localXDp.coerceIn(minXDp, maxXDp),
                     onValueChange = { localXDp = it },
                     onValueChangeFinished = {
                         coroutineScope.launch {
                             val newXPx = (localXDp * density).roundToInt()
-                            playbackManager.preferencesRepository.setOverlayPosition(newXPx, userPreferences.overlayYPosition)
+                                .coerceIn(resolvedBounds.constraints.minX, resolvedBounds.constraints.maxX)
+                            playbackManager.preferencesRepository.setOverlayPosition(
+                                x = newXPx,
+                                y = resolvedBounds.y,
+                                orientation = activeOrientation
+                            )
                         }
                     },
-                    valueRange = 0f..maxXDp.toFloat(),
+                    valueRange = minXDp..maxXDp,
                     modifier = Modifier.fillMaxWidth().testTag("x_position_slider")
                 )
 
@@ -1671,7 +1764,13 @@ fun SettingsScreen(
                             onClick = {
                                 coroutineScope.launch {
                                     val deltaPx = (deltaDp * density).roundToInt()
-                                    playbackManager.preferencesRepository.nudgeOverlayPosition(deltaPx, 0)
+                                    playbackManager.preferencesRepository.nudgeOverlayPosition(
+                                        deltaX = deltaPx,
+                                        deltaY = 0,
+                                        orientation = activeOrientation,
+                                        constraints = resolvedBounds.constraints,
+                                        fallbackProfile = activeProfile
+                                    )
                                 }
                             },
                             modifier = Modifier
@@ -1706,7 +1805,7 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "${localYDp.roundToInt()} dp (${userPreferences.overlayYPosition} px)",
+                        text = "${localYDp.roundToInt()} dp (${(localYDp * density).roundToInt()} px)",
                         fontWeight = FontWeight.Bold,
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.primary
@@ -1714,15 +1813,20 @@ fun SettingsScreen(
                 }
 
                 Slider(
-                    value = localYDp,
+                    value = localYDp.coerceIn(minYDp, maxYDp),
                     onValueChange = { localYDp = it },
                     onValueChangeFinished = {
                         coroutineScope.launch {
                             val newYPx = (localYDp * density).roundToInt()
-                            playbackManager.preferencesRepository.setOverlayPosition(userPreferences.overlayXPosition, newYPx)
+                                .coerceIn(resolvedBounds.constraints.minY, resolvedBounds.constraints.maxY)
+                            playbackManager.preferencesRepository.setOverlayPosition(
+                                x = resolvedBounds.x,
+                                y = newYPx,
+                                orientation = activeOrientation
+                            )
                         }
                     },
-                    valueRange = 0f..maxYDp.toFloat(),
+                    valueRange = minYDp..maxYDp,
                     modifier = Modifier.fillMaxWidth().testTag("y_position_slider")
                 )
 
@@ -1736,7 +1840,13 @@ fun SettingsScreen(
                             onClick = {
                                 coroutineScope.launch {
                                     val deltaPx = (deltaDp * density).roundToInt()
-                                    playbackManager.preferencesRepository.nudgeOverlayPosition(0, deltaPx)
+                                    playbackManager.preferencesRepository.nudgeOverlayPosition(
+                                        deltaX = 0,
+                                        deltaY = deltaPx,
+                                        orientation = activeOrientation,
+                                        constraints = resolvedBounds.constraints,
+                                        fallbackProfile = activeProfile
+                                    )
                                 }
                             },
                             modifier = Modifier
@@ -1760,9 +1870,17 @@ fun SettingsScreen(
                 OutlinedButton(
                     onClick = {
                         coroutineScope.launch {
-                            val centerXPx = ((screenWidthDp * density - overlayWidthPx) / 2).toInt().coerceAtLeast(0)
-                            val centerYPx = (screenHeightDp * density * 0.18f).toInt()
-                            playbackManager.preferencesRepository.setOverlayPosition(centerXPx, centerYPx)
+                            val centered = HudPositioningEngine.computeCenteredProfile(
+                                widthPx = resolvedBounds.widthPx,
+                                heightPx = resolvedBounds.heightPx,
+                                geometry = displayGeometry,
+                                minBackdropHeightPx = minBackdropHeightPx
+                            )
+                            playbackManager.preferencesRepository.setOverlayPosition(
+                                x = centered.x,
+                                y = centered.y,
+                                orientation = activeOrientation
+                            )
                         }
                     },
                     modifier = Modifier.fillMaxWidth().height(42.dp),
@@ -2594,13 +2712,18 @@ fun SettingsScreen(
                     .fillMaxWidth()
                     .widthIn(max = if (isTwoColumn) 1080.dp else 640.dp)
             ) {
-                // Header with title, subtitle, and Expand/Collapse All
+                val showChipInlineInHeader = isTwoColumn && fontScale < 1.35f
+
+                // Header with title, subtitle, HUD orientation chip, and Expand/Collapse All
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(
                             top = if (isTwoColumn) 2.dp else 8.dp,
-                            bottom = if (isTwoColumn) 14.dp else 16.dp
+                            bottom = when {
+                                showChipInlineInHeader -> 14.dp
+                                else -> 4.dp
+                            }
                         ),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
@@ -2621,19 +2744,45 @@ fun SettingsScreen(
                         )
                     }
 
-                    TextButton(
-                        onClick = {
-                            expandedSections = if (expandedSections.size == allSectionKeys.size) {
-                                emptySet()
-                            } else {
-                                allSectionKeys.toSet()
-                            }
-                        }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text(
-                            text = if (expandedSections.size == allSectionKeys.size) "Collapse All" else "Expand All",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary
+                        if (showChipInlineInHeader) {
+                            HudOrientationModeChip(
+                                snapshot = orientationInfo,
+                                onClick = { showOrientationInfoDialog = true }
+                            )
+                        }
+
+                        TextButton(
+                            onClick = {
+                                expandedSections = if (expandedSections.size == allSectionKeys.size) {
+                                    emptySet()
+                                } else {
+                                    allSectionKeys.toSet()
+                                }
+                            }
+                        ) {
+                            Text(
+                                text = if (expandedSections.size == allSectionKeys.size) "Collapse All" else "Expand All",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
+
+                if (!showChipInlineInHeader) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 10.dp),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        HudOrientationModeChip(
+                            snapshot = orientationInfo,
+                            onClick = { showOrientationInfoDialog = true }
                         )
                     }
                 }
@@ -2692,6 +2841,13 @@ fun SettingsScreen(
             UpdateDialog(
                 updateManager = updateManager,
                 onDismiss = { showUpdateDialog = false }
+            )
+        }
+
+        if (showOrientationInfoDialog) {
+            HudOrientationInfoDialog(
+                snapshot = orientationInfo,
+                onDismiss = { showOrientationInfoDialog = false }
             )
         }
     }
@@ -3211,5 +3367,249 @@ private fun SettingsAccordionCard(
                 content()
             }
         }
+    }
+}
+
+@Composable
+private fun HudOrientationModeChip(
+    snapshot: HudOrientationInfoSnapshot,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val icon = if (snapshot.orientation == HudOrientation.LANDSCAPE) {
+        Icons.Default.StayCurrentLandscape
+    } else {
+        Icons.Default.StayCurrentPortrait
+    }
+    Box(
+        modifier = modifier
+            .minimumInteractiveComponentSize()
+            .clip(CircleShape)
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics {
+                contentDescription = "${snapshot.modeTitle} active. Tap for details."
+            }
+            .testTag("hud_orientation_mode_chip"),
+        contentAlignment = Alignment.Center
+    ) {
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
+            border = BorderStroke(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
+            )
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(14.dp)
+                )
+                Text(
+                    text = snapshot.chipLabel,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Icon(
+                    imageVector = Icons.Outlined.Info,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                    modifier = Modifier.size(14.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HudOrientationInfoDialog(
+    snapshot: HudOrientationInfoSnapshot,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val orientationIcon = if (snapshot.orientation == HudOrientation.LANDSCAPE) {
+        Icons.Default.StayCurrentLandscape
+    } else {
+        Icons.Default.StayCurrentPortrait
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        FrostedCard(
+            modifier = modifier
+                .fillMaxWidth(0.92f)
+                .widthIn(max = 420.dp)
+                .padding(vertical = 16.dp)
+                .testTag("hud_orientation_info_dialog"),
+            shape = RoundedCornerShape(24.dp),
+            backgroundAlpha = 0.90f,
+            borderAlpha = 0.35f
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(20.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = orientationIcon,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = snapshot.modeTitle,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = snapshot.modeSubtitle,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.testTag("hud_orientation_info_close_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Text(
+                    text = snapshot.explanation,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = snapshot.autoSwitchNote,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
+                    border = BorderStroke(
+                        width = 1.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OrientationSnapshotRow(
+                            label = "Window Bounds",
+                            value = snapshot.screenSizeDpLabel
+                        )
+                        HorizontalDivider(
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
+                        )
+                        OrientationSnapshotRow(
+                            label = "Active HUD Size",
+                            value = snapshot.hudSizeDpLabel
+                        )
+                        HorizontalDivider(
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
+                        )
+                        OrientationSnapshotRow(
+                            label = "Active HUD Position",
+                            value = snapshot.hudPositionDpLabel
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                FilledTonalButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .testTag("hud_orientation_info_got_it_button"),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(
+                        text = "Got it",
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OrientationSnapshotRow(
+    label: String,
+    value: String
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f).padding(end = 8.dp)
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+            textAlign = TextAlign.End
+        )
     }
 }

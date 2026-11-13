@@ -13,6 +13,11 @@ import androidx.core.app.NotificationCompat
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.ui.graphics.toArgb
 import android.animation.ValueAnimator
+import android.content.res.Configuration
+import android.hardware.display.DisplayManager
+import android.os.Handler
+import android.os.Looper
+import android.view.View
 import android.view.animation.DecelerateInterpolator
 import com.example.MainActivity
 import com.example.R
@@ -20,6 +25,7 @@ import com.example.data.preferences.ThemePreset
 import com.example.ui.components.MinimalOverlayView
 import com.example.ui.theme.*
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 
 class OverlayService : Service() {
@@ -31,10 +37,23 @@ class OverlayService : Service() {
 
     private lateinit var playbackManager: MediaPlaybackManager
 
+    private var displayManager: DisplayManager? = null
+    private lateinit var displayGeometryFlow: MutableStateFlow<HudDisplayGeometry>
+
     private var currentX = 0
-    private var currentY = 140
+    private var currentY = 180
     private var isDragMode = false
+    private var hasAppliedInitialPrefs = false
+    private var isInitializingLandscapeProfile = false
     private var currentPrefs = com.example.data.preferences.UserPreferences()
+
+    private val displayListener = object : DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) = Unit
+        override fun onDisplayRemoved(displayId: Int) = Unit
+        override fun onDisplayChanged(displayId: Int) {
+            refreshDisplayGeometry()
+        }
+    }
 
     private val screenReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -45,10 +64,39 @@ class OverlayService : Service() {
         }
     }
 
+    private fun readCurrentDisplayGeometry(
+        insets: android.view.WindowInsets? = overlayView?.rootWindowInsets
+    ): HudDisplayGeometry {
+        return HudDisplayMetricsProvider.getOverlayDisplayGeometry(
+            context = this,
+            windowManager = windowManager,
+            rootWindowInsets = insets
+        )
+    }
+
+    private fun refreshDisplayGeometry(insets: android.view.WindowInsets? = overlayView?.rootWindowInsets) {
+        if (!::displayGeometryFlow.isInitialized) return
+        val newGeometry = readCurrentDisplayGeometry(insets)
+        val prevGeometry = displayGeometryFlow.value
+        if (prevGeometry != newGeometry) {
+            if (prevGeometry.orientation != newGeometry.orientation) {
+                overlayView?.cancelActiveDrag()
+            }
+            displayGeometryFlow.value = newGeometry
+        }
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        refreshDisplayGeometry()
+    }
+
     override fun onCreate() {
         super.onCreate()
         playbackManager = MediaPlaybackManager.getInstance(this)
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        displayManager = getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
+        displayGeometryFlow = MutableStateFlow(readCurrentDisplayGeometry(null))
 
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification("LyricBar Overlay Active"))
@@ -58,6 +106,7 @@ class OverlayService : Service() {
             addAction(Intent.ACTION_SCREEN_ON)
         }
         registerReceiver(screenReceiver, screenFilter)
+        displayManager?.registerDisplayListener(displayListener, Handler(Looper.getMainLooper()))
 
         if (Settings.canDrawOverlays(this)) {
             setupOverlayWindow()
@@ -90,6 +139,10 @@ class OverlayService : Service() {
 
     private fun setupOverlayWindow() {
         val wm = windowManager ?: return
+        val initialGeometry = displayGeometryFlow.value
+        val placeholderBounds = HudPositioningEngine.defaultPlaceholderForGeometry(initialGeometry)
+        currentX = placeholderBounds.x
+        currentY = placeholderBounds.y
 
         val flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
             WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
@@ -98,8 +151,8 @@ class OverlayService : Service() {
             (if (isDragMode) 0 else WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
 
         val params = WindowManager.LayoutParams(
-            850,
-            130,
+            placeholderBounds.widthPx,
+            placeholderBounds.heightPx,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             flags,
             PixelFormat.TRANSLUCENT
@@ -118,26 +171,46 @@ class OverlayService : Service() {
             context = this,
             windowManager = wm,
             layoutParams = params,
-            onBoundsChanged = { newX, newY, newW, newH ->
+            onBoundsChanged = { dragOrientation, newX, newY, newW, newH ->
                 currentX = newX
                 currentY = newY
                 serviceScope.launch {
-                    playbackManager.preferencesRepository.setOverlayBounds(newX, newY, newW, newH)
+                    playbackManager.preferencesRepository.setOverlayBounds(
+                        x = newX,
+                        y = newY,
+                        widthPx = newW,
+                        heightPx = newH,
+                        orientation = dragOrientation
+                    )
                 }
             },
             onResyncRequested = {
                 playbackManager.resyncLyrics(forceRefresh = false)
             }
-        )
+        ).apply {
+            activeOrientation = initialGeometry.orientation
+            displayGeometry = initialGeometry
+            setOnApplyWindowInsetsListener { _, insets ->
+                refreshDisplayGeometry(insets)
+                insets
+            }
+            addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                override fun onViewAttachedToWindow(v: View) {
+                    v.requestApplyInsets()
+                    refreshDisplayGeometry(v.rootWindowInsets)
+                }
+
+                override fun onViewDetachedFromWindow(v: View) = Unit
+            })
+        }
         overlayView = view
 
-        val currentPb = playbackManager.playbackState.value
-        val shouldInitiallyShow = isDragMode || (currentPb.isPlaying && currentPb.hasActiveSession && currentPb.track != null)
-        view.visibility = if (shouldInitiallyShow) android.view.View.VISIBLE else android.view.View.GONE
-        view.alpha = if (shouldInitiallyShow) 1.0f else 0.0f
-        view.scaleX = if (shouldInitiallyShow) 1.0f else 0.97f
-        view.scaleY = if (shouldInitiallyShow) 1.0f else 0.97f
-        lastTargetVisible = shouldInitiallyShow
+        // Keep initial window hidden until persisted portrait/landscape preferences are applied
+        view.visibility = View.GONE
+        view.alpha = 0.0f
+        view.scaleX = 0.97f
+        view.scaleY = 0.97f
+        lastTargetVisible = null
 
         try {
             wm.addView(view, params)
@@ -322,20 +395,22 @@ class OverlayService : Service() {
     }
 
     private fun observeState() {
-        // Observe lyrics, playback state, and preferences
+        // Observe lyrics, playback state, preferences, and display geometry
         serviceScope.launch {
             var lastAppliedLine: com.example.data.model.LyricLine? = null
             var lastAppliedLyricsKey: String? = null
             var lastAppliedTrackKey: String? = null
             var lastAppliedPrefs: com.example.data.preferences.UserPreferences? = null
+            var lastAppliedGeometry: HudDisplayGeometry? = null
 
             combine(
                 playbackManager.activeLyricObject,
                 playbackManager.currentLyrics,
                 playbackManager.playbackState,
-                playbackManager.preferencesRepository.userPreferencesFlow
-            ) { lineObj, lyrics, playbackState, prefs ->
-                OverlayStateBundle(lineObj, lyrics, playbackState, prefs)
+                playbackManager.preferencesRepository.userPreferencesFlow,
+                displayGeometryFlow
+            ) { lineObj, lyrics, playbackState, prefs, geometry ->
+                OverlayStateBundle(lineObj, lyrics, playbackState, prefs, geometry)
             }.collect { bundle ->
                 val view = overlayView ?: return@collect
                 val params = layoutParams ?: return@collect
@@ -343,6 +418,7 @@ class OverlayService : Service() {
                 val lineObj = bundle.lineObj
                 val lyrics = bundle.lyrics
                 val playbackState = bundle.playbackState
+                val geometry = bundle.geometry
 
                 currentPrefs = prefs
                 if (!prefs.overlayEnabled) {
@@ -355,8 +431,6 @@ class OverlayService : Service() {
                     stopSelf()
                     return@collect
                 }
-
-                updateOverlayVisibility(playbackState, prefs.overlayEnabled)
 
                 // 1. Update active lyric line and next timestamp ONLY when the line or lyrics change
                 val currentLyricsKey = lyrics?.let { "${it.title}_${it.lines.size}" }
@@ -380,84 +454,112 @@ class OverlayService : Service() {
                     view.trackDurationMs = if (trackDurationSec > 0) trackDurationSec * 1000L else null
                 }
 
-                // 3. Update styling properties, primary color, and bounds ONLY when preferences actually change
-                if (prefs != lastAppliedPrefs) {
-                    lastAppliedPrefs = prefs
+                // 3. Update styling properties, primary color, and orientation-aware bounds when preferences or display geometry change
+                val prefsChanged = prefs != lastAppliedPrefs
+                val geometryChanged = geometry != lastAppliedGeometry
+                if (prefsChanged || geometryChanged || !hasAppliedInitialPrefs) {
+                    if (prefsChanged) {
+                        lastAppliedPrefs = prefs
 
-                    view.textSizeSp = prefs.overlayTextSizeSp
-                    view.textOpacity = prefs.overlayTextOpacity
-                    view.hudBackdropEnabled = prefs.hudBackdropEnabled
-                    view.hudBackdropStyle = prefs.hudBackdropStyle.name
-                    view.hudBackdropOpacity = prefs.hudBackdropOpacity
-                    view.hudBackdropCornerRadiusDp = prefs.hudBackdropCornerRadiusDp.toFloat()
-                    view.hudBackdropHorizontalPaddingDp = prefs.hudBackdropHorizontalPaddingDp.toFloat()
-                    view.hudBackdropVerticalPaddingDp = prefs.hudBackdropVerticalPaddingDp.toFloat()
-                    view.typewriterSpeed = prefs.typewriterSpeed
-                    view.smoothTransitionSpeed = prefs.smoothTransitionSpeed
-                    view.fadeSpeed = prefs.fadeSpeed
-                    view.blurRevealSpeed = prefs.blurRevealSpeed
-                    view.karaokeSpeed = prefs.karaokeSpeed
-                    view.karaokeGlowSpeed = prefs.karaokeGlowSpeed
-                    view.textShadowEnabled = prefs.textShadowEnabled
-                    view.textAlignMode = prefs.overlayTextAlign
-                    view.animationStyle = prefs.animationStyle
-                    view.singleLineMode = prefs.singleLineLyrics
-                    view.adaptiveScrollingEnabled = prefs.adaptiveLyricScrolling
-                    view.scrollSpeedMultiplier = prefs.lyricScrollSpeedMultiplier
-                    view.fontResId = prefs.selectedFont.fontResId
+                        view.textSizeSp = prefs.overlayTextSizeSp
+                        view.textOpacity = prefs.overlayTextOpacity
+                        view.hudBackdropEnabled = prefs.hudBackdropEnabled
+                        view.hudBackdropStyle = prefs.hudBackdropStyle.name
+                        view.hudBackdropOpacity = prefs.hudBackdropOpacity
+                        view.hudBackdropCornerRadiusDp = prefs.hudBackdropCornerRadiusDp.toFloat()
+                        view.hudBackdropHorizontalPaddingDp = prefs.hudBackdropHorizontalPaddingDp.toFloat()
+                        view.hudBackdropVerticalPaddingDp = prefs.hudBackdropVerticalPaddingDp.toFloat()
+                        view.typewriterSpeed = prefs.typewriterSpeed
+                        view.smoothTransitionSpeed = prefs.smoothTransitionSpeed
+                        view.fadeSpeed = prefs.fadeSpeed
+                        view.blurRevealSpeed = prefs.blurRevealSpeed
+                        view.karaokeSpeed = prefs.karaokeSpeed
+                        view.karaokeGlowSpeed = prefs.karaokeGlowSpeed
+                        view.textShadowEnabled = prefs.textShadowEnabled
+                        view.textAlignMode = prefs.overlayTextAlign
+                        view.animationStyle = prefs.animationStyle
+                        view.singleLineMode = prefs.singleLineLyrics
+                        view.adaptiveScrollingEnabled = prefs.adaptiveLyricScrolling
+                        view.scrollSpeedMultiplier = prefs.lyricScrollSpeedMultiplier
+                        view.fontResId = prefs.selectedFont.fontResId
 
-                    val resolvedPrimary = if (prefs.useWallpaperDynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        try {
-                            dynamicDarkColorScheme(this@OverlayService).primary.toArgb()
-                        } catch (_: Exception) {
-                            android.graphics.Color.WHITE
+                        val resolvedPrimary = if (prefs.useWallpaperDynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            try {
+                                dynamicDarkColorScheme(this@OverlayService).primary.toArgb()
+                            } catch (_: Exception) {
+                                android.graphics.Color.WHITE
+                            }
+                        } else {
+                            when (prefs.themePreset) {
+                                ThemePreset.ROSE_QUARTZ, ThemePreset.OBSIDIAN_MINT -> RoseQuartzPrimary.toArgb()
+                                ThemePreset.LAVENDER_MIST, ThemePreset.MIDNIGHT_AZURE -> LavenderMistPrimary.toArgb()
+                                ThemePreset.PEACH_EMBER, ThemePreset.SUNSET_AMBER -> PeachEmberPrimary.toArgb()
+                                ThemePreset.SAGE_SERENITY, ThemePreset.CYBER_VIOLET -> SageSerenityPrimary.toArgb()
+                            }
                         }
-                    } else {
-                        when (prefs.themePreset) {
-                            ThemePreset.ROSE_QUARTZ, ThemePreset.OBSIDIAN_MINT -> RoseQuartzPrimary.toArgb()
-                            ThemePreset.LAVENDER_MIST, ThemePreset.MIDNIGHT_AZURE -> LavenderMistPrimary.toArgb()
-                            ThemePreset.PEACH_EMBER, ThemePreset.SUNSET_AMBER -> PeachEmberPrimary.toArgb()
-                            ThemePreset.SAGE_SERENITY, ThemePreset.CYBER_VIOLET -> SageSerenityPrimary.toArgb()
+                        view.primaryColor = resolvedPrimary
+
+                        // Update drag mode if changed externally from settings
+                        if (isDragMode != prefs.isDragRepositionMode) {
+                            isDragMode = prefs.isDragRepositionMode
+                            updateOverlayFlags()
+                            updateNotification()
                         }
                     }
-                    view.primaryColor = resolvedPrimary
 
-                    // Update drag mode if changed externally from settings
-                    if (isDragMode != prefs.isDragRepositionMode) {
-                        isDragMode = prefs.isDragRepositionMode
-                        updateOverlayFlags()
-                        updateNotification()
-                        updateOverlayVisibility(playbackState, prefs.overlayEnabled)
-                    }
+                    lastAppliedGeometry = geometry
+                    val minBackdropHeightPx = HudPositioningEngine.computeMinBackdropHeightPx(
+                        prefs = prefs,
+                        displayMetrics = resources.displayMetrics
+                    )
 
-                    // Update bounds coordinates & size
-                    var layoutChanged = false
-                    if (params.y != prefs.overlayYPosition || params.x != prefs.overlayXPosition) {
-                        params.x = prefs.overlayXPosition
-                        params.y = prefs.overlayYPosition
-                        currentX = prefs.overlayXPosition
-                        currentY = prefs.overlayYPosition
-                        layoutChanged = true
-                    }
-                    if (prefs.overlayWidthPx > 0 && params.width != prefs.overlayWidthPx) {
-                        params.width = prefs.overlayWidthPx
-                        layoutChanged = true
-                    }
-                    val density = resources.displayMetrics.density
-                    val minBackdropHeightPx = if (prefs.hudBackdropEnabled) {
-                        val textPx = android.util.TypedValue.applyDimension(
-                            android.util.TypedValue.COMPLEX_UNIT_SP,
-                            prefs.overlayTextSizeSp,
-                            resources.displayMetrics
+                    if (geometry.orientation == HudOrientation.LANDSCAPE &&
+                        !prefs.hasLandscapeProfile &&
+                        !isInitializingLandscapeProfile
+                    ) {
+                        isInitializingLandscapeProfile = true
+                        val defaultLandscape = HudPositioningEngine.createDefaultLandscapeProfile(
+                            geometry = geometry,
+                            minBackdropHeightPx = minBackdropHeightPx
                         )
-                        val vertPadPx = prefs.hudBackdropVerticalPaddingDp * density * 2f
-                        kotlin.math.round(textPx * 2.2f + vertPadPx + 16f * density).toInt()
-                    } else {
-                        0
+                        serviceScope.launch {
+                            try {
+                                playbackManager.preferencesRepository.ensureLandscapeProfile(defaultLandscape)
+                            } finally {
+                                isInitializingLandscapeProfile = false
+                            }
+                        }
                     }
-                    val effectiveHeightPx = maxOf(prefs.overlayHeightPx, minBackdropHeightPx)
-                    if (effectiveHeightPx > 0 && params.height != effectiveHeightPx) {
-                        params.height = effectiveHeightPx
+
+                    val activeProfile = prefs.resolveProfile(
+                        orientation = geometry.orientation,
+                        displayGeometry = geometry,
+                        minBackdropHeightPx = minBackdropHeightPx
+                    )
+                    val resolvedBounds = HudPositioningEngine.resolveBounds(
+                        profile = activeProfile,
+                        geometry = geometry,
+                        minBackdropHeightPx = minBackdropHeightPx
+                    )
+
+                    view.activeOrientation = geometry.orientation
+                    view.displayGeometry = geometry
+                    view.minBackdropHeightPx = minBackdropHeightPx
+
+                    var layoutChanged = false
+                    if (params.x != resolvedBounds.x || params.y != resolvedBounds.y) {
+                        params.x = resolvedBounds.x
+                        params.y = resolvedBounds.y
+                        currentX = resolvedBounds.x
+                        currentY = resolvedBounds.y
+                        layoutChanged = true
+                    }
+                    if (resolvedBounds.widthPx > 0 && params.width != resolvedBounds.widthPx) {
+                        params.width = resolvedBounds.widthPx
+                        layoutChanged = true
+                    }
+                    if (resolvedBounds.effectiveHeightPx > 0 && params.height != resolvedBounds.effectiveHeightPx) {
+                        params.height = resolvedBounds.effectiveHeightPx
                         layoutChanged = true
                     }
 
@@ -467,6 +569,9 @@ class OverlayService : Service() {
                         } catch (_: Exception) {}
                     }
                 }
+
+                hasAppliedInitialPrefs = true
+                updateOverlayVisibility(playbackState, prefs.overlayEnabled)
             }
         }
 
@@ -474,7 +579,9 @@ class OverlayService : Service() {
         serviceScope.launch {
             playbackManager.playbackState.collect { state ->
                 val view = overlayView ?: return@collect
-                updateOverlayVisibility(state, currentPrefs.overlayEnabled)
+                if (hasAppliedInitialPrefs) {
+                    updateOverlayVisibility(state, currentPrefs.overlayEnabled)
+                }
                 view.updatePlaybackState(
                     playing = state.isPlaying,
                     positionMs = state.positionMs,
@@ -546,6 +653,9 @@ class OverlayService : Service() {
         cancelVisibilityAnimation()
         serviceScope.cancel()
         try {
+            displayManager?.unregisterDisplayListener(displayListener)
+        } catch (_: Exception) {}
+        try {
             unregisterReceiver(screenReceiver)
         } catch (_: Exception) {}
         overlayView?.let {
@@ -584,6 +694,7 @@ class OverlayService : Service() {
         val lineObj: com.example.data.model.LyricLine?,
         val lyrics: com.example.data.model.ParsedLyrics?,
         val playbackState: com.example.data.model.PlaybackStateInfo,
-        val prefs: com.example.data.preferences.UserPreferences
+        val prefs: com.example.data.preferences.UserPreferences,
+        val geometry: HudDisplayGeometry
     )
 }

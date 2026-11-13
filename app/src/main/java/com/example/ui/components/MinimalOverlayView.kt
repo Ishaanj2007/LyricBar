@@ -14,6 +14,10 @@ import android.view.WindowManager
 import android.view.animation.DecelerateInterpolator
 import androidx.core.content.res.ResourcesCompat
 import com.example.data.model.LyricLine
+import com.example.service.HudDisplayGeometry
+import com.example.service.HudOrientation
+import com.example.service.HudOverlayProfile
+import com.example.service.HudPositioningEngine
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -22,7 +26,7 @@ class MinimalOverlayView(
     context: Context,
     private val windowManager: WindowManager,
     private val layoutParams: WindowManager.LayoutParams,
-    private val onBoundsChanged: (x: Int, y: Int, width: Int, height: Int) -> Unit,
+    private val onBoundsChanged: (orientation: HudOrientation, x: Int, y: Int, width: Int, height: Int) -> Unit,
     var onResyncRequested: (() -> Unit)? = null
 ) : View(context) {
 
@@ -593,18 +597,30 @@ class MinimalOverlayView(
     var isDragMode: Boolean = false
         set(value) {
             field = value
+            if (!value) {
+                activeTouchTarget = TouchTarget.NONE
+            }
             invalidate()
         }
+
+    var activeOrientation: HudOrientation = HudOrientation.PORTRAIT
+    var displayGeometry: HudDisplayGeometry? = null
+    var minBackdropHeightPx: Int = 0
 
     // Touch and drag/resize tracking
     private enum class TouchTarget { NONE, MOVE, RESIZE_TOP, RESIZE_BOTTOM, RESIZE_LEFT, RESIZE_RIGHT, RESIZE_TL, RESIZE_TR, RESIZE_BL, RESIZE_BR }
     private var activeTouchTarget = TouchTarget.NONE
+    private var dragOrientation: HudOrientation = HudOrientation.PORTRAIT
     private var initialX = 0
     private var initialY = 0
     private var initialW = 0
     private var initialH = 0
     private var initialTouchX = 0f
     private var initialTouchY = 0f
+
+    fun cancelActiveDrag() {
+        activeTouchTarget = TouchTarget.NONE
+    }
 
     init {
         setBackgroundColor(Color.TRANSPARENT)
@@ -1663,6 +1679,7 @@ class MinimalOverlayView(
 
         when (event.action) {
             MotionEvent.ACTION_DOWN -> {
+                dragOrientation = displayGeometry?.orientation ?: activeOrientation
                 initialX = layoutParams.x
                 initialY = layoutParams.y
                 initialW = if (layoutParams.width > 0) layoutParams.width else width
@@ -1685,58 +1702,118 @@ class MinimalOverlayView(
             }
 
             MotionEvent.ACTION_MOVE -> {
+                if (activeTouchTarget == TouchTarget.NONE) return false
                 val dx = (event.rawX - initialTouchX).toInt()
                 val dy = (event.rawY - initialTouchY).toInt()
 
+                val geom = displayGeometry
+                val constraints = geom?.let {
+                    HudPositioningEngine.computeConstraints(
+                        geometry = it,
+                        currentWidthPx = initialW,
+                        currentEffectiveHeightPx = initialH,
+                        minBackdropHeightPx = minBackdropHeightPx
+                    )
+                }
+                val minW = constraints?.minWidthPx ?: 280
+                val maxW = constraints?.maxWidthPx ?: 2000
+                val minH = constraints?.minHeightPx ?: 60
+                val maxH = constraints?.maxHeightPx ?: 800
+                val minX = constraints?.minX ?: -2000
+                val maxRight = constraints?.minSafeRightPx ?: Int.MAX_VALUE
+                val minY = constraints?.minY ?: 0
+                val maxBottom = constraints?.maxSafeBottomPx ?: Int.MAX_VALUE
+
+                var targetX = initialX
+                var targetY = initialY
+                var targetW = initialW
+                var targetH = initialH
+
                 when (activeTouchTarget) {
                     TouchTarget.MOVE -> {
-                        layoutParams.x = (initialX + dx).coerceIn(-2000, 2000)
-                        layoutParams.y = (initialY + dy).coerceIn(0, 3000)
+                        val moveMaxX = if (maxRight < Int.MAX_VALUE) (maxRight - initialW).coerceAtLeast(minX) else 2000
+                        val moveMaxY = if (maxBottom < Int.MAX_VALUE) (maxBottom - initialH).coerceAtLeast(minY) else 3000
+                        targetX = (initialX + dx).coerceIn(minX, moveMaxX)
+                        targetY = (initialY + dy).coerceIn(minY, moveMaxY)
                     }
                     TouchTarget.RESIZE_RIGHT -> {
-                        layoutParams.width = (initialW + dx).coerceIn(280, 2000)
+                        val availMaxW = if (maxRight < Int.MAX_VALUE) (maxRight - initialX).coerceIn(minW, maxW) else maxW
+                        targetW = (initialW + dx).coerceIn(minW, availMaxW)
                     }
                     TouchTarget.RESIZE_BOTTOM -> {
-                        layoutParams.height = (initialH + dy).coerceIn(60, 800)
+                        val availMaxH = if (maxBottom < Int.MAX_VALUE) (maxBottom - initialY).coerceIn(minH, maxH) else maxH
+                        targetH = (initialH + dy).coerceIn(minH, availMaxH)
                     }
                     TouchTarget.RESIZE_BR -> {
-                        layoutParams.width = (initialW + dx).coerceIn(280, 2000)
-                        layoutParams.height = (initialH + dy).coerceIn(60, 800)
+                        val availMaxW = if (maxRight < Int.MAX_VALUE) (maxRight - initialX).coerceIn(minW, maxW) else maxW
+                        val availMaxH = if (maxBottom < Int.MAX_VALUE) (maxBottom - initialY).coerceIn(minH, maxH) else maxH
+                        targetW = (initialW + dx).coerceIn(minW, availMaxW)
+                        targetH = (initialH + dy).coerceIn(minH, availMaxH)
                     }
                     TouchTarget.RESIZE_LEFT -> {
-                        val newW = (initialW - dx).coerceIn(280, 2000)
-                        layoutParams.width = newW
-                        layoutParams.x = (initialX + dx).coerceIn(-2000, 2000)
+                        val anchorRight = initialX + initialW
+                        val availMaxW = (anchorRight - minX).coerceIn(minW, maxW)
+                        val newW = (initialW - dx).coerceIn(minW, availMaxW)
+                        targetW = newW
+                        targetX = (anchorRight - newW).coerceIn(minX, (maxRight - newW).coerceAtLeast(minX))
                     }
                     TouchTarget.RESIZE_TOP -> {
-                        val newH = (initialH - dy).coerceIn(60, 800)
-                        layoutParams.height = newH
-                        layoutParams.y = (initialY + dy).coerceIn(0, 3000)
+                        val anchorBottom = initialY + initialH
+                        val availMaxH = (anchorBottom - minY).coerceIn(minH, maxH)
+                        val newH = (initialH - dy).coerceIn(minH, availMaxH)
+                        targetH = newH
+                        targetY = (anchorBottom - newH).coerceIn(minY, (maxBottom - newH).coerceAtLeast(minY))
                     }
                     TouchTarget.RESIZE_TL -> {
-                        val newW = (initialW - dx).coerceIn(280, 2000)
-                        val newH = (initialH - dy).coerceIn(60, 800)
-                        layoutParams.width = newW
-                        layoutParams.height = newH
-                        layoutParams.x = (initialX + dx).coerceIn(-2000, 2000)
-                        layoutParams.y = (initialY + dy).coerceIn(0, 3000)
+                        val anchorRight = initialX + initialW
+                        val anchorBottom = initialY + initialH
+                        val availMaxW = (anchorRight - minX).coerceIn(minW, maxW)
+                        val availMaxH = (anchorBottom - minY).coerceIn(minH, maxH)
+                        val newW = (initialW - dx).coerceIn(minW, availMaxW)
+                        val newH = (initialH - dy).coerceIn(minH, availMaxH)
+                        targetW = newW
+                        targetH = newH
+                        targetX = (anchorRight - newW).coerceIn(minX, (maxRight - newW).coerceAtLeast(minX))
+                        targetY = (anchorBottom - newH).coerceIn(minY, (maxBottom - newH).coerceAtLeast(minY))
                     }
                     TouchTarget.RESIZE_TR -> {
-                        val newW = (initialW + dx).coerceIn(280, 2000)
-                        val newH = (initialH - dy).coerceIn(60, 800)
-                        layoutParams.width = newW
-                        layoutParams.height = newH
-                        layoutParams.y = (initialY + dy).coerceIn(0, 3000)
+                        val anchorBottom = initialY + initialH
+                        val availMaxW = if (maxRight < Int.MAX_VALUE) (maxRight - initialX).coerceIn(minW, maxW) else maxW
+                        val availMaxH = (anchorBottom - minY).coerceIn(minH, maxH)
+                        val newW = (initialW + dx).coerceIn(minW, availMaxW)
+                        val newH = (initialH - dy).coerceIn(minH, availMaxH)
+                        targetW = newW
+                        targetH = newH
+                        targetY = (anchorBottom - newH).coerceIn(minY, (maxBottom - newH).coerceAtLeast(minY))
                     }
                     TouchTarget.RESIZE_BL -> {
-                        val newW = (initialW - dx).coerceIn(280, 2000)
-                        val newH = (initialH + dy).coerceIn(60, 800)
-                        layoutParams.width = newW
-                        layoutParams.height = newH
-                        layoutParams.x = (initialX + dx).coerceIn(-2000, 2000)
-                        layoutParams.y = (initialY + dy).coerceIn(0, 3000)
+                        val anchorRight = initialX + initialW
+                        val availMaxW = (anchorRight - minX).coerceIn(minW, maxW)
+                        val availMaxH = if (maxBottom < Int.MAX_VALUE) (maxBottom - initialY).coerceIn(minH, maxH) else maxH
+                        val newW = (initialW - dx).coerceIn(minW, availMaxW)
+                        val newH = (initialH + dy).coerceIn(minH, availMaxH)
+                        targetW = newW
+                        targetH = newH
+                        targetX = (anchorRight - newW).coerceIn(minX, (maxRight - newW).coerceAtLeast(minX))
                     }
                     TouchTarget.NONE -> {}
+                }
+
+                if (geom != null) {
+                    val safeResolved = HudPositioningEngine.resolveBounds(
+                        profile = HudOverlayProfile(targetX, targetY, targetW, targetH),
+                        geometry = geom,
+                        minBackdropHeightPx = minBackdropHeightPx
+                    )
+                    layoutParams.x = safeResolved.x
+                    layoutParams.y = safeResolved.y
+                    layoutParams.width = safeResolved.widthPx
+                    layoutParams.height = safeResolved.effectiveHeightPx
+                } else {
+                    layoutParams.x = targetX
+                    layoutParams.y = targetY
+                    layoutParams.width = targetW
+                    layoutParams.height = targetH
                 }
 
                 try {
@@ -1747,9 +1824,11 @@ class MinimalOverlayView(
             }
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                val finalW = if (layoutParams.width > 0) layoutParams.width else width
-                val finalH = if (layoutParams.height > 0) layoutParams.height else height
-                onBoundsChanged(layoutParams.x, layoutParams.y, finalW, finalH)
+                if (activeTouchTarget != TouchTarget.NONE) {
+                    val finalW = if (layoutParams.width > 0) layoutParams.width else width
+                    val finalH = if (layoutParams.height > 0) layoutParams.height else height
+                    onBoundsChanged(dragOrientation, layoutParams.x, layoutParams.y, finalW, finalH)
+                }
                 activeTouchTarget = TouchTarget.NONE
                 return true
             }
