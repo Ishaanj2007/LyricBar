@@ -8,14 +8,15 @@ import org.junit.Test
 class HudHoldGestureTest {
 
     @Test
-    fun `hold delay defaults to approximately two seconds`() {
+    fun `hold delay defaults to one second`() {
         val controller = HudHoldGestureController(touchSlopPx = 24f)
-        assertEquals(2000L, controller.holdDurationMs)
+        assertEquals(1000L, controller.holdDurationMs)
+        assertEquals(1000L, HudHoldGestureController.HOLD_REPOSITION_DELAY_MS)
         assertEquals(HudHoldGestureController.State.IDLE, controller.state)
     }
 
     @Test
-    fun `holding 2s enters active reposition and releasing commits position`() {
+    fun `holding 1s enters active reposition and releasing commits position`() {
         val controller = HudHoldGestureController(touchSlopPx = 24f)
 
         assertTrue(controller.onDown(rawX = 300f, rawY = 400f, pointerId = 0))
@@ -27,8 +28,10 @@ class HudHoldGestureTest {
         assertEquals(310f, controller.activationRawX, 0.001f)
         assertEquals(408f, controller.activationRawY, 0.001f)
 
-        // Two-second hold threshold reached
-        assertTrue(controller.onHoldTimeout())
+        // Note: HudHoldGestureController.onHoldTimeout() unconditionally transitions PENDING_HOLD to ACTIVE_REPOSITION
+        // (the time delta check is performed by Handler before calling onHoldTimeout).
+        // Therefore, we test that calling onHoldTimeout() at the 1000ms threshold successfully activates reposition:
+        assertTrue("At 1000ms threshold timeout activates active reposition", controller.onHoldTimeout())
         assertEquals(HudHoldGestureController.State.ACTIVE_REPOSITION, controller.state)
 
         // Further drag movement does not cancel an active reposition
@@ -54,7 +57,7 @@ class HudHoldGestureTest {
     }
 
     @Test
-    fun `moving beyond touch slop before 2s cancels hold activation and suppresses tap`() {
+    fun `moving beyond touch slop before 1s cancels hold activation and suppresses tap`() {
         val controller = HudHoldGestureController(touchSlopPx = 24f)
 
         assertTrue(controller.onDown(rawX = 200f, rawY = 200f, pointerId = 0))
@@ -113,7 +116,7 @@ class HudHoldGestureTest {
     }
 
     @Test
-    fun `natural stationary finger tremor up to 15dp does not cancel 2s hold activation with 20dp tolerance`() {
+    fun `natural stationary finger tremor up to 15dp does not cancel 1s hold activation with 20dp tolerance`() {
         val density3xHoldSlopPx = 60f // 20dp * 3.0 density
         val controller = HudHoldGestureController(touchSlopPx = density3xHoldSlopPx)
 
@@ -127,4 +130,3 @@ class HudHoldGestureTest {
         assertEquals(530f, controller.activationRawY, 0.001f)
     }
 }
-

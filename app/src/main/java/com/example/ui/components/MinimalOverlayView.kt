@@ -2477,7 +2477,7 @@ class HudHoldGestureController(
     }
 
     companion object {
-        const val HOLD_REPOSITION_DELAY_MS = 2000L
+        const val HOLD_REPOSITION_DELAY_MS = 1000L
         const val INVALID_POINTER_ID = -1
     }
 }

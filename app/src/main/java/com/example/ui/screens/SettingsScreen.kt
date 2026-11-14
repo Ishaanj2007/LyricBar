@@ -187,7 +187,7 @@ fun SettingsScreen(
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = if (userPreferences.isDragRepositionMode) "Touch enabled: drag & resize overlay anywhere on screen" else "Hold HUD 2s to reposition; toggle ON for resize handles",
+                            text = if (userPreferences.isDragRepositionMode) "Touch enabled: drag & resize overlay anywhere on screen" else "Hold HUD 1s to reposition; toggle ON for resize handles",
                             fontSize = 12.sp,
                             color = if (userPreferences.isDragRepositionMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                         )
