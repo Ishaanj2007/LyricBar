@@ -79,7 +79,10 @@ class OverlayService : Service() {
         val newGeometry = readCurrentDisplayGeometry(insets)
         val prevGeometry = displayGeometryFlow.value
         if (prevGeometry != newGeometry) {
-            if (prevGeometry.orientation != newGeometry.orientation) {
+            if (prevGeometry.orientation != newGeometry.orientation ||
+                prevGeometry.windowWidthPx != newGeometry.windowWidthPx ||
+                prevGeometry.windowHeightPx != newGeometry.windowHeightPx
+            ) {
                 overlayView?.cancelActiveDrag()
             }
             displayGeometryFlow.value = newGeometry
@@ -88,6 +91,16 @@ class OverlayService : Service() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        val expectedOrientation = when (newConfig.orientation) {
+            Configuration.ORIENTATION_LANDSCAPE -> HudOrientation.LANDSCAPE
+            Configuration.ORIENTATION_PORTRAIT -> HudOrientation.PORTRAIT
+            else -> null
+        }
+        if (expectedOrientation != null && ::displayGeometryFlow.isInitialized &&
+            displayGeometryFlow.value.orientation != expectedOrientation
+        ) {
+            overlayView?.cancelActiveDrag()
+        }
         refreshDisplayGeometry()
     }
 
@@ -128,6 +141,7 @@ class OverlayService : Service() {
                 updateOverlayVisibility(playbackManager.playbackState.value, true)
             }
             ACTION_STOP_OVERLAY -> {
+                overlayView?.cancelActiveDrag()
                 serviceScope.launch {
                     playbackManager.preferencesRepository.setOverlayEnabled(false)
                 }
@@ -419,12 +433,14 @@ class OverlayService : Service() {
 
                 currentPrefs = prefs
                 if (!prefs.overlayEnabled) {
+                    view.cancelActiveDrag()
                     stopSelf()
                     return@collect
                 }
 
                 // Verify runtime overlay permission; stop gracefully if revoked
                 if (!Settings.canDrawOverlays(this@OverlayService)) {
+                    view.cancelActiveDrag()
                     stopSelf()
                     return@collect
                 }

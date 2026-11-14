@@ -650,30 +650,31 @@ class MinimalOverlayView(
     var isDragMode: Boolean = false
         set(value) {
             if (field != value) {
+                cancelActiveDrag()
                 field = value
-                cancelHoldGesture(revertActivePosition = false)
-                if (!value) {
-                    activeTouchTarget = TouchTarget.NONE
-                }
                 invalidate()
             }
         }
 
     var activeOrientation: HudOrientation = HudOrientation.PORTRAIT
     var displayGeometry: HudDisplayGeometry? = null
+        set(value) {
+            val prev = field
+            field = value
+            if (prev != null && value != null &&
+                (prev.orientation != value.orientation ||
+                    prev.windowWidthPx != value.windowWidthPx ||
+                    prev.windowHeightPx != value.windowHeightPx)
+            ) {
+                cancelActiveDrag()
+            }
+        }
     var minBackdropHeightPx: Int = 0
     var isPointOnInteractiveControl: ((x: Float, y: Float) -> Boolean)? = null
 
     // Touch and drag/resize tracking
     private enum class TouchTarget { NONE, MOVE, RESIZE_TOP, RESIZE_BOTTOM, RESIZE_LEFT, RESIZE_RIGHT, RESIZE_TL, RESIZE_TR, RESIZE_BL, RESIZE_BR }
     private var activeTouchTarget = TouchTarget.NONE
-    private var dragOrientation: HudOrientation = HudOrientation.PORTRAIT
-    private var initialX = 0
-    private var initialY = 0
-    private var initialW = 0
-    private var initialH = 0
-    private var initialTouchX = 0f
-    private var initialTouchY = 0f
 
     // One-second hold-to-reposition controller & subtle neutral visual/haptic feedback
     // Use generous stationary tolerance for a 1000ms finger hold while still cancelling deliberate slides
@@ -682,6 +683,18 @@ class MinimalOverlayView(
         TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 20f, resources.displayMetrics)
     )
     private val holdGestureController = HudHoldGestureController(touchSlopPx = touchSlopPx)
+    private val dragCoordinator = HudDragTransactionCoordinator(
+        holdController = holdGestureController,
+        readBounds = ::readCurrentWindowBounds,
+        applyDragBounds = ::applyDragWindowBounds,
+        restoreBounds = ::restoreRolledBackBounds,
+        commitBounds = { orientation, bounds ->
+            onBoundsChanged(orientation, bounds.x, bounds.y, bounds.width, bounds.height)
+        },
+        onTapAction = {
+            onResyncRequested?.invoke()
+        }
+    )
     private val holdHandler = Handler(Looper.getMainLooper())
     private var holdAttemptToken: Long = 0L
     private var scheduledHoldToken: Long = -1L
@@ -692,18 +705,11 @@ class MinimalOverlayView(
             return@Runnable
         }
         if (!isAttachedToWindow || visibility != VISIBLE || isDragMode) {
-            holdGestureController.reset()
+            dragCoordinator.cancelActiveDrag()
             return@Runnable
         }
-        if (holdGestureController.onHoldTimeout()) {
-            dragOrientation = displayGeometry?.orientation ?: activeOrientation
-            initialX = layoutParams.x
-            initialY = layoutParams.y
-            initialW = if (layoutParams.width > 0) layoutParams.width else width
-            initialH = if (layoutParams.height > 0) layoutParams.height else height
-            initialTouchX = holdGestureController.activationRawX
-            initialTouchY = holdGestureController.activationRawY
-
+        val orientation = displayGeometry?.orientation ?: activeOrientation
+        if (dragCoordinator.onHoldTimeout(orientation = orientation)) {
             triggerHoldActivatedHaptic()
             animateHoldFeedback(active = true)
         }
@@ -743,7 +749,7 @@ class MinimalOverlayView(
     private fun animateHoldFeedback(active: Boolean) {
         holdFeedbackAnimator?.cancel()
         val target = if (active) 1f else 0f
-        if (abs(holdFeedbackProgress - target) < 0.01f) {
+        if (!isAttachedToWindow || abs(holdFeedbackProgress - target) < 0.01f) {
             holdFeedbackProgress = target
             invalidate()
             return
@@ -759,24 +765,13 @@ class MinimalOverlayView(
         }
     }
 
-    private fun cancelHoldGesture(revertActivePosition: Boolean) {
+    fun cancelActiveDrag() {
         cancelScheduledHoldCallback()
-        val wasHoldActive = holdGestureController.onCancel()
-        if (wasHoldActive && revertActivePosition && isAttachedToWindow) {
-            layoutParams.x = initialX
-            layoutParams.y = initialY
-            try {
-                windowManager.updateViewLayout(this, layoutParams)
-            } catch (_: Exception) {}
-        }
-        if (wasHoldActive || holdFeedbackProgress > 0f) {
+        activeTouchTarget = TouchTarget.NONE
+        val rolledBack = dragCoordinator.cancelActiveDrag()
+        if (rolledBack || holdFeedbackProgress > 0f) {
             animateHoldFeedback(active = false)
         }
-    }
-
-    fun cancelActiveDrag() {
-        activeTouchTarget = TouchTarget.NONE
-        cancelHoldGesture(revertActivePosition = false)
     }
 
     init {
@@ -1409,6 +1404,16 @@ class MinimalOverlayView(
         }
     }
 
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        if (visibility != VISIBLE) {
+            cancelActiveDrag()
+            stopLoop()
+        } else if (isPlaying) {
+            startLoopIfNeeded()
+        }
+    }
+
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         if (w > 0 && h > 0) {
@@ -1930,13 +1935,13 @@ class MinimalOverlayView(
 
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                dragOrientation = displayGeometry?.orientation ?: activeOrientation
-                initialX = layoutParams.x
-                initialY = layoutParams.y
-                initialW = if (layoutParams.width > 0) layoutParams.width else width
-                initialH = if (layoutParams.height > 0) layoutParams.height else height
-                initialTouchX = event.rawX
-                initialTouchY = event.rawY
+                cancelScheduledHoldCallback()
+                val orientation = displayGeometry?.orientation ?: activeOrientation
+                dragCoordinator.onEditDown(
+                    orientation = orientation,
+                    rawX = event.rawX,
+                    rawY = event.rawY
+                )
 
                 activeTouchTarget = when {
                     x <= touchMargin && y <= touchMargin -> TouchTarget.RESIZE_TL
@@ -1953,122 +1958,165 @@ class MinimalOverlayView(
             }
 
             MotionEvent.ACTION_MOVE -> {
-                if (activeTouchTarget == TouchTarget.NONE) return false
-                val dx = (event.rawX - initialTouchX).toInt()
-                val dy = (event.rawY - initialTouchY).toInt()
-
-                val geom = displayGeometry
-                val constraints = geom?.let {
-                    HudPositioningEngine.computeConstraints(
-                        geometry = it,
-                        currentWidthPx = initialW,
-                        currentEffectiveHeightPx = initialH,
-                        minBackdropHeightPx = minBackdropHeightPx
-                    )
+                val target = activeTouchTarget
+                if (target == TouchTarget.NONE) return false
+                return dragCoordinator.onEditMove(event.rawX, event.rawY) { initialBounds, dx, dy ->
+                    computeEditMoveBounds(initialBounds, dx, dy, target)
                 }
-                val minW = constraints?.minWidthPx ?: 280
-                val maxW = constraints?.maxWidthPx ?: 2000
-                val minH = constraints?.minHeightPx ?: 60
-                val maxH = constraints?.maxHeightPx ?: 800
-                val minX = constraints?.minX ?: -2000
-                val maxRight = constraints?.minSafeRightPx ?: Int.MAX_VALUE
-                val minY = constraints?.minY ?: 0
-                val maxBottom = constraints?.maxSafeBottomPx ?: Int.MAX_VALUE
-
-                var targetX = initialX
-                var targetY = initialY
-                var targetW = initialW
-                var targetH = initialH
-
-                when (activeTouchTarget) {
-                    TouchTarget.MOVE -> {
-                        val moveMaxX = if (maxRight < Int.MAX_VALUE) (maxRight - initialW).coerceAtLeast(minX) else 2000
-                        val moveMaxY = if (maxBottom < Int.MAX_VALUE) (maxBottom - initialH).coerceAtLeast(minY) else 3000
-                        targetX = (initialX + dx).coerceIn(minX, moveMaxX)
-                        targetY = (initialY + dy).coerceIn(minY, moveMaxY)
-                    }
-                    TouchTarget.RESIZE_RIGHT -> {
-                        val availMaxW = if (maxRight < Int.MAX_VALUE) (maxRight - initialX).coerceIn(minW, maxW) else maxW
-                        targetW = (initialW + dx).coerceIn(minW, availMaxW)
-                    }
-                    TouchTarget.RESIZE_BOTTOM -> {
-                        val availMaxH = if (maxBottom < Int.MAX_VALUE) (maxBottom - initialY).coerceIn(minH, maxH) else maxH
-                        targetH = (initialH + dy).coerceIn(minH, availMaxH)
-                    }
-                    TouchTarget.RESIZE_BR -> {
-                        val availMaxW = if (maxRight < Int.MAX_VALUE) (maxRight - initialX).coerceIn(minW, maxW) else maxW
-                        val availMaxH = if (maxBottom < Int.MAX_VALUE) (maxBottom - initialY).coerceIn(minH, maxH) else maxH
-                        targetW = (initialW + dx).coerceIn(minW, availMaxW)
-                        targetH = (initialH + dy).coerceIn(minH, availMaxH)
-                    }
-                    TouchTarget.RESIZE_LEFT -> {
-                        val anchorRight = initialX + initialW
-                        val availMaxW = (anchorRight - minX).coerceIn(minW, maxW)
-                        val newW = (initialW - dx).coerceIn(minW, availMaxW)
-                        targetW = newW
-                        targetX = (anchorRight - newW).coerceIn(minX, (maxRight - newW).coerceAtLeast(minX))
-                    }
-                    TouchTarget.RESIZE_TOP -> {
-                        val anchorBottom = initialY + initialH
-                        val availMaxH = (anchorBottom - minY).coerceIn(minH, maxH)
-                        val newH = (initialH - dy).coerceIn(minH, availMaxH)
-                        targetH = newH
-                        targetY = (anchorBottom - newH).coerceIn(minY, (maxBottom - newH).coerceAtLeast(minY))
-                    }
-                    TouchTarget.RESIZE_TL -> {
-                        val anchorRight = initialX + initialW
-                        val anchorBottom = initialY + initialH
-                        val availMaxW = (anchorRight - minX).coerceIn(minW, maxW)
-                        val availMaxH = (anchorBottom - minY).coerceIn(minH, maxH)
-                        val newW = (initialW - dx).coerceIn(minW, availMaxW)
-                        val newH = (initialH - dy).coerceIn(minH, availMaxH)
-                        targetW = newW
-                        targetH = newH
-                        targetX = (anchorRight - newW).coerceIn(minX, (maxRight - newW).coerceAtLeast(minX))
-                        targetY = (anchorBottom - newH).coerceIn(minY, (maxBottom - newH).coerceAtLeast(minY))
-                    }
-                    TouchTarget.RESIZE_TR -> {
-                        val anchorBottom = initialY + initialH
-                        val availMaxW = if (maxRight < Int.MAX_VALUE) (maxRight - initialX).coerceIn(minW, maxW) else maxW
-                        val availMaxH = (anchorBottom - minY).coerceIn(minH, maxH)
-                        val newW = (initialW + dx).coerceIn(minW, availMaxW)
-                        val newH = (initialH - dy).coerceIn(minH, availMaxH)
-                        targetW = newW
-                        targetH = newH
-                        targetY = (anchorBottom - newH).coerceIn(minY, (maxBottom - newH).coerceAtLeast(minY))
-                    }
-                    TouchTarget.RESIZE_BL -> {
-                        val anchorRight = initialX + initialW
-                        val availMaxW = (anchorRight - minX).coerceIn(minW, maxW)
-                        val availMaxH = if (maxBottom < Int.MAX_VALUE) (maxBottom - initialY).coerceIn(minH, maxH) else maxH
-                        val newW = (initialW - dx).coerceIn(minW, availMaxW)
-                        val newH = (initialH + dy).coerceIn(minH, availMaxH)
-                        targetW = newW
-                        targetH = newH
-                        targetX = (anchorRight - newW).coerceIn(minX, (maxRight - newW).coerceAtLeast(minX))
-                    }
-                    TouchTarget.NONE -> {}
-                }
-
-                val sizeChanged = targetW != layoutParams.width || targetH != layoutParams.height
-                applyUpdatedWindowBounds(targetX, targetY, targetW, targetH)
-                if (sizeChanged) {
-                    recalculateLayout()
-                }
-                return true
             }
 
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+            MotionEvent.ACTION_UP -> {
                 if (activeTouchTarget != TouchTarget.NONE) {
-                    val finalW = if (layoutParams.width > 0) layoutParams.width else width
-                    val finalH = if (layoutParams.height > 0) layoutParams.height else height
-                    onBoundsChanged(dragOrientation, layoutParams.x, layoutParams.y, finalW, finalH)
+                    dragCoordinator.onEditUp()
                 }
                 activeTouchTarget = TouchTarget.NONE
                 return true
             }
+
+            MotionEvent.ACTION_CANCEL -> {
+                cancelActiveDrag()
+                return true
+            }
         }
         return super.onTouchEvent(event)
+    }
+
+    private fun computeEditMoveBounds(
+        initialBounds: HudWindowBounds,
+        dx: Int,
+        dy: Int,
+        target: TouchTarget
+    ): HudWindowBounds {
+        val initialX = initialBounds.x
+        val initialY = initialBounds.y
+        val initialW = initialBounds.width
+        val initialH = initialBounds.height
+
+        val geom = displayGeometry
+        val constraints = geom?.let {
+            HudPositioningEngine.computeConstraints(
+                geometry = it,
+                currentWidthPx = initialW,
+                currentEffectiveHeightPx = initialH,
+                minBackdropHeightPx = minBackdropHeightPx
+            )
+        }
+        val minW = constraints?.minWidthPx ?: 280
+        val maxW = constraints?.maxWidthPx ?: 2000
+        val minH = constraints?.minHeightPx ?: 60
+        val maxH = constraints?.maxHeightPx ?: 800
+        val minX = constraints?.minX ?: -2000
+        val maxRight = constraints?.minSafeRightPx ?: Int.MAX_VALUE
+        val minY = constraints?.minY ?: 0
+        val maxBottom = constraints?.maxSafeBottomPx ?: Int.MAX_VALUE
+
+        var targetX = initialX
+        var targetY = initialY
+        var targetW = initialW
+        var targetH = initialH
+
+        when (target) {
+            TouchTarget.MOVE -> {
+                val moveMaxX = if (maxRight < Int.MAX_VALUE) (maxRight - initialW).coerceAtLeast(minX) else 2000
+                val moveMaxY = if (maxBottom < Int.MAX_VALUE) (maxBottom - initialH).coerceAtLeast(minY) else 3000
+                targetX = (initialX + dx).coerceIn(minX, moveMaxX)
+                targetY = (initialY + dy).coerceIn(minY, moveMaxY)
+            }
+            TouchTarget.RESIZE_RIGHT -> {
+                val availMaxW = if (maxRight < Int.MAX_VALUE) (maxRight - initialX).coerceIn(minW, maxW) else maxW
+                targetW = (initialW + dx).coerceIn(minW, availMaxW)
+            }
+            TouchTarget.RESIZE_BOTTOM -> {
+                val availMaxH = if (maxBottom < Int.MAX_VALUE) (maxBottom - initialY).coerceIn(minH, maxH) else maxH
+                targetH = (initialH + dy).coerceIn(minH, availMaxH)
+            }
+            TouchTarget.RESIZE_BR -> {
+                val availMaxW = if (maxRight < Int.MAX_VALUE) (maxRight - initialX).coerceIn(minW, maxW) else maxW
+                val availMaxH = if (maxBottom < Int.MAX_VALUE) (maxBottom - initialY).coerceIn(minH, maxH) else maxH
+                targetW = (initialW + dx).coerceIn(minW, availMaxW)
+                targetH = (initialH + dy).coerceIn(minH, availMaxH)
+            }
+            TouchTarget.RESIZE_LEFT -> {
+                val anchorRight = initialX + initialW
+                val availMaxW = (anchorRight - minX).coerceIn(minW, maxW)
+                val newW = (initialW - dx).coerceIn(minW, availMaxW)
+                targetW = newW
+                targetX = (anchorRight - newW).coerceIn(minX, (maxRight - newW).coerceAtLeast(minX))
+            }
+            TouchTarget.RESIZE_TOP -> {
+                val anchorBottom = initialY + initialH
+                val availMaxH = (anchorBottom - minY).coerceIn(minH, maxH)
+                val newH = (initialH - dy).coerceIn(minH, availMaxH)
+                targetH = newH
+                targetY = (anchorBottom - newH).coerceIn(minY, (maxBottom - newH).coerceAtLeast(minY))
+            }
+            TouchTarget.RESIZE_TL -> {
+                val anchorRight = initialX + initialW
+                val anchorBottom = initialY + initialH
+                val availMaxW = (anchorRight - minX).coerceIn(minW, maxW)
+                val availMaxH = (anchorBottom - minY).coerceIn(minH, maxH)
+                val newW = (initialW - dx).coerceIn(minW, availMaxW)
+                val newH = (initialH - dy).coerceIn(minH, availMaxH)
+                targetW = newW
+                targetH = newH
+                targetX = (anchorRight - newW).coerceIn(minX, (maxRight - newW).coerceAtLeast(minX))
+                targetY = (anchorBottom - newH).coerceIn(minY, (maxBottom - newH).coerceAtLeast(minY))
+            }
+            TouchTarget.RESIZE_TR -> {
+                val anchorBottom = initialY + initialH
+                val availMaxW = if (maxRight < Int.MAX_VALUE) (maxRight - initialX).coerceIn(minW, maxW) else maxW
+                val availMaxH = (anchorBottom - minY).coerceIn(minH, maxH)
+                val newW = (initialW + dx).coerceIn(minW, availMaxW)
+                val newH = (initialH - dy).coerceIn(minH, availMaxH)
+                targetW = newW
+                targetH = newH
+                targetY = (anchorBottom - newH).coerceIn(minY, (maxBottom - newH).coerceAtLeast(minY))
+            }
+            TouchTarget.RESIZE_BL -> {
+                val anchorRight = initialX + initialW
+                val availMaxW = (anchorRight - minX).coerceIn(minW, maxW)
+                val availMaxH = if (maxBottom < Int.MAX_VALUE) (maxBottom - initialY).coerceIn(minH, maxH) else maxH
+                val newW = (initialW - dx).coerceIn(minW, availMaxW)
+                val newH = (initialH + dy).coerceIn(minH, availMaxH)
+                targetW = newW
+                targetH = newH
+                targetX = (anchorRight - newW).coerceIn(minX, (maxRight - newW).coerceAtLeast(minX))
+            }
+            TouchTarget.NONE -> {}
+        }
+
+        return HudWindowBounds(targetX, targetY, targetW, targetH)
+    }
+
+    private fun computeNormalMoveBounds(
+        initialBounds: HudWindowBounds,
+        dx: Int,
+        dy: Int
+    ): HudWindowBounds {
+        val initialX = initialBounds.x
+        val initialY = initialBounds.y
+        val initialW = initialBounds.width
+        val initialH = initialBounds.height
+
+        val geom = displayGeometry
+        val constraints = geom?.let {
+            HudPositioningEngine.computeConstraints(
+                geometry = it,
+                currentWidthPx = initialW,
+                currentEffectiveHeightPx = initialH,
+                minBackdropHeightPx = minBackdropHeightPx
+            )
+        }
+        val minX = constraints?.minX ?: -2000
+        val maxRight = constraints?.minSafeRightPx ?: Int.MAX_VALUE
+        val minY = constraints?.minY ?: 0
+        val maxBottom = constraints?.maxSafeBottomPx ?: Int.MAX_VALUE
+        val moveMaxX = if (maxRight < Int.MAX_VALUE) (maxRight - initialW).coerceAtLeast(minX) else 2000
+        val moveMaxY = if (maxBottom < Int.MAX_VALUE) (maxBottom - initialH).coerceAtLeast(minY) else 3000
+
+        val targetX = (initialX + dx).coerceIn(minX, moveMaxX)
+        val targetY = (initialY + dy).coerceIn(minY, moveMaxY)
+        return HudWindowBounds(targetX, targetY, initialW, initialH)
     }
 
     private fun handleNormalTouchEvent(event: MotionEvent): Boolean {
@@ -2077,7 +2125,7 @@ class MinimalOverlayView(
                 cancelScheduledHoldCallback()
                 val pointerId = event.getPointerId(0)
                 val onControl = isPointOnInteractiveControl?.invoke(event.x, event.y) == true
-                val started = holdGestureController.onDown(
+                val started = dragCoordinator.onNormalDown(
                     rawX = getPointerRawX(event, 0),
                     rawY = getPointerRawY(event, 0),
                     pointerId = pointerId,
@@ -2091,7 +2139,7 @@ class MinimalOverlayView(
             }
 
             MotionEvent.ACTION_POINTER_DOWN -> {
-                if (holdGestureController.onMultiPointerDown()) {
+                if (dragCoordinator.onNormalMultiPointerDown()) {
                     cancelScheduledHoldCallback()
                 }
                 return holdGestureController.state != HudHoldGestureController.State.IDLE
@@ -2105,33 +2153,13 @@ class MinimalOverlayView(
 
                 return when (holdGestureController.state) {
                     HudHoldGestureController.State.PENDING_HOLD -> {
-                        if (holdGestureController.onMove(rawX, rawY)) {
+                        if (dragCoordinator.onNormalMovePending(rawX, rawY)) {
                             cancelScheduledHoldCallback()
                         }
                         true
                     }
                     HudHoldGestureController.State.ACTIVE_REPOSITION -> {
-                        val dx = (rawX - initialTouchX).toInt()
-                        val dy = (rawY - initialTouchY).toInt()
-                        val geom = displayGeometry
-                        val constraints = geom?.let {
-                            HudPositioningEngine.computeConstraints(
-                                geometry = it,
-                                currentWidthPx = initialW,
-                                currentEffectiveHeightPx = initialH,
-                                minBackdropHeightPx = minBackdropHeightPx
-                            )
-                        }
-                        val minX = constraints?.minX ?: -2000
-                        val maxRight = constraints?.minSafeRightPx ?: Int.MAX_VALUE
-                        val minY = constraints?.minY ?: 0
-                        val maxBottom = constraints?.maxSafeBottomPx ?: Int.MAX_VALUE
-                        val moveMaxX = if (maxRight < Int.MAX_VALUE) (maxRight - initialW).coerceAtLeast(minX) else 2000
-                        val moveMaxY = if (maxBottom < Int.MAX_VALUE) (maxBottom - initialH).coerceAtLeast(minY) else 3000
-
-                        val targetX = (initialX + dx).coerceIn(minX, moveMaxX)
-                        val targetY = (initialY + dy).coerceIn(minY, moveMaxY)
-                        applyUpdatedWindowBounds(targetX, targetY, initialW, initialH)
+                        dragCoordinator.onNormalDragMove(rawX, rawY, ::computeNormalMoveBounds)
                         true
                     }
                     HudHoldGestureController.State.CANCELLED_BEFORE_HOLD -> true
@@ -2154,7 +2182,7 @@ class MinimalOverlayView(
             }
 
             MotionEvent.ACTION_CANCEL -> {
-                cancelHoldGesture(revertActivePosition = true)
+                cancelActiveDrag()
                 return true
             }
         }
@@ -2163,14 +2191,9 @@ class MinimalOverlayView(
 
     private fun finishHoldPointerUp() {
         cancelScheduledHoldCallback()
-        when (holdGestureController.onUp()) {
-            HudHoldGestureController.UpResult.TRIGGER_TAP -> {
-                onResyncRequested?.invoke()
-            }
+        when (dragCoordinator.onNormalUp()) {
+            HudHoldGestureController.UpResult.TRIGGER_TAP -> Unit
             HudHoldGestureController.UpResult.COMMIT_REPOSITION -> {
-                val finalW = if (layoutParams.width > 0) layoutParams.width else width
-                val finalH = if (layoutParams.height > 0) layoutParams.height else height
-                onBoundsChanged(dragOrientation, layoutParams.x, layoutParams.y, finalW, finalH)
                 animateHoldFeedback(active = false)
             }
             HudHoldGestureController.UpResult.NONE -> {
@@ -2179,6 +2202,48 @@ class MinimalOverlayView(
                 }
             }
         }
+    }
+
+    private fun readCurrentWindowBounds(): HudWindowBounds {
+        val w = if (layoutParams.width > 0) layoutParams.width else width
+        val h = if (layoutParams.height > 0) layoutParams.height else height
+        return HudWindowBounds(
+            x = layoutParams.x,
+            y = layoutParams.y,
+            width = w,
+            height = h
+        )
+    }
+
+    private fun applyDragWindowBounds(bounds: HudWindowBounds) {
+        val prevW = layoutParams.width
+        val prevH = layoutParams.height
+        applyUpdatedWindowBounds(bounds.x, bounds.y, bounds.width, bounds.height)
+        if (layoutParams.width != prevW || layoutParams.height != prevH) {
+            recalculateLayout()
+        }
+    }
+
+    private fun restoreRolledBackBounds(snapshotBounds: HudWindowBounds) {
+        val prevW = layoutParams.width
+        val prevH = layoutParams.height
+        layoutParams.x = snapshotBounds.x
+        layoutParams.y = snapshotBounds.y
+        if (snapshotBounds.width > 0) {
+            layoutParams.width = snapshotBounds.width
+        }
+        if (snapshotBounds.height > 0) {
+            layoutParams.height = snapshotBounds.height
+        }
+        if (layoutParams.width != prevW || layoutParams.height != prevH) {
+            recalculateLayout()
+        }
+        if (isAttachedToWindow) {
+            try {
+                windowManager.updateViewLayout(this, layoutParams)
+            } catch (_: Exception) {}
+        }
+        invalidate()
     }
 
     private fun applyUpdatedWindowBounds(targetX: Int, targetY: Int, targetW: Int, targetH: Int) {
@@ -2200,9 +2265,11 @@ class MinimalOverlayView(
             layoutParams.height = targetH
         }
 
-        try {
-            windowManager.updateViewLayout(this, layoutParams)
-        } catch (_: Exception) {}
+        if (isAttachedToWindow) {
+            try {
+                windowManager.updateViewLayout(this, layoutParams)
+            } catch (_: Exception) {}
+        }
     }
 
     companion object {
@@ -2476,5 +2543,169 @@ class HudHoldGestureController(
         const val HOLD_REPOSITION_DELAY_MS = 1000L
         const val HOLD_REPOSITION_SECONDS = (HOLD_REPOSITION_DELAY_MS / 1000L).toInt()
         const val INVALID_POINTER_ID = -1
+    }
+}
+
+data class HudWindowBounds(
+    val x: Int,
+    val y: Int,
+    val width: Int,
+    val height: Int
+)
+
+data class HudDragSnapshot(
+    val orientation: HudOrientation,
+    val initialBounds: HudWindowBounds
+)
+
+class HudDragTransactionCoordinator(
+    val holdController: HudHoldGestureController,
+    private val readBounds: () -> HudWindowBounds,
+    private val applyDragBounds: (HudWindowBounds) -> Unit,
+    private val restoreBounds: (HudWindowBounds) -> Unit,
+    private val commitBounds: (HudOrientation, HudWindowBounds) -> Unit,
+    private val onTapAction: () -> Unit = {}
+) {
+    var activeSnapshot: HudDragSnapshot? = null
+        private set
+    var isEditDragActive: Boolean = false
+        private set
+    var initialTouchX: Float = 0f
+        private set
+    var initialTouchY: Float = 0f
+        private set
+
+    val isTransactionActive: Boolean
+        get() = activeSnapshot != null &&
+            (isEditDragActive || holdController.state == HudHoldGestureController.State.ACTIVE_REPOSITION)
+
+    fun onNormalDown(
+        rawX: Float,
+        rawY: Float,
+        pointerId: Int,
+        isOnInteractiveControl: Boolean = false
+    ): Boolean {
+        if (isTransactionActive) {
+            cancelActiveDrag()
+        }
+        return holdController.onDown(
+            rawX = rawX,
+            rawY = rawY,
+            pointerId = pointerId,
+            isOnInteractiveControl = isOnInteractiveControl
+        )
+    }
+
+    fun onNormalMultiPointerDown(): Boolean = holdController.onMultiPointerDown()
+
+    fun onNormalMovePending(rawX: Float, rawY: Float): Boolean = holdController.onMove(rawX, rawY)
+
+    fun onHoldTimeout(
+        orientation: HudOrientation,
+        elapsedMs: Long = holdController.holdDurationMs
+    ): Boolean {
+        if (!holdController.onHoldTimeout(elapsedMs)) {
+            return false
+        }
+        initialTouchX = holdController.activationRawX
+        initialTouchY = holdController.activationRawY
+        activeSnapshot = HudDragSnapshot(
+            orientation = orientation,
+            initialBounds = readBounds()
+        )
+        return true
+    }
+
+    fun onNormalDragMove(
+        rawX: Float,
+        rawY: Float,
+        computeTarget: (initialBounds: HudWindowBounds, dx: Int, dy: Int) -> HudWindowBounds
+    ): Boolean {
+        if (holdController.state != HudHoldGestureController.State.ACTIVE_REPOSITION) {
+            return false
+        }
+        val snapshot = activeSnapshot ?: return false
+        val dx = (rawX - initialTouchX).toInt()
+        val dy = (rawY - initialTouchY).toInt()
+        applyDragBounds(computeTarget(snapshot.initialBounds, dx, dy))
+        return true
+    }
+
+    fun onNormalUp(): HudHoldGestureController.UpResult {
+        val result = holdController.onUp()
+        when (result) {
+            HudHoldGestureController.UpResult.TRIGGER_TAP -> {
+                activeSnapshot = null
+                onTapAction()
+            }
+            HudHoldGestureController.UpResult.COMMIT_REPOSITION -> {
+                val snapshot = activeSnapshot
+                activeSnapshot = null
+                if (snapshot != null) {
+                    commitBounds(snapshot.orientation, readBounds())
+                }
+            }
+            HudHoldGestureController.UpResult.NONE -> {
+                activeSnapshot = null
+            }
+        }
+        return result
+    }
+
+    fun onEditDown(orientation: HudOrientation, rawX: Float, rawY: Float): HudDragSnapshot {
+        if (isTransactionActive || holdController.state != HudHoldGestureController.State.IDLE) {
+            cancelActiveDrag()
+        }
+        isEditDragActive = true
+        initialTouchX = rawX
+        initialTouchY = rawY
+        val snapshot = HudDragSnapshot(
+            orientation = orientation,
+            initialBounds = readBounds()
+        )
+        activeSnapshot = snapshot
+        return snapshot
+    }
+
+    fun onEditMove(
+        rawX: Float,
+        rawY: Float,
+        computeTarget: (initialBounds: HudWindowBounds, dx: Int, dy: Int) -> HudWindowBounds
+    ): Boolean {
+        if (!isEditDragActive) return false
+        val snapshot = activeSnapshot ?: return false
+        val dx = (rawX - initialTouchX).toInt()
+        val dy = (rawY - initialTouchY).toInt()
+        applyDragBounds(computeTarget(snapshot.initialBounds, dx, dy))
+        return true
+    }
+
+    fun onEditUp(): Boolean {
+        if (!isEditDragActive) return false
+        isEditDragActive = false
+        val snapshot = activeSnapshot
+        activeSnapshot = null
+        if (snapshot != null) {
+            commitBounds(snapshot.orientation, readBounds())
+        }
+        return true
+    }
+
+    /**
+     * Cancels any pending or active drag gesture.
+     * Returns true if an active drag transaction was rolled back to its original bounds.
+     */
+    fun cancelActiveDrag(): Boolean {
+        val wasHoldActive = holdController.onCancel()
+        val wasEditActive = isEditDragActive
+        isEditDragActive = false
+        val snapshot = activeSnapshot
+        activeSnapshot = null
+
+        val shouldRollback = (wasHoldActive || wasEditActive) && snapshot != null
+        if (shouldRollback) {
+            restoreBounds(snapshot!!.initialBounds)
+        }
+        return shouldRollback
     }
 }
