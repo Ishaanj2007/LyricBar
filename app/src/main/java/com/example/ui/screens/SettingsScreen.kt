@@ -554,7 +554,7 @@ fun SettingsScreen(
                 Column(
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    // Compact Segmented Backdrop Style Selector: [ Solid | Glass ]
+                    // Compact Segmented Backdrop Style Selector: [ Solid | Grey ]
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,

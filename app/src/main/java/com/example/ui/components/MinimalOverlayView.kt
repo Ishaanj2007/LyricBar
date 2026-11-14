@@ -1515,6 +1515,8 @@ class MinimalOverlayView(
             canvas.translate(-currentScrollX, 0f)
         }
 
+        val isDarkActiveInk = HudColorSystem.isDarkColor(hierarchy.activeColor)
+
         when (currentStyle) {
             "KARAOKE" -> {
                 if (isWordSynced && activeLyricLine?.words?.isNotEmpty() == true) {
@@ -1547,11 +1549,13 @@ class MinimalOverlayView(
                             // Single active line: progressive word highlight
                             for (w in line.words) {
                                 if (posMs < w.startMs) {
-                                    // Word not sung yet on active line: draw with low opacity below
+                                    // Word not sung yet on active line: draw with subordinate inactive opacity
                                     canvas.drawText(w.word, w.x, drawY, wordInactivePaint)
                                 } else if (posMs >= w.endMs) {
                                     // Word fully sung on active line: draw with glowing high-opacity active text
-                                    canvas.drawText(w.word, w.x, drawY, wordGlowPaint)
+                                    if (!isDarkActiveInk) {
+                                        canvas.drawText(w.word, w.x, drawY, wordGlowPaint)
+                                    }
                                     canvas.drawText(w.word, w.x, drawY, wordActivePaint)
                                 } else {
                                     // Word actively being sung on active line: progressive fill from left to right
@@ -1562,16 +1566,24 @@ class MinimalOverlayView(
                                         speedMultiplier = karaokeGlowSpeed
                                     )
 
-                                    // Low opacity below
-                                    canvas.drawText(w.word, w.x, drawY, wordInactivePaint)
-
-                                    // High-opacity glowing active text clipped progressively left to right
                                     val splitX = w.x + (w.width * progress)
+
+                                    // Unsung right portion at inactive colour/opacity (non-overlapping clip)
                                     canvas.save()
-                                    canvas.clipRect(w.x, 0f, splitX, height.toFloat())
-                                    canvas.drawText(w.word, w.x, drawY, wordGlowPaint)
-                                    canvas.drawText(w.word, w.x, drawY, wordActivePaint)
+                                    canvas.clipRect(splitX, 0f, w.x + w.width + 16f, height.toFloat())
+                                    canvas.drawText(w.word, w.x, drawY, wordInactivePaint)
                                     canvas.restore()
+
+                                    // Sung left portion with glowing high-opacity active text
+                                    if (progress > 0f) {
+                                        canvas.save()
+                                        canvas.clipRect(w.x - 16f, 0f, splitX, height.toFloat())
+                                        if (!isDarkActiveInk) {
+                                            canvas.drawText(w.word, w.x, drawY, wordGlowPaint)
+                                        }
+                                        canvas.drawText(w.word, w.x, drawY, wordActivePaint)
+                                        canvas.restore()
+                                    }
                                 }
                             }
                         }
@@ -1586,7 +1598,7 @@ class MinimalOverlayView(
                             canvas.drawText(w.word, w.x, drawY, wordActivePaint)
                         }
                     }
-                } else {
+                } else if (currentLayoutLines.isNotEmpty()) {
                     // 3. Synchronized line-timed LRC:
                     val lineStart = activeLyricLine?.timeMs ?: 0L
                     val rawEnd = activeLyricLine?.endTimeMs ?: 0L
@@ -1598,91 +1610,120 @@ class MinimalOverlayView(
                         lineStart + 3500L
                     }
                     val totalDuration = (lineEnd - lineStart).coerceIn(1200L, 12000L)
+                    val totalChars = totalLayoutChars.coerceAtLeast(1)
 
-                    // A: Display unsung visual lines using the user's inactive lyric colour
+                    var activeLineIdx = 0
+                    var activeLineStart = lineStart
+                    var activeLineDuration = totalDuration
+                    var charAccumulator = 0
+
+                    for (idx in 0 until currentLayoutLines.size) {
+                        val line = currentLayoutLines[idx]
+                        val lineChars = line.totalChars.coerceAtLeast(1)
+                        val startFrac = charAccumulator.toFloat() / totalChars
+                        val endFrac = (charAccumulator + lineChars).toFloat() / totalChars
+                        val lStart = lineStart + (totalDuration * startFrac).toLong()
+                        val lEnd = lineStart + (totalDuration * endFrac).toLong()
+
+                        if (posMs >= lStart && (idx == currentLayoutLines.lastIndex || posMs < lEnd)) {
+                            activeLineIdx = idx
+                            activeLineStart = lStart
+                            activeLineDuration = (lEnd - lStart).coerceAtLeast(1L)
+                            break
+                        } else if (idx == currentLayoutLines.lastIndex && posMs >= lEnd) {
+                            activeLineIdx = idx
+                            activeLineStart = lStart
+                            activeLineDuration = (lEnd - lStart).coerceAtLeast(1L)
+                        }
+                        charAccumulator += lineChars
+                    }
+
                     wordInactivePaint.color = hierarchy.inactiveColor
                     wordInactivePaint.alpha = inactiveAlpha
-                    for (line in currentLayoutLines) {
-                        val drawY = line.baselineY - currentScrollY + incomingOffsetY
-                        for (w in line.words) {
-                            canvas.drawText(w.word, w.x, drawY, wordInactivePaint)
+                    wordActivePaint.color = hierarchy.activeColor
+                    wordActivePaint.alpha = incomingAlpha
+                    wordGlowPaint.color = hierarchy.activeColor
+                    wordGlowPaint.alpha = incomingAlpha
+
+                    // Draw prior completed visual lines (0 until activeLineIdx) fully highlighted
+                    for (prevIdx in 0 until activeLineIdx) {
+                        val prevLine = currentLayoutLines[prevIdx]
+                        val drawY = prevLine.baselineY - currentScrollY + incomingOffsetY
+                        for (wIdx in 0 until prevLine.words.size) {
+                            val w = prevLine.words[wIdx]
+                            if (!isDarkActiveInk) {
+                                canvas.drawText(w.word, w.x, drawY, wordGlowPaint)
+                            }
+                            canvas.drawText(w.word, w.x, drawY, wordActivePaint)
                         }
                     }
 
-                    // B: Show active lyric colour sweeping cleanly across current words
-                    if (currentLayoutLines.isNotEmpty()) {
-                        val totalChars = totalLayoutChars.coerceAtLeast(1)
+                    val lineProgress = if (posMs < activeLineStart) {
+                        0f
+                    } else if (posMs >= activeLineStart + activeLineDuration) {
+                        1f
+                    } else {
+                        com.example.domain.lyricsengine.LyricsTimingEngine.calculateWordGlowProgress(
+                            startMs = activeLineStart,
+                            endMs = activeLineStart + activeLineDuration,
+                            currentPositionMs = posMs,
+                            speedMultiplier = karaokeGlowSpeed
+                        )
+                    }
 
-                        var activeLineIdx = 0
-                        var activeLineStart = lineStart
-                        var activeLineDuration = totalDuration
-                        var charAccumulator = 0
-
-                        for (idx in 0 until currentLayoutLines.size) {
-                            val line = currentLayoutLines[idx]
-                            val lineChars = line.totalChars.coerceAtLeast(1)
-                            val startFrac = charAccumulator.toFloat() / totalChars
-                            val endFrac = (charAccumulator + lineChars).toFloat() / totalChars
-                            val lStart = lineStart + (totalDuration * startFrac).toLong()
-                            val lEnd = lineStart + (totalDuration * endFrac).toLong()
-
-                            if (posMs >= lStart && (idx == currentLayoutLines.lastIndex || posMs < lEnd)) {
-                                activeLineIdx = idx
-                                activeLineStart = lStart
-                                activeLineDuration = (lEnd - lStart).coerceAtLeast(1L)
-                                break
-                            } else if (idx == currentLayoutLines.lastIndex && posMs >= lEnd) {
-                                activeLineIdx = idx
-                                activeLineStart = lStart
-                                activeLineDuration = (lEnd - lStart).coerceAtLeast(1L)
-                            }
-                            charAccumulator += lineChars
-                        }
-
-                        wordActivePaint.color = hierarchy.activeColor
-                        wordActivePaint.alpha = incomingAlpha
-                        wordGlowPaint.color = hierarchy.activeColor
-                        wordGlowPaint.alpha = incomingAlpha
-
-                        // Draw prior completed visual lines (0 until activeLineIdx) fully highlighted and glowing
-                        for (prevIdx in 0 until activeLineIdx) {
-                            val prevLine = currentLayoutLines[prevIdx]
-                            val drawY = prevLine.baselineY - currentScrollY + incomingOffsetY
-                            for (wIdx in 0 until prevLine.words.size) {
-                                val w = prevLine.words[wIdx]
-                                canvas.drawText(w.word, w.x, drawY, wordGlowPaint)
-                                canvas.drawText(w.word, w.x, drawY, wordActivePaint)
+                    val activeLine = currentLayoutLines[activeLineIdx]
+                    val activeDrawY = activeLine.baselineY - currentScrollY + incomingOffsetY
+                    when {
+                        lineProgress <= 0f -> {
+                            for (wIdx in 0 until activeLine.words.size) {
+                                val w = activeLine.words[wIdx]
+                                canvas.drawText(w.word, w.x, activeDrawY, wordInactivePaint)
                             }
                         }
-
-                        val lineProgress = if (posMs < activeLineStart) {
-                            0f
-                        } else if (posMs >= activeLineStart + activeLineDuration) {
-                            1f
-                        } else {
-                            com.example.domain.lyricsengine.LyricsTimingEngine.calculateWordGlowProgress(
-                                startMs = activeLineStart,
-                                endMs = activeLineStart + activeLineDuration,
-                                currentPositionMs = posMs,
-                                speedMultiplier = karaokeGlowSpeed
-                            )
+                        lineProgress >= 1f -> {
+                            for (wIdx in 0 until activeLine.words.size) {
+                                val w = activeLine.words[wIdx]
+                                if (!isDarkActiveInk) {
+                                    canvas.drawText(w.word, w.x, activeDrawY, wordGlowPaint)
+                                }
+                                canvas.drawText(w.word, w.x, activeDrawY, wordActivePaint)
+                            }
                         }
-
-                        if (lineProgress > 0f) {
-                            val activeLine = currentLayoutLines[activeLineIdx]
+                        else -> {
                             val lineLeft = activeLine.words.firstOrNull()?.x ?: paddingHorizontal
                             val lineRight = (activeLine.words.lastOrNull()?.let { it.x + it.width }) ?: (width - paddingHorizontal)
                             val sweepX = lineLeft + ((lineRight - lineLeft) * lineProgress)
-                            val drawY = activeLine.baselineY - currentScrollY + incomingOffsetY
 
+                            // Unsung right half in inactive colour/opacity
                             canvas.save()
-                            canvas.clipRect(0f, 0f, sweepX, height.toFloat())
+                            canvas.clipRect(sweepX, 0f, lineRight + 64f, height.toFloat())
                             for (wIdx in 0 until activeLine.words.size) {
                                 val w = activeLine.words[wIdx]
-                                canvas.drawText(w.word, w.x, drawY, wordGlowPaint)
-                                canvas.drawText(w.word, w.x, drawY, wordActivePaint)
+                                canvas.drawText(w.word, w.x, activeDrawY, wordInactivePaint)
                             }
                             canvas.restore()
+
+                            // Sung left half in active colour/opacity
+                            canvas.save()
+                            canvas.clipRect(lineLeft - 64f, 0f, sweepX, height.toFloat())
+                            for (wIdx in 0 until activeLine.words.size) {
+                                val w = activeLine.words[wIdx]
+                                if (!isDarkActiveInk) {
+                                    canvas.drawText(w.word, w.x, activeDrawY, wordGlowPaint)
+                                }
+                                canvas.drawText(w.word, w.x, activeDrawY, wordActivePaint)
+                            }
+                            canvas.restore()
+                        }
+                    }
+
+                    // Draw remaining upcoming visual lines purely in inactive colour/opacity
+                    for (nextIdx in (activeLineIdx + 1) until currentLayoutLines.size) {
+                        val nextLine = currentLayoutLines[nextIdx]
+                        val drawY = nextLine.baselineY - currentScrollY + incomingOffsetY
+                        for (wIdx in 0 until nextLine.words.size) {
+                            val w = nextLine.words[wIdx]
+                            canvas.drawText(w.word, w.x, drawY, wordInactivePaint)
                         }
                     }
                 }
@@ -2332,7 +2373,7 @@ class MinimalOverlayView(
             val clampedProgress = animProgress.coerceIn(0f, 1f)
             val baseAlpha = (255f * clampedOpacity).roundToInt().coerceIn(0, 255)
             val activeAlpha = (baseAlpha * clampedProgress).roundToInt().coerceIn(0, 255)
-            val inactiveAlpha = activeAlpha
+            val inactiveAlpha = (activeAlpha * INACTIVE_LYRIC_ALPHA_RATIO).roundToInt().coerceIn(0, 255)
             val outgoingRatio = if (isFadeStyle) 1f else OUTGOING_LYRIC_ALPHA_RATIO
             val outgoingAlpha = (baseAlpha * (1f - clampedProgress) * outgoingRatio).roundToInt().coerceIn(0, 255)
             return LyricColorHierarchy(

@@ -22,6 +22,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 class HudBackdropTest {
 
@@ -368,7 +370,7 @@ class HudBackdropTest {
     }
 
     @Test
-    fun `lyric color hierarchy preserves custom active and inactive colours cleanly`() {
+    fun `lyric color hierarchy applies 0_64f inactive ratio and preserves custom active and inactive colours cleanly`() {
         val customActive = 0xFF7DD3FC.toInt()
         val customInactive = 0xFFD4D8E0.toInt()
         val fullOpacity = MinimalOverlayView.computeLyricColorHierarchy(
@@ -378,19 +380,47 @@ class HudBackdropTest {
             animProgress = 1.0f,
             isFadeStyle = false
         )
+        val expectedFullInactive = (255 * MinimalOverlayView.INACTIVE_LYRIC_ALPHA_RATIO).roundToInt()
         assertEquals(customActive, fullOpacity.activeColor)
         assertEquals(customInactive, fullOpacity.inactiveColor)
         assertEquals(255, fullOpacity.activeAlpha)
-        assertEquals(255, fullOpacity.inactiveAlpha)
+        assertEquals(expectedFullInactive, fullOpacity.inactiveAlpha)
+        assertTrue(
+            "Active lyric must have strictly higher opacity than inactive lyric",
+            fullOpacity.activeAlpha > fullOpacity.inactiveAlpha
+        )
 
+        // Semi-transparent custom inputs must normalize to opaque 0xFFRRGGBB so Paint.alpha is never multiplied twice
+        val semiTransparentActive = 0x80C4B5FD.toInt()
+        val semiTransparentInactive = 0x40A1A6B0.toInt()
         val halfOpacity = MinimalOverlayView.computeLyricColorHierarchy(
-            activeColor = customActive,
-            inactiveColor = customInactive,
+            activeColor = semiTransparentActive,
+            inactiveColor = semiTransparentInactive,
             textOpacity = 0.5f,
             animProgress = 1.0f,
             isFadeStyle = false
         )
+        assertEquals(0xFFC4B5FD.toInt(), halfOpacity.activeColor)
+        assertEquals(0xFFA1A6B0.toInt(), halfOpacity.inactiveColor)
         assertTrue("User text opacity preference must scale alpha proportionally", halfOpacity.activeAlpha in 126..129)
+        val expectedHalfInactive = (halfOpacity.activeAlpha * MinimalOverlayView.INACTIVE_LYRIC_ALPHA_RATIO).roundToInt()
+        assertEquals(
+            "Inactive alpha must apply INACTIVE_LYRIC_ALPHA_RATIO once against activeAlpha without double multiplication",
+            expectedHalfInactive,
+            halfOpacity.inactiveAlpha
+        )
+
+        val minOpacity = MinimalOverlayView.computeLyricColorHierarchy(
+            activeColor = customActive,
+            inactiveColor = customInactive,
+            textOpacity = 0.15f,
+            animProgress = 1.0f,
+            isFadeStyle = false
+        )
+        val expectedMinInactive = (minOpacity.activeAlpha * MinimalOverlayView.INACTIVE_LYRIC_ALPHA_RATIO).roundToInt()
+        assertEquals(38, minOpacity.activeAlpha)
+        assertEquals(expectedMinInactive, minOpacity.inactiveAlpha)
+        assertTrue("Inactive lyrics must remain non-zero even at minimum textOpacity", minOpacity.inactiveAlpha > 0)
 
         val midTransitionSlide = MinimalOverlayView.computeLyricColorHierarchy(
             activeColor = customActive,
@@ -399,6 +429,8 @@ class HudBackdropTest {
             animProgress = 0.5f,
             isFadeStyle = false
         )
+        val expectedMidInactive = (midTransitionSlide.activeAlpha * MinimalOverlayView.INACTIVE_LYRIC_ALPHA_RATIO).roundToInt()
+        assertEquals(expectedMidInactive, midTransitionSlide.inactiveAlpha)
         val midTransitionFade = MinimalOverlayView.computeLyricColorHierarchy(
             activeColor = customActive,
             inactiveColor = customInactive,
@@ -407,6 +439,146 @@ class HudBackdropTest {
             isFadeStyle = true
         )
         assertTrue(midTransitionSlide.outgoingAlpha < midTransitionFade.outgoingAlpha)
+    }
+
+    @Test
+    fun `active and inactive 0_64f hierarchy stays distinct and readable on Black and Grey backdrops across opacities`() {
+        val backdropOpacities = listOf(0.0f, 0.30f, 0.65f, 1.0f)
+        val darkWallpaperRef = 0xFF18181B.toInt()
+
+        // 1. Black backdrop with default White active & Soft White inactive, plus identical #FFFFFF/#FFFFFF
+        val blackColorPairs = listOf(
+            HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR to HudColorSystem.DEFAULT_INACTIVE_LYRIC_COLOR,
+            0xFFFFFFFF.toInt() to 0xFFFFFFFF.toInt(),
+            0xFFC4B5FD.toInt() to 0xFFA1A6B0.toInt()
+        )
+        val fullHierarchy = MinimalOverlayView.computeLyricColorHierarchy(
+            activeColor = HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR,
+            inactiveColor = HudColorSystem.DEFAULT_INACTIVE_LYRIC_COLOR,
+            textOpacity = 1.0f
+        )
+        assertEquals(255, fullHierarchy.activeAlpha)
+        assertEquals(163, fullHierarchy.inactiveAlpha)
+
+        for (backdropOpacity in backdropOpacities) {
+            val appearance = MinimalOverlayView.computeBackdropAppearance("BLACK", backdropOpacity)
+            val effectiveBg = if (backdropOpacity <= 0f) {
+                darkWallpaperRef
+            } else {
+                HudColorSystem.blendOver(
+                    foregroundArgb = appearance.fillColor,
+                    alpha = appearance.fillAlpha / 255f,
+                    backgroundArgb = darkWallpaperRef
+                )
+            }
+            for ((activeCol, inactiveCol) in blackColorPairs) {
+                val hierarchy = MinimalOverlayView.computeLyricColorHierarchy(
+                    activeColor = activeCol,
+                    inactiveColor = inactiveCol,
+                    textOpacity = 1.0f
+                )
+                val activeComposite = HudColorSystem.blendOver(
+                    foregroundArgb = hierarchy.activeColor,
+                    alpha = hierarchy.activeAlpha / 255f,
+                    backgroundArgb = effectiveBg
+                )
+                val inactiveComposite = HudColorSystem.blendOver(
+                    foregroundArgb = hierarchy.inactiveColor,
+                    alpha = hierarchy.inactiveAlpha / 255f,
+                    backgroundArgb = effectiveBg
+                )
+                val activeContrast = HudColorSystem.contrastRatio(activeComposite, effectiveBg)
+                val inactiveContrast = HudColorSystem.contrastRatio(inactiveComposite, effectiveBg)
+                val separation = HudColorSystem.contrastRatio(activeComposite, inactiveComposite)
+                assertTrue(
+                    "Active lyric must be strongly readable on Black backdrop (opacity=$backdropOpacity): $activeContrast",
+                    activeContrast >= 4.5
+                )
+                assertTrue(
+                    "Inactive lyric at 0.64f must remain readable on Black backdrop (opacity=$backdropOpacity): $inactiveContrast",
+                    inactiveContrast >= 2.2
+                )
+                assertTrue(
+                    "Active lyric must stand out from inactive lyric on Black backdrop (opacity=$backdropOpacity): $separation",
+                    separation >= 1.5
+                )
+            }
+        }
+
+        // 2. Grey backdrop at low, medium, and full backdrop opacity with recommended & identical dark inks
+        val greyColorPairs = listOf(
+            0xFF141418.toInt() to 0xFF4A4A50.toInt(),
+            0xFF1E40AF.toInt() to 0xFF141418.toInt(),
+            0xFF141418.toInt() to 0xFF141418.toInt()
+        )
+        // Low-opacity Grey backdrop (30%) sits over light/medium UI surfaces where dark ink is intended;
+        // default (65%) and full (100%) Grey backdrops must also stay readable over neutral mid-grey surfaces.
+        val greyScenarios = listOf(
+            0.30f to 0xFFD4D6DC.toInt(),
+            0.65f to 0xFF9E9EA4.toInt(),
+            1.0f to 0xFF8C8C92.toInt()
+        )
+        for ((backdropOpacity, underlyingSurface) in greyScenarios) {
+            val appearance = MinimalOverlayView.computeBackdropAppearance("GREY", backdropOpacity)
+            val effectiveBg = HudColorSystem.blendOver(
+                foregroundArgb = appearance.fillColor,
+                alpha = appearance.fillAlpha / 255f,
+                backgroundArgb = underlyingSurface
+            )
+            for ((activeCol, inactiveCol) in greyColorPairs) {
+                val hierarchy = MinimalOverlayView.computeLyricColorHierarchy(
+                    activeColor = activeCol,
+                    inactiveColor = inactiveCol,
+                    textOpacity = 1.0f
+                )
+                val activeComposite = HudColorSystem.blendOver(
+                    foregroundArgb = hierarchy.activeColor,
+                    alpha = hierarchy.activeAlpha / 255f,
+                    backgroundArgb = effectiveBg
+                )
+                val inactiveComposite = HudColorSystem.blendOver(
+                    foregroundArgb = hierarchy.inactiveColor,
+                    alpha = hierarchy.inactiveAlpha / 255f,
+                    backgroundArgb = effectiveBg
+                )
+                val activeContrast = HudColorSystem.contrastRatio(activeComposite, effectiveBg)
+                val inactiveContrast = HudColorSystem.contrastRatio(inactiveComposite, effectiveBg)
+                val separationContrast = HudColorSystem.contrastRatio(activeComposite, inactiveComposite)
+                val rgbDelta = abs(((activeComposite ushr 16) and 0xFF) - ((inactiveComposite ushr 16) and 0xFF)) +
+                    abs(((activeComposite ushr 8) and 0xFF) - ((inactiveComposite ushr 8) and 0xFF)) +
+                    abs((activeComposite and 0xFF) - (inactiveComposite and 0xFF))
+                assertTrue(
+                    "Active lyric must stay clearly readable on Grey backdrop (opacity=$backdropOpacity): $activeContrast",
+                    activeContrast >= 3.5
+                )
+                assertTrue(
+                    "Active lyric contrast ($activeContrast) must exceed inactive contrast ($inactiveContrast) on Grey backdrop",
+                    activeContrast > inactiveContrast
+                )
+                assertTrue(
+                    "Inactive lyric at 0.64f must stay legible on Grey backdrop (opacity=$backdropOpacity): $inactiveContrast",
+                    inactiveContrast >= 2.2
+                )
+                assertTrue(
+                    "Active and inactive lyrics must remain visually distinguishable on Grey backdrop (contrast=$separationContrast, rgbDelta=$rgbDelta)",
+                    separationContrast >= 1.35 || rgbDelta >= 45
+                )
+            }
+        }
+
+        // 3. Partial user textOpacity preserves the 0.64f active-to-inactive separation on both backdrops
+        for (textOpacity in listOf(0.85f, 0.60f)) {
+            val h = MinimalOverlayView.computeLyricColorHierarchy(
+                activeColor = HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR,
+                inactiveColor = HudColorSystem.DEFAULT_INACTIVE_LYRIC_COLOR,
+                textOpacity = textOpacity
+            )
+            assertEquals(
+                (h.activeAlpha * MinimalOverlayView.INACTIVE_LYRIC_ALPHA_RATIO).roundToInt(),
+                h.inactiveAlpha
+            )
+            assertTrue(h.activeAlpha > h.inactiveAlpha)
+        }
     }
 
     @Test
