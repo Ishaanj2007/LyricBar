@@ -71,16 +71,23 @@ import com.example.ui.components.LocalHazeState
 import com.example.ui.components.MinimalOverlayView
 import com.example.ui.theme.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.launch
+import java.text.DateFormat
+import java.util.Date
 
 @Composable
 fun SettingsScreen(
     playbackManager: MediaPlaybackManager,
     userPreferences: UserPreferences,
     modifier: Modifier = Modifier,
-    hasBottomNavPill: Boolean = true
+    hasBottomNavPill: Boolean = true,
+    openUpdaterSignal: Int = 0,
+    onOpenUpdaterConsumed: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -90,16 +97,42 @@ fun SettingsScreen(
     var showCacheClearedToast by remember { mutableStateOf(false) }
     var isFontListExpanded by rememberSaveable { mutableStateOf(false) }
     val updateManager = remember { com.example.data.updater.UpdateManager.getInstance(context) }
+    val cachedAvailableRelease by updateManager.cachedAvailableRelease.collectAsStateWithLifecycle()
     var showUpdateDialog by rememberSaveable { mutableStateOf(false) }
+    var notificationsAllowed by remember {
+        mutableStateOf(com.example.data.updater.UpdateNotifier(context).canPostNotifications())
+    }
     var showOrientationInfoDialog by rememberSaveable { mutableStateOf(false) }
     var selectedColorTarget by rememberSaveable { mutableStateOf(HudColorTarget.ACTIVE_LYRIC) }
     var activeColorPickerTarget by rememberSaveable { mutableStateOf<HudColorTarget?>(null) }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, context) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                notificationsAllowed = com.example.data.updater.UpdateNotifier(context).canPostNotifications()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     val allSectionKeys = remember {
         listOf("overlay", "animation", "size_align", "position", "theme", "typography", "lyrics_provider", "data", "about")
     }
     var expandedSections by rememberSaveable {
         mutableStateOf(setOf("overlay", "theme", "lyrics_provider"))
+    }
+
+    LaunchedEffect(openUpdaterSignal) {
+        if (openUpdaterSignal > 0) {
+            expandedSections = expandedSections + "about"
+            showUpdateDialog = true
+            updateManager.openUpdaterFromNotification()
+            onOpenUpdaterConsumed()
+        }
     }
     val toggleSection: (String) -> Unit = { key ->
         expandedSections = if (expandedSections.contains(key)) {
@@ -3160,7 +3193,87 @@ fun SettingsScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(14.dp))
+                HorizontalDivider()
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 12.dp)
+                    ) {
+                        Text(
+                            text = "Automatic update checks",
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Checks GitHub for new stable releases every 48 hours and notifies when available",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        val lastCheckedLabel = remember(livePreferences.lastUpdateCheckTimestampMs) {
+                            if (livePreferences.lastUpdateCheckTimestampMs > 0L) {
+                                DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
+                                    .format(Date(livePreferences.lastUpdateCheckTimestampMs))
+                            } else {
+                                "Not checked yet"
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Last checked: $lastCheckedLabel",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f)
+                        )
+                        if (
+                            livePreferences.autoUpdateChecksEnabled &&
+                            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                            !notificationsAllowed
+                        ) {
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "System notifications are off; available updates still appear here.",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f)
+                            )
+                        }
+                    }
+                    Switch(
+                        checked = livePreferences.autoUpdateChecksEnabled,
+                        onCheckedChange = { enabled ->
+                            coroutineScope.launch {
+                                playbackManager.preferencesRepository.setAutoUpdateChecksEnabled(enabled)
+                                com.example.data.updater.UpdateCheckScheduler.syncPeriodicSchedule(
+                                    context = context,
+                                    enabled = enabled
+                                )
+                            }
+                        },
+                        modifier = Modifier.testTag("settings_auto_update_checks_switch")
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                val pendingUpdate = cachedAvailableRelease
+                if (pendingUpdate != null) {
+                    Text(
+                        text = "New stable release detected: v${pendingUpdate.cleanVersionName}",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.primary,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp)
+                    )
+                }
 
                 OutlinedButton(
                     onClick = {

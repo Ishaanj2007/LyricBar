@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">LyricBar</string>
-    <string name="app_version">2.2.0</string>
+    <string name="app_version">2.5.0</string>
     <string name="app_description">Synchronized floating lyrics overlay for Android music apps.</string>
     
     <!-- Navigation -->
@@ -41,4 +41,10 @@
     <string name="notification_title">LyricBar Overlay</string>
     <string name="notification_reposition">Reposition</string>
     <string name="notification_stop">Stop</string>
+
+    <!-- App Update Notifications -->
+    <string name="update_channel_name">App Updates</string>
+    <string name="update_channel_description">Notifications when a new stable LyricBar release is available</string>
+    <string name="update_notification_title">LyricBar update available</string>
+    <string name="update_notification_message">LyricBar v%1$s is now available. Tap to see what\'s new.</string>
 </resources>

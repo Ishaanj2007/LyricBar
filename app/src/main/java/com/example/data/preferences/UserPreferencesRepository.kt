@@ -177,7 +177,13 @@ data class UserPreferences(
     val singleLineLyrics: Boolean = false,
     val adaptiveLyricScrolling: Boolean = true,
     val lyricScrollSpeedMultiplier: Float = 1.0f, // 1.0x to 1.5x
-    val globalOffsetMs: Long = 0L
+    val globalOffsetMs: Long = 0L,
+    val autoUpdateChecksEnabled: Boolean = true,
+    val lastUpdateCheckTimestampMs: Long = 0L,
+    val lastNotifiedUpdateVersion: String? = null,
+    val lastReleaseEtag: String? = null,
+    val cachedLatestReleaseJson: String? = null,
+    val hasRequestedUpdateNotificationPermission: Boolean = false
 ) {
     val hasLandscapeProfile: Boolean
         get() = hudLandscapeX != null &&
@@ -272,6 +278,12 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
         val ADAPTIVE_LYRIC_SCROLLING = booleanPreferencesKey("adaptive_lyric_scrolling")
         val LYRIC_SCROLL_SPEED_MULTIPLIER = floatPreferencesKey("lyric_scroll_speed_multiplier")
         val GLOBAL_OFFSET_MS = longPreferencesKey("global_offset_ms")
+        val AUTO_UPDATE_CHECKS_ENABLED = booleanPreferencesKey("auto_update_checks_enabled")
+        val LAST_UPDATE_CHECK_TIMESTAMP_MS = longPreferencesKey("last_update_check_timestamp_ms")
+        val LAST_NOTIFIED_UPDATE_VERSION = stringPreferencesKey("last_notified_update_version")
+        val LAST_RELEASE_ETAG = stringPreferencesKey("last_release_etag")
+        val CACHED_LATEST_RELEASE_JSON = stringPreferencesKey("cached_latest_release_json")
+        val HAS_REQUESTED_UPDATE_NOTIFICATION_PERMISSION = booleanPreferencesKey("has_requested_update_notification_permission")
     }
 
     val userPreferencesFlow: Flow<UserPreferences> = dataStore.data
@@ -407,7 +419,13 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
                 singleLineLyrics = preferences[PreferencesKeys.SINGLE_LINE_LYRICS] ?: false,
                 adaptiveLyricScrolling = preferences[PreferencesKeys.ADAPTIVE_LYRIC_SCROLLING] ?: true,
                 lyricScrollSpeedMultiplier = (preferences[PreferencesKeys.LYRIC_SCROLL_SPEED_MULTIPLIER] ?: 1.0f).coerceIn(1.0f, 1.5f),
-                globalOffsetMs = preferences[PreferencesKeys.GLOBAL_OFFSET_MS] ?: 0L
+                globalOffsetMs = preferences[PreferencesKeys.GLOBAL_OFFSET_MS] ?: 0L,
+                autoUpdateChecksEnabled = preferences[PreferencesKeys.AUTO_UPDATE_CHECKS_ENABLED] ?: true,
+                lastUpdateCheckTimestampMs = (preferences[PreferencesKeys.LAST_UPDATE_CHECK_TIMESTAMP_MS] ?: 0L).coerceAtLeast(0L),
+                lastNotifiedUpdateVersion = preferences[PreferencesKeys.LAST_NOTIFIED_UPDATE_VERSION]?.takeIf { it.isNotBlank() },
+                lastReleaseEtag = preferences[PreferencesKeys.LAST_RELEASE_ETAG]?.takeIf { it.isNotBlank() },
+                cachedLatestReleaseJson = preferences[PreferencesKeys.CACHED_LATEST_RELEASE_JSON]?.takeIf { it.isNotBlank() },
+                hasRequestedUpdateNotificationPermission = preferences[PreferencesKeys.HAS_REQUESTED_UPDATE_NOTIFICATION_PERMISSION] ?: false
             )
         }
 
@@ -813,5 +831,45 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
         return dataStore.data.map { preferences ->
             preferences[primaryKey] ?: (if (altKey != null) preferences[altKey] else null) ?: 0L
         }
+    }
+
+    suspend fun setAutoUpdateChecksEnabled(enabled: Boolean) {
+        dataStore.edit { it[PreferencesKeys.AUTO_UPDATE_CHECKS_ENABLED] = enabled }
+    }
+
+    suspend fun setLastUpdateCheckTimestampMs(timestampMs: Long) {
+        val safeTs = timestampMs.coerceAtLeast(0L)
+        dataStore.edit { it[PreferencesKeys.LAST_UPDATE_CHECK_TIMESTAMP_MS] = safeTs }
+    }
+
+    suspend fun setLastNotifiedUpdateVersion(version: String?) {
+        dataStore.edit { prefs ->
+            val trimmed = version?.trim()
+            if (trimmed.isNullOrEmpty()) {
+                prefs.remove(PreferencesKeys.LAST_NOTIFIED_UPDATE_VERSION)
+            } else {
+                prefs[PreferencesKeys.LAST_NOTIFIED_UPDATE_VERSION] = trimmed
+            }
+        }
+    }
+
+    suspend fun saveCachedReleaseMetadata(etag: String?, rawJson: String?) {
+        dataStore.edit { prefs ->
+            val cleanEtag = etag?.trim()
+            if (cleanEtag.isNullOrEmpty()) {
+                prefs.remove(PreferencesKeys.LAST_RELEASE_ETAG)
+            } else {
+                prefs[PreferencesKeys.LAST_RELEASE_ETAG] = cleanEtag
+            }
+            if (rawJson.isNullOrBlank()) {
+                prefs.remove(PreferencesKeys.CACHED_LATEST_RELEASE_JSON)
+            } else {
+                prefs[PreferencesKeys.CACHED_LATEST_RELEASE_JSON] = rawJson
+            }
+        }
+    }
+
+    suspend fun setHasRequestedUpdateNotificationPermission(requested: Boolean) {
+        dataStore.edit { it[PreferencesKeys.HAS_REQUESTED_UPDATE_NOTIFICATION_PERMISSION] = requested }
     }
 }

@@ -11,104 +11,283 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 import java.util.regex.Pattern
 
-class UpdateRepository(
+sealed interface UpdateFetchResult {
+    data class ReleaseFound(
+        val release: ReleaseInfo,
+        val eTag: String?,
+        val rawJson: String?,
+        val fromNotModifiedCache: Boolean
+    ) : UpdateFetchResult
+
+    data class NoStableRelease(val reason: String) : UpdateFetchResult
+
+    data class NetworkOrServerFailure(
+        val message: String,
+        val isRetryable: Boolean,
+        val cause: Throwable? = null
+    ) : UpdateFetchResult
+}
+
+open class UpdateRepository(
     private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .build(),
     private val owner: String = "Ishaanj2007",
-    private val repo: String = "LyricBar"
+    private val repo: String = "LyricBar",
+    private val baseApiUrl: String = "https://api.github.com"
 ) {
 
+    private val trimmedBaseUrl: String
+        get() = baseApiUrl.trimEnd('/')
+
     private val latestReleaseUrl: String
-        get() = "https://api.github.com/repos/$owner/$repo/releases/latest"
+        get() = "$trimmedBaseUrl/repos/$owner/$repo/releases/latest"
 
     private val allReleasesUrl: String
-        get() = "https://api.github.com/repos/$owner/$repo/releases"
+        get() = "$trimmedBaseUrl/repos/$owner/$repo/releases"
 
-    suspend fun fetchLatestRelease(): Result<ReleaseInfo> = withContext(Dispatchers.IO) {
-        try {
-            // First attempt: fetch /releases/latest
-            val request = Request.Builder()
+    private val userAgentValue: String
+        get() = try {
+            "LyricBar-Updater/${com.example.BuildConfig.VERSION_NAME}"
+        } catch (_: Throwable) {
+            "LyricBar-Updater"
+        }
+
+    open suspend fun fetchLatestRelease(): Result<ReleaseInfo> {
+        return when (val result = fetchLatestStableRelease()) {
+            is UpdateFetchResult.ReleaseFound -> Result.success(result.release)
+            is UpdateFetchResult.NoStableRelease -> Result.failure(IllegalStateException(result.reason))
+            is UpdateFetchResult.NetworkOrServerFailure -> {
+                Result.failure(result.cause ?: IOException(result.message))
+            }
+        }
+    }
+
+    open suspend fun fetchLatestStableRelease(
+        cachedEtag: String? = null,
+        cachedReleaseJson: String? = null
+    ): UpdateFetchResult = withContext(Dispatchers.IO) {
+        fetchLatestInternal(
+            cachedEtag = cachedEtag,
+            cachedReleaseJson = cachedReleaseJson,
+            allowCacheFallbackRetry = true
+        )
+    }
+
+    private fun fetchLatestInternal(
+        cachedEtag: String?,
+        cachedReleaseJson: String?,
+        allowCacheFallbackRetry: Boolean
+    ): UpdateFetchResult {
+        return try {
+            val usableEtag = cachedEtag?.trim()?.takeIf { it.isNotEmpty() && !cachedReleaseJson.isNullOrBlank() }
+            val requestBuilder = Request.Builder()
                 .url(latestReleaseUrl)
-                .header("User-Agent", "LyricBar-Updater/${com.example.BuildConfig.VERSION_NAME}")
+                .header("User-Agent", userAgentValue)
                 .header("Accept", "application/vnd.github.v3+json")
-                .build()
+            if (usableEtag != null) {
+                requestBuilder.header("If-None-Match", usableEtag)
+            }
 
-            client.newCall(request).execute().use { response ->
+            client.newCall(requestBuilder.build()).execute().use { response ->
                 when (response.code) {
+                    304 -> {
+                        val cachedRelease = parseCachedReleaseOrNull(cachedReleaseJson)
+                        if (cachedRelease != null && isValidStableReleaseWithApk(cachedRelease)) {
+                            UpdateFetchResult.ReleaseFound(
+                                release = cachedRelease,
+                                eTag = usableEtag,
+                                rawJson = cachedReleaseJson,
+                                fromNotModifiedCache = true
+                            )
+                        } else if (allowCacheFallbackRetry) {
+                            // Cached JSON is missing or stale/corrupt; re-fetch unconditionally once
+                            fetchLatestInternal(
+                                cachedEtag = null,
+                                cachedReleaseJson = null,
+                                allowCacheFallbackRetry = false
+                            )
+                        } else {
+                            UpdateFetchResult.NetworkOrServerFailure(
+                                message = "Cached release metadata was invalid after 304 Not Modified.",
+                                isRetryable = false
+                            )
+                        }
+                    }
                     200 -> {
                         val bodyString = response.body?.string()
-                            ?: return@withContext Result.failure(IOException("Empty response from GitHub API"))
-                        val json = JsonParser.parseString(bodyString).asJsonObject
-                        val release = parseReleaseJson(json)
+                        if (bodyString.isNullOrBlank()) {
+                            return UpdateFetchResult.NetworkOrServerFailure(
+                                message = "Empty response from GitHub API.",
+                                isRetryable = true
+                            )
+                        }
+                        val parsedObj = try {
+                            val elem = JsonParser.parseString(bodyString)
+                            if (!elem.isJsonObject) {
+                                return UpdateFetchResult.NetworkOrServerFailure(
+                                    message = "Malformed release metadata returned by GitHub.",
+                                    isRetryable = false
+                                )
+                            }
+                            elem.asJsonObject
+                        } catch (e: Exception) {
+                            return UpdateFetchResult.NetworkOrServerFailure(
+                                message = "Invalid JSON received from GitHub Releases API.",
+                                isRetryable = false,
+                                cause = e
+                            )
+                        }
 
-                        // Strict check: accept only stable (non-draft, non-prerelease) releases with a compatible APK
-                        if (!release.isDraft && !release.isPrerelease && release.apkAsset != null) {
-                            return@withContext Result.success(release)
+                        val release = parseReleaseJson(parsedObj)
+                        val responseEtag = response.header("ETag")?.trim()?.takeIf { it.isNotEmpty() }
+
+                        // Strict check: accept only stable (non-draft, non-prerelease) releases with valid metadata & compatible APK
+                        if (isValidStableReleaseWithApk(release)) {
+                            UpdateFetchResult.ReleaseFound(
+                                release = release,
+                                eTag = responseEtag,
+                                rawJson = bodyString,
+                                fromNotModifiedCache = false
+                            )
                         } else {
-                            // /releases/latest was draft, prerelease, or had no APK -> fall back to releases list
-                            return@withContext fetchFromReleasesList()
+                            // /releases/latest was draft, prerelease, malformed, or lacked an APK -> fall back to /releases
+                            fetchFromReleasesList()
                         }
                     }
                     403, 429 -> {
-                        return@withContext Result.failure(
-                            IOException("GitHub API rate limit exceeded. Please wait a few moments and try again.")
+                        UpdateFetchResult.NetworkOrServerFailure(
+                            message = "GitHub API rate limit exceeded. Please wait a few moments and try again.",
+                            isRetryable = true
                         )
                     }
                     404 -> {
                         // Fallback to querying the releases list in case "latest" pointer is not set
-                        return@withContext fetchFromReleasesList()
+                        fetchFromReleasesList()
+                    }
+                    in 500..599 -> {
+                        UpdateFetchResult.NetworkOrServerFailure(
+                            message = "GitHub server returned HTTP ${response.code}.",
+                            isRetryable = true
+                        )
                     }
                     else -> {
-                        return@withContext Result.failure(
-                            IOException("GitHub server returned HTTP ${response.code}")
+                        UpdateFetchResult.NetworkOrServerFailure(
+                            message = "GitHub server returned HTTP ${response.code}.",
+                            isRetryable = false
                         )
                     }
                 }
             }
         } catch (e: IOException) {
-            Result.failure(IOException("Network error checking for updates: ${e.localizedMessage ?: "Connection failed"}", e))
+            UpdateFetchResult.NetworkOrServerFailure(
+                message = "Network error checking for updates: ${e.localizedMessage ?: "Connection failed"}",
+                isRetryable = true,
+                cause = e
+            )
         } catch (e: Exception) {
-            Result.failure(e)
+            UpdateFetchResult.NetworkOrServerFailure(
+                message = e.localizedMessage?.takeIf { it.isNotBlank() } ?: "Unexpected error checking for updates.",
+                isRetryable = false,
+                cause = e
+            )
         }
     }
 
-    private fun fetchFromReleasesList(): Result<ReleaseInfo> {
+    private fun fetchFromReleasesList(): UpdateFetchResult {
         val request = Request.Builder()
             .url(allReleasesUrl)
-            .header("User-Agent", "LyricBar-Updater/${com.example.BuildConfig.VERSION_NAME}")
+            .header("User-Agent", userAgentValue)
             .header("Accept", "application/vnd.github.v3+json")
             .build()
 
-        client.newCall(request).execute().use { response ->
+        return client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
-                val errorMsg = if (response.code == 403 || response.code == 429) {
+                val isRateLimit = response.code == 403 || response.code == 429
+                val isRetryable = isRateLimit || response.code in 500..599
+                val errorMsg = if (isRateLimit) {
                     "GitHub API rate limit exceeded. Please wait a few moments and try again."
                 } else {
                     "GitHub returned HTTP ${response.code} fetching releases list"
                 }
-                return Result.failure(IOException(errorMsg))
+                return UpdateFetchResult.NetworkOrServerFailure(
+                    message = errorMsg,
+                    isRetryable = isRetryable
+                )
             }
             val bodyString = response.body?.string()
-                ?: return Result.failure(IOException("Empty response from GitHub releases list"))
+            if (bodyString.isNullOrBlank()) {
+                return UpdateFetchResult.NetworkOrServerFailure(
+                    message = "Empty response from GitHub releases list",
+                    isRetryable = true
+                )
+            }
 
-            val jsonArray = JsonParser.parseString(bodyString).asJsonArray
+            val jsonArray = try {
+                val elem = JsonParser.parseString(bodyString)
+                if (!elem.isJsonArray) {
+                    return UpdateFetchResult.NetworkOrServerFailure(
+                        message = "Malformed releases list returned by GitHub.",
+                        isRetryable = false
+                    )
+                }
+                elem.asJsonArray
+            } catch (e: Exception) {
+                return UpdateFetchResult.NetworkOrServerFailure(
+                    message = "Invalid JSON received from GitHub releases list.",
+                    isRetryable = false,
+                    cause = e
+                )
+            }
+
+            var bestPair: Pair<ReleaseInfo, String>? = null
             for (element in jsonArray) {
-                if (element.isJsonObject) {
-                    val item = element.asJsonObject
-                    val isDraft = item.get("draft")?.asBoolean ?: false
-                    val isPrerelease = item.get("prerelease")?.asBoolean ?: false
-                    if (!isDraft && !isPrerelease) {
-                        val release = parseReleaseJson(item)
-                        if (release.apkAsset != null) {
-                            return Result.success(release)
-                        }
-                    }
+                if (!element.isJsonObject) continue
+                val item = element.asJsonObject
+                val release = parseReleaseJson(item)
+                if (!isValidStableReleaseWithApk(release)) continue
+
+                val currentBest = bestPair
+                if (currentBest == null || VersionComparator.compare(release.tagName, currentBest.first.tagName) > 0) {
+                    bestPair = release to item.toString()
                 }
             }
-            return Result.failure(IllegalStateException("No published stable release with a compatible APK asset found"))
+
+            if (bestPair != null) {
+                UpdateFetchResult.ReleaseFound(
+                    release = bestPair.first,
+                    eTag = null,
+                    rawJson = bestPair.second,
+                    fromNotModifiedCache = false
+                )
+            } else {
+                UpdateFetchResult.NoStableRelease(
+                    reason = "No published stable release with a compatible APK asset found"
+                )
+            }
         }
+    }
+
+    fun parseCachedReleaseOrNull(rawJson: String?): ReleaseInfo? {
+        if (rawJson.isNullOrBlank()) return null
+        return try {
+            val elem = JsonParser.parseString(rawJson)
+            if (!elem.isJsonObject) return null
+            val parsed = parseReleaseJson(elem.asJsonObject)
+            if (isValidStableReleaseWithApk(parsed)) parsed else null
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    internal fun isValidStableReleaseWithApk(release: ReleaseInfo): Boolean {
+        if (release.isDraft || release.isPrerelease) return false
+        val tag = release.tagName.trim()
+        if (tag.isEmpty() || tag.none { it.isDigit() }) return false
+        val asset = release.apkAsset ?: return false
+        val url = asset.downloadUrl.trim()
+        return url.startsWith("https://", ignoreCase = true) || url.startsWith("http://", ignoreCase = true)
     }
 
     suspend fun fetchCompanionChecksum(companionAsset: ReleaseAsset, targetApkName: String? = null): String? = withContext(Dispatchers.IO) {

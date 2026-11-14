@@ -1,11 +1,18 @@
 package com.example
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -26,6 +33,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.example.data.preferences.UserPreferences
+import com.example.data.updater.UpdateNotifier
 import com.example.service.OverlayService
 import com.example.ui.components.AdaptiveNavRail
 import com.example.ui.components.FloatingBottomNavPill
@@ -34,6 +42,7 @@ import com.example.ui.screens.*
 import com.example.ui.theme.MyApplicationTheme
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
+import kotlinx.coroutines.launch
 
 enum class AppTab(val title: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
     NOW_PLAYING("Now Playing", Icons.Default.PlayCircle),
@@ -44,9 +53,15 @@ enum class AppTab(val title: String, val icon: androidx.compose.ui.graphics.vect
 
 class MainActivity : ComponentActivity() {
 
+    private var openUpdaterSignal by mutableIntStateOf(0)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        if (savedInstanceState == null && UpdateNotifier.isOpenUpdaterIntent(intent)) {
+            openUpdaterSignal++
+        }
 
         val app = application as LyricBarApp
         val playbackManager = app.playbackManager
@@ -97,10 +112,20 @@ class MainActivity : ComponentActivity() {
                 } else {
                     MainAppScaffold(
                         playbackManager = playbackManager,
-                        userPreferences = prefs
+                        userPreferences = prefs,
+                        openUpdaterSignal = openUpdaterSignal,
+                        onOpenUpdaterConsumed = { openUpdaterSignal = 0 }
                     )
                 }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (UpdateNotifier.isOpenUpdaterIntent(intent)) {
+            openUpdaterSignal++
         }
     }
 }
@@ -108,12 +133,50 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MainAppScaffold(
     playbackManager: com.example.service.MediaPlaybackManager,
-    userPreferences: UserPreferences
+    userPreferences: UserPreferences,
+    openUpdaterSignal: Int = 0,
+    onOpenUpdaterConsumed: () -> Unit = {}
 ) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     var currentTab by rememberSaveable { mutableStateOf(AppTab.NOW_PLAYING) }
     val navHazeState = remember { HazeState() }
     val playbackState by playbackManager.playbackState.collectAsStateWithLifecycle()
     val artworkBitmap = com.example.ui.components.rememberArtworkBitmap(playbackState.track)
+
+    LaunchedEffect(openUpdaterSignal) {
+        if (openUpdaterSignal > 0) {
+            currentTab = AppTab.SETTINGS
+        }
+    }
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { _ ->
+        coroutineScope.launch {
+            playbackManager.preferencesRepository.setHasRequestedUpdateNotificationPermission(true)
+        }
+    }
+
+    LaunchedEffect(
+        userPreferences.autoUpdateChecksEnabled,
+        userPreferences.hasRequestedUpdateNotificationPermission
+    ) {
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            userPreferences.autoUpdateChecksEnabled &&
+            !userPreferences.hasRequestedUpdateNotificationPermission
+        ) {
+            val alreadyGranted = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+            playbackManager.preferencesRepository.setHasRequestedUpdateNotificationPermission(true)
+            if (!alreadyGranted) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
 
     // Intercept back button when on sub-tabs to return to Now Playing
     BackHandler(enabled = currentTab != AppTab.NOW_PLAYING) {
@@ -164,7 +227,9 @@ fun MainAppScaffold(
                             playbackManager = playbackManager,
                             userPreferences = userPreferences,
                             hasBottomNavPill = false,
-                            onNavigateToLyrics = { currentTab = AppTab.LYRICS }
+                            onNavigateToLyrics = { currentTab = AppTab.LYRICS },
+                            openUpdaterSignal = openUpdaterSignal,
+                            onOpenUpdaterConsumed = onOpenUpdaterConsumed
                         )
                     }
                 }
@@ -191,7 +256,9 @@ fun MainAppScaffold(
                             playbackManager = playbackManager,
                             userPreferences = userPreferences,
                             hasBottomNavPill = true,
-                            onNavigateToLyrics = { currentTab = AppTab.LYRICS }
+                            onNavigateToLyrics = { currentTab = AppTab.LYRICS },
+                            openUpdaterSignal = openUpdaterSignal,
+                            onOpenUpdaterConsumed = onOpenUpdaterConsumed
                         )
                     }
 
@@ -220,7 +287,9 @@ private fun TabContent(
     playbackManager: com.example.service.MediaPlaybackManager,
     userPreferences: UserPreferences,
     hasBottomNavPill: Boolean,
-    onNavigateToLyrics: () -> Unit
+    onNavigateToLyrics: () -> Unit,
+    openUpdaterSignal: Int = 0,
+    onOpenUpdaterConsumed: () -> Unit = {}
 ) {
     AnimatedContent(targetState = currentTab, label = "tab_animation") { target ->
         when (target) {
@@ -238,7 +307,9 @@ private fun TabContent(
             AppTab.SETTINGS -> SettingsScreen(
                 playbackManager = playbackManager,
                 userPreferences = userPreferences,
-                hasBottomNavPill = hasBottomNavPill
+                hasBottomNavPill = hasBottomNavPill,
+                openUpdaterSignal = openUpdaterSignal,
+                onOpenUpdaterConsumed = onOpenUpdaterConsumed
             )
             AppTab.HISTORY -> HistoryScreen(
                 hasBottomNavPill = hasBottomNavPill

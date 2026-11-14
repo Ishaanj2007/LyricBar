@@ -3,6 +3,7 @@ package com.example.data.updater
 import android.content.Context
 import android.content.Intent
 import com.example.BuildConfig
+import com.example.data.preferences.UserPreferencesRepository
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -57,9 +58,20 @@ class UpdateManager private constructor(
 ) {
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private val preferencesRepository = UserPreferencesRepository(context.applicationContext)
+    private val notifier = UpdateNotifier(context.applicationContext)
+    private val checkEngine = UpdateCheckEngine(
+        repository = repository,
+        preferencesRepository = preferencesRepository,
+        notifier = notifier,
+        installedVersionProvider = { installedVersionName }
+    )
 
     private val _uiState = MutableStateFlow<UpdateUiState>(UpdateUiState.Idle)
     val uiState: StateFlow<UpdateUiState> = _uiState.asStateFlow()
+
+    private val _cachedAvailableRelease = MutableStateFlow<ReleaseInfo?>(null)
+    val cachedAvailableRelease: StateFlow<ReleaseInfo?> = _cachedAvailableRelease.asStateFlow()
 
     val installedVersionName: String
         get() = BuildConfig.VERSION_NAME
@@ -68,6 +80,10 @@ class UpdateManager private constructor(
         get() = BuildConfig.VERSION_CODE.toLong()
 
     init {
+        scope.launch(Dispatchers.IO) {
+            _cachedAvailableRelease.value = checkEngine.loadCachedAvailableReleaseOrNull()
+        }
+
         // Observe downloader progress and translate to UpdateUiState
         scope.launch {
             downloader.downloadState.collect { downloadState ->
@@ -112,40 +128,132 @@ class UpdateManager private constructor(
     }
 
     fun checkForUpdates(isUserInitiated: Boolean = true) {
-        if (_uiState.value is UpdateUiState.Checking || _uiState.value is UpdateUiState.Downloading) {
+        val current = _uiState.value
+        if (
+            current is UpdateUiState.Checking ||
+            current is UpdateUiState.Downloading ||
+            current is UpdateUiState.Verifying ||
+            current is UpdateUiState.ReadyToInstall ||
+            current is UpdateUiState.PermissionRequired
+        ) {
             return
         }
 
         _uiState.value = UpdateUiState.Checking
 
         scope.launch {
-            val result = repository.fetchLatestRelease()
-            result.onSuccess { release ->
-                val isNewer = VersionComparator.isNewer(
-                    remoteVersion = release.tagName,
+            val outcome = withContext(Dispatchers.IO) {
+                checkEngine.performCheck(
+                    trigger = UpdateCheckTrigger.MANUAL,
+                    allowRecentSkip = !isUserInitiated
+                )
+            }
+            applyManualCheckOutcome(outcome)
+        }
+    }
+
+    suspend fun performBackgroundUpdateCheck(
+        trigger: UpdateCheckTrigger = UpdateCheckTrigger.WORKER
+    ): UpdateCheckOutcome {
+        val outcome = withContext(Dispatchers.IO) {
+            checkEngine.performCheck(
+                trigger = trigger,
+                allowRecentSkip = true
+            )
+        }
+        when (outcome) {
+            is UpdateCheckOutcome.UpdateAvailable -> _cachedAvailableRelease.value = outcome.release
+            is UpdateCheckOutcome.UpToDate,
+            is UpdateCheckOutcome.NoStableRelease -> _cachedAvailableRelease.value = null
+            is UpdateCheckOutcome.Failure,
+            UpdateCheckOutcome.SkippedDisabled,
+            UpdateCheckOutcome.SkippedRecent -> Unit
+        }
+        return outcome
+    }
+
+    fun openUpdaterFromNotification() {
+        val current = _uiState.value
+        if (
+            current is UpdateUiState.Available ||
+            current is UpdateUiState.Downloading ||
+            current is UpdateUiState.DownloadFailed ||
+            current is UpdateUiState.Verifying ||
+            current is UpdateUiState.VerificationFailed ||
+            current is UpdateUiState.PermissionRequired ||
+            current is UpdateUiState.ReadyToInstall ||
+            current is UpdateUiState.InstallationLaunched ||
+            current is UpdateUiState.Checking
+        ) {
+            return
+        }
+
+        val inMemoryCached = _cachedAvailableRelease.value
+        if (
+            inMemoryCached != null &&
+            inMemoryCached.apkAsset != null &&
+            VersionComparator.isNewer(inMemoryCached.tagName, installedVersionName)
+        ) {
+            _uiState.value = UpdateUiState.Available(
+                release = inMemoryCached,
+                installedVersion = installedVersionName
+            )
+            return
+        }
+
+        _uiState.value = UpdateUiState.Checking
+        scope.launch {
+            val diskCached = withContext(Dispatchers.IO) {
+                checkEngine.loadCachedAvailableReleaseOrNull()
+            }
+            if (
+                diskCached != null &&
+                diskCached.apkAsset != null &&
+                VersionComparator.isNewer(diskCached.tagName, installedVersionName)
+            ) {
+                _cachedAvailableRelease.value = diskCached
+                _uiState.value = UpdateUiState.Available(
+                    release = diskCached,
                     installedVersion = installedVersionName
                 )
-
-                if (isNewer && release.apkAsset != null) {
-                    _uiState.value = UpdateUiState.Available(
-                        release = release,
-                        installedVersion = installedVersionName
-                    )
-                } else if (release.apkAsset == null && isNewer) {
-                    _uiState.value = UpdateUiState.Error(
-                        "A new version (${release.tagName}) was found on GitHub, but no compatible APK asset was provided in this release."
-                    )
-                } else {
-                    _uiState.value = UpdateUiState.UpToDate(
-                        installedVersion = installedVersionName,
-                        checkedAt = System.currentTimeMillis()
+            } else {
+                val outcome = withContext(Dispatchers.IO) {
+                    checkEngine.performCheck(
+                        trigger = UpdateCheckTrigger.MANUAL,
+                        allowRecentSkip = false
                     )
                 }
-            }.onFailure { error ->
-                _uiState.value = UpdateUiState.Error(
-                    error.localizedMessage?.takeIf { it.isNotBlank() }
-                        ?: "Failed to check for updates. Please try again."
+                applyManualCheckOutcome(outcome)
+            }
+        }
+    }
+
+    private fun applyManualCheckOutcome(outcome: UpdateCheckOutcome) {
+        when (outcome) {
+            is UpdateCheckOutcome.UpdateAvailable -> {
+                _cachedAvailableRelease.value = outcome.release
+                _uiState.value = UpdateUiState.Available(
+                    release = outcome.release,
+                    installedVersion = outcome.installedVersion
                 )
+            }
+            is UpdateCheckOutcome.UpToDate -> {
+                _cachedAvailableRelease.value = null
+                _uiState.value = UpdateUiState.UpToDate(
+                    installedVersion = outcome.installedVersion,
+                    checkedAt = outcome.checkedAtMs
+                )
+            }
+            is UpdateCheckOutcome.NoStableRelease -> {
+                _cachedAvailableRelease.value = null
+                _uiState.value = UpdateUiState.Error(outcome.reason)
+            }
+            is UpdateCheckOutcome.Failure -> {
+                _uiState.value = UpdateUiState.Error(outcome.message)
+            }
+            UpdateCheckOutcome.SkippedDisabled,
+            UpdateCheckOutcome.SkippedRecent -> {
+                _uiState.value = UpdateUiState.Idle
             }
         }
     }
