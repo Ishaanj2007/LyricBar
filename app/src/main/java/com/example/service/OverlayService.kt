@@ -468,7 +468,6 @@ class OverlayService : Service() {
                         view.hudBackdropVerticalPaddingDp = prefs.hudBackdropVerticalPaddingDp.toFloat()
                         view.activeLyricColor = prefs.hudActiveLyricColor
                         view.inactiveLyricColor = prefs.hudInactiveLyricColor
-                        view.hudAccentColor = prefs.hudAccentColor
                         view.typewriterSpeed = prefs.typewriterSpeed
                         view.smoothTransitionSpeed = prefs.smoothTransitionSpeed
                         view.fadeSpeed = prefs.fadeSpeed

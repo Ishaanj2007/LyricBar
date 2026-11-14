@@ -28,10 +28,18 @@ class HudHoldGestureTest {
         assertEquals(310f, controller.activationRawX, 0.001f)
         assertEquals(408f, controller.activationRawY, 0.001f)
 
-        // Note: HudHoldGestureController.onHoldTimeout() unconditionally transitions PENDING_HOLD to ACTIVE_REPOSITION
-        // (the time delta check is performed by Handler before calling onHoldTimeout).
-        // Therefore, we test that calling onHoldTimeout() at the 1000ms threshold successfully activates reposition:
-        assertTrue("At 1000ms threshold timeout activates active reposition", controller.onHoldTimeout())
+        // Just before 1000ms threshold (999ms) -> must not activate reposition yet
+        assertFalse(
+            "Hold before 1000ms threshold must remain pending",
+            controller.onHoldTimeout(elapsedMs = HudHoldGestureController.HOLD_REPOSITION_DELAY_MS - 1L)
+        )
+        assertEquals(HudHoldGestureController.State.PENDING_HOLD, controller.state)
+
+        // At 1000ms threshold -> activates reposition mode
+        assertTrue(
+            "At 1000ms threshold timeout activates active reposition",
+            controller.onHoldTimeout(elapsedMs = HudHoldGestureController.HOLD_REPOSITION_DELAY_MS)
+        )
         assertEquals(HudHoldGestureController.State.ACTIVE_REPOSITION, controller.state)
 
         // Further drag movement does not cancel an active reposition

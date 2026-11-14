@@ -66,6 +66,7 @@ import com.example.ui.components.FrostedCard
 import com.example.ui.components.HudColorPickerDialog
 import com.example.ui.components.HudColorSystem
 import com.example.ui.components.HudColorTarget
+import com.example.ui.components.HudHoldGestureController
 import com.example.ui.components.LocalHazeState
 import com.example.ui.components.MinimalOverlayView
 import com.example.ui.theme.*
@@ -187,7 +188,11 @@ fun SettingsScreen(
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = if (userPreferences.isDragRepositionMode) "Touch enabled: drag & resize overlay anywhere on screen" else "Hold HUD 1s to reposition; toggle ON for resize handles",
+                            text = if (userPreferences.isDragRepositionMode) {
+                                "Touch enabled: drag & resize overlay anywhere on screen"
+                            } else {
+                                "Hold HUD ${HudHoldGestureController.HOLD_REPOSITION_SECONDS}s to reposition; toggle ON for resize handles"
+                            },
                             fontSize = 12.sp,
                             color = if (userPreferences.isDragRepositionMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -407,40 +412,12 @@ fun SettingsScreen(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 // Live Preview Box
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Live Preview",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(Color(livePreferences.hudAccentColor))
-                                .border(
-                                    width = 0.75.dp,
-                                    color = Color.White.copy(alpha = 0.55f),
-                                    shape = CircleShape
-                                )
-                        )
-                        Text(
-                            text = "Accent ${HudColorSystem.formatHexColor(livePreferences.hudAccentColor)}",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
+                Text(
+                    text = "Live Preview",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 Spacer(modifier = Modifier.height(6.dp))
 
                 Box(
@@ -883,15 +860,13 @@ fun SettingsScreen(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // HUD LYRIC & ACCENT COLOURS (Independent of backdrop toggle)
+                // HUD LYRIC COLOURS (Independent of backdrop toggle)
                 val currentTargetColor = when (selectedColorTarget) {
                     HudColorTarget.ACTIVE_LYRIC -> livePreferences.hudActiveLyricColor
                     HudColorTarget.INACTIVE_LYRIC -> livePreferences.hudInactiveLyricColor
-                    HudColorTarget.ACCENT -> livePreferences.hudAccentColor
                 }
                 val hasCustomColorChanges = livePreferences.hudActiveLyricColor != HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR ||
-                    livePreferences.hudInactiveLyricColor != HudColorSystem.DEFAULT_INACTIVE_LYRIC_COLOR ||
-                    livePreferences.hudAccentColor != HudColorSystem.DEFAULT_ACCENT_COLOR
+                    livePreferences.hudInactiveLyricColor != HudColorSystem.DEFAULT_INACTIVE_LYRIC_COLOR
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -899,7 +874,7 @@ fun SettingsScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Lyric & Accent Colours",
+                        text = "Lyric Colours",
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 13.sp,
                         color = MaterialTheme.colorScheme.onSurface
@@ -911,9 +886,6 @@ fun SettingsScreen(
                                     playbackManager.preferencesRepository.applyHudColorPair(
                                         activeColorArgb = HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR,
                                         inactiveColorArgb = HudColorSystem.DEFAULT_INACTIVE_LYRIC_COLOR
-                                    )
-                                    playbackManager.preferencesRepository.setHudAccentColor(
-                                        HudColorSystem.DEFAULT_ACCENT_COLOR
                                     )
                                 }
                             },
@@ -927,14 +899,14 @@ fun SettingsScreen(
                     }
                 }
                 Text(
-                    text = "Customize active lyrics, surrounding words, and reposition highlight independently.",
+                    text = "Customize active and inactive floating lyric colours independently.",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // 3-target segmented selector: [ Active | Inactive | Accent ]
+                // 2-target segmented selector: [ Active Lyric | Inactive Lyric ]
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
@@ -951,16 +923,14 @@ fun SettingsScreen(
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         val targets = listOf(
-                            HudColorTarget.ACTIVE_LYRIC to "Active",
-                            HudColorTarget.INACTIVE_LYRIC to "Inactive",
-                            HudColorTarget.ACCENT to "Accent"
+                            HudColorTarget.ACTIVE_LYRIC to "Active Lyric",
+                            HudColorTarget.INACTIVE_LYRIC to "Inactive Lyric"
                         )
                         targets.forEach { (target, shortLabel) ->
                             val isSelected = selectedColorTarget == target
                             val targetArgb = when (target) {
                                 HudColorTarget.ACTIVE_LYRIC -> livePreferences.hudActiveLyricColor
                                 HudColorTarget.INACTIVE_LYRIC -> livePreferences.hudInactiveLyricColor
-                                HudColorTarget.ACCENT -> livePreferences.hudAccentColor
                             }
                             Surface(
                                 onClick = { selectedColorTarget = target },
@@ -1099,8 +1069,6 @@ fun SettingsScreen(
                                                                     playbackManager.preferencesRepository.setHudActiveLyricColor(preset.argb)
                                                                 HudColorTarget.INACTIVE_LYRIC ->
                                                                     playbackManager.preferencesRepository.setHudInactiveLyricColor(preset.argb)
-                                                                HudColorTarget.ACCENT ->
-                                                                    playbackManager.preferencesRepository.setHudAccentColor(preset.argb)
                                                             }
                                                         }
                                                     }
@@ -1185,8 +1153,6 @@ fun SettingsScreen(
                                                                         playbackManager.preferencesRepository.setHudActiveLyricColor(colorArgb)
                                                                     HudColorTarget.INACTIVE_LYRIC ->
                                                                         playbackManager.preferencesRepository.setHudInactiveLyricColor(colorArgb)
-                                                                    HudColorTarget.ACCENT ->
-                                                                        playbackManager.preferencesRepository.setHudAccentColor(colorArgb)
                                                                 }
                                                             }
                                                         }
@@ -3382,7 +3348,6 @@ fun SettingsScreen(
             val initialColor = when (pickerTarget) {
                 HudColorTarget.ACTIVE_LYRIC -> livePreferences.hudActiveLyricColor
                 HudColorTarget.INACTIVE_LYRIC -> livePreferences.hudInactiveLyricColor
-                HudColorTarget.ACCENT -> livePreferences.hudAccentColor
             }
             HudColorPickerDialog(
                 target = pickerTarget,
@@ -3395,8 +3360,6 @@ fun SettingsScreen(
                                 playbackManager.preferencesRepository.setHudActiveLyricColor(pickedArgb)
                             HudColorTarget.INACTIVE_LYRIC ->
                                 playbackManager.preferencesRepository.setHudInactiveLyricColor(pickedArgb)
-                            HudColorTarget.ACCENT ->
-                                playbackManager.preferencesRepository.setHudAccentColor(pickedArgb)
                         }
                         playbackManager.preferencesRepository.saveCustomHudColor(pickedArgb)
                     }

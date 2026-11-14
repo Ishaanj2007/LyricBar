@@ -81,15 +81,15 @@ class MinimalOverlayView(
         isFakeBoldText = true
     }
 
-    // Editable bounding box paints (displayed ONLY when isDragMode == true)
+    // Editable bounding box paints (displayed ONLY when isDragMode == true; neutral high-contrast indicator)
     private val editBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = androidx.core.graphics.ColorUtils.setAlphaComponent(HudColorSystem.DEFAULT_ACCENT_COLOR, 180)
+        color = Color.argb(190, 244, 244, 246)
         style = Paint.Style.STROKE
         strokeWidth = 2.5f
     }
 
     private val editHandlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = androidx.core.graphics.ColorUtils.setAlphaComponent(HudColorSystem.DEFAULT_ACCENT_COLOR, 230)
+        color = Color.argb(235, 244, 244, 246)
         style = Paint.Style.FILL
     }
 
@@ -99,20 +99,20 @@ class MinimalOverlayView(
         color = BLACK_BACKDROP_COLOR
     }
 
-    // Subtle hold-to-reposition feedback paints (pre-allocated)
+    // Subtle neutral hold-to-reposition feedback paints (pre-allocated)
     private val holdHaloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        color = HudColorSystem.DEFAULT_ACCENT_COLOR
+        color = Color.BLACK
     }
 
     private val holdOutlinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        color = HudColorSystem.DEFAULT_ACCENT_COLOR
+        color = Color.WHITE
     }
 
     private val holdFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
-        color = HudColorSystem.DEFAULT_ACCENT_COLOR
+        color = Color.WHITE
     }
 
     private val holdDotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -154,17 +154,6 @@ class MinimalOverlayView(
                 previousTextPaint.color = safe
                 updateShadow(wordInactivePaint, textShadowEnabled, isSubordinate = true, inkColor = safe)
                 updateShadow(previousTextPaint, textShadowEnabled, isSubordinate = true, inkColor = safe)
-                invalidate()
-            }
-        }
-
-    var hudAccentColor: Int = HudColorSystem.DEFAULT_ACCENT_COLOR
-        set(value) {
-            val safe = HudColorSystem.sanitizeOpaqueColor(value, HudColorSystem.DEFAULT_ACCENT_COLOR)
-            if (field != safe) {
-                field = safe
-                editBorderPaint.color = androidx.core.graphics.ColorUtils.setAlphaComponent(safe, 180)
-                editHandlePaint.color = androidx.core.graphics.ColorUtils.setAlphaComponent(safe, 230)
                 invalidate()
             }
         }
@@ -686,8 +675,8 @@ class MinimalOverlayView(
     private var initialTouchX = 0f
     private var initialTouchY = 0f
 
-    // Two-second hold-to-reposition controller & subtle visual/haptic feedback
-    // Use generous stationary tolerance for a 2000ms finger hold while still cancelling deliberate slides
+    // One-second hold-to-reposition controller & subtle neutral visual/haptic feedback
+    // Use generous stationary tolerance for a 1000ms finger hold while still cancelling deliberate slides
     private val touchSlopPx = maxOf(
         ViewConfiguration.get(context).scaledTouchSlop * 2.5f,
         TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 20f, resources.displayMetrics)
@@ -1874,23 +1863,29 @@ class MinimalOverlayView(
             radiusPx = (16f * density).coerceIn(0f, maxR)
         }
 
-        val accent = hudAccentColor
+        // Neutral high-contrast visual indicator: dark ink on Grey backdrop, crisp white ink on Black/text-only HUD
+        val useDarkNeutralIndicator = hudBackdropEnabled &&
+            hudBackdropOpacity >= 0.35f &&
+            hudBackdropStyle == "GREY"
+        val primaryNeutral = if (useDarkNeutralIndicator) 0xFF141418.toInt() else Color.WHITE
+        val contrastHaloNeutral = if (useDarkNeutralIndicator) Color.WHITE else 0xFF0A0A0A.toInt()
+
         holdFillPaint.color = androidx.core.graphics.ColorUtils.setAlphaComponent(
-            accent,
-            (42f * prog).roundToInt().coerceIn(0, 48)
+            primaryNeutral,
+            (36f * prog).roundToInt().coerceIn(0, 44)
         )
         canvas.drawRoundRect(holdFeedbackRect, radiusPx, radiusPx, holdFillPaint)
 
         holdHaloPaint.strokeWidth = strokePx + (2.5f * density)
         holdHaloPaint.color = androidx.core.graphics.ColorUtils.setAlphaComponent(
-            accent,
-            (64f * prog).roundToInt().coerceIn(0, 80)
+            contrastHaloNeutral,
+            (95f * prog).roundToInt().coerceIn(0, 110)
         )
         canvas.drawRoundRect(holdFeedbackRect, radiusPx, radiusPx, holdHaloPaint)
 
         holdOutlinePaint.strokeWidth = strokePx
         holdOutlinePaint.color = androidx.core.graphics.ColorUtils.setAlphaComponent(
-            accent,
+            primaryNeutral,
             (235f * prog).roundToInt().coerceIn(0, 245)
         )
         canvas.drawRoundRect(holdFeedbackRect, radiusPx, radiusPx, holdOutlinePaint)
@@ -1898,7 +1893,7 @@ class MinimalOverlayView(
         val dotRadius = (3.5f * density).coerceAtLeast(3f) * prog
         val inset = maxOf(radiusPx * 0.42f, 8f * density)
         holdDotPaint.color = androidx.core.graphics.ColorUtils.setAlphaComponent(
-            accent,
+            primaryNeutral,
             (235f * prog).roundToInt().coerceIn(0, 245)
         )
         canvas.drawCircle(holdFeedbackRect.left + inset, holdFeedbackRect.top + inset, dotRadius, holdDotPaint)
@@ -2435,8 +2430,9 @@ class HudHoldGestureController(
         }
     }
 
-    fun onHoldTimeout(): Boolean {
+    fun onHoldTimeout(elapsedMs: Long = holdDurationMs): Boolean {
         if (state != State.PENDING_HOLD) return false
+        if (elapsedMs < holdDurationMs) return false
         state = State.ACTIVE_REPOSITION
         return true
     }
@@ -2478,6 +2474,7 @@ class HudHoldGestureController(
 
     companion object {
         const val HOLD_REPOSITION_DELAY_MS = 1000L
+        const val HOLD_REPOSITION_SECONDS = (HOLD_REPOSITION_DELAY_MS / 1000L).toInt()
         const val INVALID_POINTER_ID = -1
     }
 }

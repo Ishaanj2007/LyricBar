@@ -170,14 +170,12 @@ fun HudColorPickerDialog(
                         label = "On Black",
                         backdropArgb = HudColorSystem.BLACK_BACKDROP_COLOR,
                         candidateArgb = selectedArgb,
-                        isAccent = target == HudColorTarget.ACCENT,
                         modifier = Modifier.weight(1f)
                     )
                     BackdropContrastChip(
                         label = "On Grey",
                         backdropArgb = HudColorSystem.GREY_BACKDROP_COLOR,
                         candidateArgb = selectedArgb,
-                        isAccent = target == HudColorTarget.ACCENT,
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -302,7 +300,6 @@ private fun BackdropContrastChip(
     label: String,
     backdropArgb: Int,
     candidateArgb: Int,
-    isAccent: Boolean,
     modifier: Modifier = Modifier
 ) {
     val ratio = remember(backdropArgb, candidateArgb) {
@@ -315,8 +312,8 @@ private fun BackdropContrastChip(
         shape = RoundedCornerShape(12.dp),
         color = Color(backdropArgb),
         border = BorderStroke(
-            width = if (isAccent) 1.5.dp else 1.dp,
-            color = if (isAccent) Color(candidateArgb) else Color.Gray.copy(alpha = 0.35f)
+            width = 1.dp,
+            color = Color.Gray.copy(alpha = 0.35f)
         )
     ) {
         Row(
@@ -326,36 +323,14 @@ private fun BackdropContrastChip(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            if (isAccent) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(10.dp)
-                            .clip(CircleShape)
-                            .background(Color(candidateArgb))
-                    )
-                    Text(
-                        text = label,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = textColorOnBackdrop,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            } else {
-                Text(
-                    text = label,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(candidateArgb),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
+            Text(
+                text = label,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(candidateArgb),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
             Text(
                 text = String.format(java.util.Locale.US, "%.1f:1", ratio),
                 fontSize = 10.sp,

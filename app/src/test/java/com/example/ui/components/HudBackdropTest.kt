@@ -39,7 +39,6 @@ class HudBackdropTest {
         assertEquals(10, prefs.hudBackdropVerticalPaddingDp)
         assertEquals(HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR, prefs.hudActiveLyricColor)
         assertEquals(HudColorSystem.DEFAULT_INACTIVE_LYRIC_COLOR, prefs.hudInactiveLyricColor)
-        assertEquals(HudColorSystem.DEFAULT_ACCENT_COLOR, prefs.hudAccentColor)
         assertTrue(prefs.hudCustomColors.isEmpty())
         assertEquals("Text opacity must remain 100% by default", 1.0f, prefs.overlayTextOpacity, 0.001f)
     }
@@ -246,7 +245,6 @@ class HudBackdropTest {
         repository.setHudBackdropVerticalPaddingDp(16)
         repository.setHudActiveLyricColor(customDeepBlue)
         repository.setHudInactiveLyricColor(customLavender)
-        repository.setHudAccentColor(customMint)
         repository.saveCustomHudColor(customCrimson)
         repository.saveCustomHudColor(customCobalt)
         // Built-in presets are already in curatedPresets and should not duplicate into custom swatches
@@ -261,7 +259,6 @@ class HudBackdropTest {
         assertEquals(16, saved.hudBackdropVerticalPaddingDp)
         assertEquals(customDeepBlue, saved.hudActiveLyricColor)
         assertEquals(customLavender, saved.hudInactiveLyricColor)
-        assertEquals(customMint, saved.hudAccentColor)
         assertEquals(listOf(customCobalt, customCrimson), saved.hudCustomColors)
         assertEquals("Changing backdrop opacity must NEVER alter text opacity", 0.85f, saved.overlayTextOpacity, 0.001f)
 
@@ -279,7 +276,6 @@ class HudBackdropTest {
         assertEquals(16, afterRestart.hudBackdropVerticalPaddingDp)
         assertEquals(customDeepBlue, afterRestart.hudActiveLyricColor)
         assertEquals(customLavender, afterRestart.hudInactiveLyricColor)
-        assertEquals(customMint, afterRestart.hudAccentColor)
         assertEquals(listOf(customCobalt, customCrimson), afterRestart.hudCustomColors)
     }
 

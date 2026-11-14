@@ -18,10 +18,6 @@ enum class HudColorTarget(
     INACTIVE_LYRIC(
         title = "Inactive Lyric Colour",
         subtitle = "Surrounding or upcoming lyric words and lines"
-    ),
-    ACCENT(
-        title = "Accent Colour (Optional)",
-        subtitle = "Subtle selection ring and secondary HUD details"
     )
 }
 
@@ -44,7 +40,6 @@ object HudColorSystem {
 
     const val DEFAULT_ACTIVE_LYRIC_COLOR: Int = 0xFFFFFFFF.toInt()
     const val DEFAULT_INACTIVE_LYRIC_COLOR: Int = 0xFFD4D8E0.toInt()
-    const val DEFAULT_ACCENT_COLOR: Int = 0xFFC4B5FD.toInt()
 
     const val MAX_SAVED_CUSTOM_COLORS: Int = 8
 

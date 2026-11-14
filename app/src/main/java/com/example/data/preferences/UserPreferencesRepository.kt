@@ -149,7 +149,6 @@ data class UserPreferences(
     val hudBackdropVerticalPaddingDp: Int = 10, // 0 to 24 dp (default 10dp)
     val hudActiveLyricColor: Int = HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR,
     val hudInactiveLyricColor: Int = HudColorSystem.DEFAULT_INACTIVE_LYRIC_COLOR,
-    val hudAccentColor: Int = HudColorSystem.DEFAULT_ACCENT_COLOR,
     val hudCustomColors: List<Int> = emptyList(),
     val overlayYPosition: Int = HudPositioningEngine.DEFAULT_PORTRAIT_Y, // Portrait Y (legacy mirror)
     val overlayXPosition: Int = HudPositioningEngine.DEFAULT_PORTRAIT_X, // Portrait X (legacy mirror)
@@ -242,7 +241,6 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
         val HUD_BACKDROP_VERTICAL_PADDING_DP = intPreferencesKey("hud_backdrop_vertical_padding_dp")
         val HUD_ACTIVE_LYRIC_COLOR = intPreferencesKey("hud_active_lyric_color")
         val HUD_INACTIVE_LYRIC_COLOR = intPreferencesKey("hud_inactive_lyric_color")
-        val HUD_ACCENT_COLOR = intPreferencesKey("hud_accent_color")
         val HUD_CUSTOM_COLORS = stringPreferencesKey("hud_custom_colors")
         val HUD_STYLE_MIGRATION_VERSION = intPreferencesKey("hud_style_migration_version")
         val OVERLAY_Y_POS = intPreferencesKey("overlay_y_position")
@@ -378,10 +376,6 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
                 hudInactiveLyricColor = HudColorSystem.sanitizeOpaqueColor(
                     preferences[PreferencesKeys.HUD_INACTIVE_LYRIC_COLOR],
                     HudColorSystem.DEFAULT_INACTIVE_LYRIC_COLOR
-                ),
-                hudAccentColor = HudColorSystem.sanitizeOpaqueColor(
-                    preferences[PreferencesKeys.HUD_ACCENT_COLOR],
-                    HudColorSystem.DEFAULT_ACCENT_COLOR
                 ),
                 hudCustomColors = HudColorSystem.deserializeCustomColors(
                     preferences[PreferencesKeys.HUD_CUSTOM_COLORS]
@@ -536,11 +530,6 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
     suspend fun setHudInactiveLyricColor(colorArgb: Int) {
         val safe = HudColorSystem.sanitizeOpaqueColor(colorArgb, HudColorSystem.DEFAULT_INACTIVE_LYRIC_COLOR)
         dataStore.edit { it[PreferencesKeys.HUD_INACTIVE_LYRIC_COLOR] = safe }
-    }
-
-    suspend fun setHudAccentColor(colorArgb: Int) {
-        val safe = HudColorSystem.sanitizeOpaqueColor(colorArgb, HudColorSystem.DEFAULT_ACCENT_COLOR)
-        dataStore.edit { it[PreferencesKeys.HUD_ACCENT_COLOR] = safe }
     }
 
     suspend fun applyHudColorPair(activeColorArgb: Int, inactiveColorArgb: Int) {
