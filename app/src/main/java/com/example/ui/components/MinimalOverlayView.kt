@@ -36,7 +36,8 @@ class MinimalOverlayView(
     private val windowManager: WindowManager,
     private val layoutParams: WindowManager.LayoutParams,
     private val onBoundsChanged: (orientation: HudOrientation, x: Int, y: Int, width: Int, height: Int) -> Unit,
-    var onResyncRequested: (() -> Unit)? = null
+    var onResyncRequested: (() -> Unit)? = null,
+    var onTripleTapRequested: (() -> Unit)? = null
 ) : View(context) {
 
     private val containerRect = android.graphics.RectF()
@@ -120,10 +121,23 @@ class MinimalOverlayView(
         color = Color.WHITE
     }
 
+    private val tripleTapOutlinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeJoin = Paint.Join.ROUND
+        strokeCap = Paint.Cap.ROUND
+        color = Color.WHITE
+    }
+
+    private val tripleTapFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.WHITE
+    }
+
     private val currentBackdropRect = android.graphics.RectF()
     private val previousBackdropRect = android.graphics.RectF()
     private val drawnBackdropRect = android.graphics.RectF()
     private val holdFeedbackRect = android.graphics.RectF()
+    private val tripleTapRect = android.graphics.RectF()
 
     var primaryColor: Int = Color.WHITE
         set(value) {
@@ -652,6 +666,7 @@ class MinimalOverlayView(
             if (field != value) {
                 cancelActiveDrag()
                 field = value
+                syncTripleTapDetectorEnabled()
                 invalidate()
             }
         }
@@ -664,6 +679,7 @@ class MinimalOverlayView(
                     cancelActiveDrag()
                 }
                 dragCoordinator.setClickThroughEnabled(value)
+                syncTripleTapDetectorEnabled()
                 invalidate()
             }
         }
@@ -707,6 +723,45 @@ class MinimalOverlayView(
             onResyncRequested?.invoke()
         }
     )
+    private val tapTouchSlopPx = ViewConfiguration.get(context).scaledTouchSlop.toFloat().coerceAtLeast(8f)
+    private val tripleTapDetector = HudTripleTapDetector(tapTouchSlopPx = tapTouchSlopPx)
+    private var tripleTapFeedbackProgress: Float = 0f
+    private var tripleTapFeedbackAnimator: ValueAnimator? = null
+
+    private fun syncTripleTapDetectorEnabled() {
+        tripleTapDetector.setEnabled(!isClickThroughEnabled && !isDragMode)
+    }
+
+    private fun triggerTripleTapFeedback() {
+        tripleTapFeedbackAnimator?.cancel()
+        if (!isAttachedToWindow || visibility != VISIBLE || isClickThroughEnabled) {
+            tripleTapFeedbackProgress = 0f
+            return
+        }
+        tripleTapFeedbackProgress = 1f
+        invalidate()
+        tripleTapFeedbackAnimator = ValueAnimator.ofFloat(1f, 0f).apply {
+            duration = 220L
+            interpolator = DecelerateInterpolator(1.5f)
+            addUpdateListener { anim ->
+                tripleTapFeedbackProgress = anim.animatedValue as Float
+                invalidate()
+            }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    tripleTapFeedbackProgress = 0f
+                    invalidate()
+                }
+
+                override fun onAnimationCancel(animation: android.animation.Animator) {
+                    tripleTapFeedbackProgress = 0f
+                    invalidate()
+                }
+            })
+            start()
+        }
+    }
+
     private val holdHandler = Handler(Looper.getMainLooper())
     private var holdAttemptToken: Long = 0L
     private var scheduledHoldToken: Long = -1L
@@ -718,10 +773,12 @@ class MinimalOverlayView(
         }
         if (!isAttachedToWindow || visibility != VISIBLE || isDragMode || isClickThroughEnabled) {
             dragCoordinator.cancelActiveDrag()
+            tripleTapDetector.reset()
             return@Runnable
         }
         val orientation = displayGeometry?.orientation ?: activeOrientation
         if (dragCoordinator.onHoldTimeout(orientation = orientation)) {
+            tripleTapDetector.onDragOrHoldActivated()
             triggerHoldActivatedHaptic()
             animateHoldFeedback(active = true)
         }
@@ -779,10 +836,16 @@ class MinimalOverlayView(
 
     fun cancelActiveDrag() {
         cancelScheduledHoldCallback()
+        tripleTapDetector.reset()
         activeTouchTarget = TouchTarget.NONE
         val rolledBack = dragCoordinator.cancelActiveDrag()
         if (rolledBack || holdFeedbackProgress > 0f) {
             animateHoldFeedback(active = false)
+        }
+        if (tripleTapFeedbackProgress > 0f) {
+            tripleTapFeedbackAnimator?.cancel()
+            tripleTapFeedbackProgress = 0f
+            invalidate()
         }
     }
 
@@ -1404,6 +1467,8 @@ class MinimalOverlayView(
         transitionAnimator = null
         holdFeedbackAnimator?.cancel()
         holdFeedbackAnimator = null
+        tripleTapFeedbackAnimator?.cancel()
+        tripleTapFeedbackAnimator = null
     }
 
     override fun onVisibilityChanged(changedView: View, visibility: Int) {
@@ -1889,7 +1954,57 @@ class MinimalOverlayView(
             canvas.drawRect(width - edgePillH, height / 2f - edgePillW / 2f, width.toFloat(), height / 2f + edgePillW / 2f, editHandlePaint) // Right
         } else if (!isClickThroughEnabled && holdFeedbackProgress > 0.01f) {
             drawHoldRepositionFeedback(canvas)
+        } else if (!isClickThroughEnabled && tripleTapFeedbackProgress > 0.01f) {
+            drawTripleTapFeedback(canvas)
         }
+    }
+
+    private fun drawTripleTapFeedback(canvas: Canvas) {
+        val density = resources.displayMetrics.density
+        val prog = tripleTapFeedbackProgress.coerceIn(0f, 1f)
+        val strokePx = (1.75f * density).coerceAtLeast(1.5f)
+        val halfStroke = strokePx / 2f
+
+        val radiusPx: Float
+        if (hudBackdropEnabled && hudBackdropOpacity > 0f && drawnBackdropRect.width() > 0f && drawnBackdropRect.height() > 0f) {
+            val padOut = 2f * density
+            tripleTapRect.set(
+                (drawnBackdropRect.left - padOut).coerceAtLeast(halfStroke),
+                (drawnBackdropRect.top - padOut).coerceAtLeast(halfStroke),
+                (drawnBackdropRect.right + padOut).coerceAtMost(width - halfStroke),
+                (drawnBackdropRect.bottom + padOut).coerceAtMost(height - halfStroke)
+            )
+            val maxR = (minOf(tripleTapRect.width(), tripleTapRect.height()) / 2f).coerceAtLeast(0f)
+            radiusPx = (hudBackdropCornerRadiusDp.coerceIn(0f, 32f) * density + padOut).coerceIn(0f, maxR)
+        } else {
+            val padInset = halfStroke + 2f
+            tripleTapRect.set(
+                padInset,
+                padInset,
+                (width - padInset).coerceAtLeast(padInset),
+                (height - padInset).coerceAtLeast(padInset)
+            )
+            val maxR = (minOf(tripleTapRect.width(), tripleTapRect.height()) / 2f).coerceAtLeast(0f)
+            radiusPx = (16f * density).coerceIn(0f, maxR)
+        }
+
+        val useDarkNeutralIndicator = hudBackdropEnabled &&
+            hudBackdropOpacity >= 0.35f &&
+            hudBackdropStyle == "GREY"
+        val primaryNeutral = if (useDarkNeutralIndicator) 0xFF141418.toInt() else Color.WHITE
+
+        tripleTapFillPaint.color = androidx.core.graphics.ColorUtils.setAlphaComponent(
+            primaryNeutral,
+            (40f * prog).roundToInt().coerceIn(0, 44)
+        )
+        canvas.drawRoundRect(tripleTapRect, radiusPx, radiusPx, tripleTapFillPaint)
+
+        tripleTapOutlinePaint.strokeWidth = strokePx
+        tripleTapOutlinePaint.color = androidx.core.graphics.ColorUtils.setAlphaComponent(
+            primaryNeutral,
+            (185f * prog).roundToInt().coerceIn(0, 200)
+        )
+        canvas.drawRoundRect(tripleTapRect, radiusPx, radiusPx, tripleTapOutlinePaint)
     }
 
     private fun drawHoldRepositionFeedback(canvas: Canvas) {
@@ -2001,6 +2116,7 @@ class MinimalOverlayView(
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 cancelScheduledHoldCallback()
+                tripleTapDetector.reset()
                 val orientation = displayGeometry?.orientation ?: activeOrientation
                 dragCoordinator.onEditDown(
                     orientation = orientation,
@@ -2189,21 +2305,33 @@ class MinimalOverlayView(
             MotionEvent.ACTION_DOWN -> {
                 cancelScheduledHoldCallback()
                 val pointerId = event.getPointerId(0)
+                val rawX = getPointerRawX(event, 0)
+                val rawY = getPointerRawY(event, 0)
                 val onControl = isPointOnInteractiveControl?.invoke(event.x, event.y) == true
                 val started = dragCoordinator.onNormalDown(
-                    rawX = getPointerRawX(event, 0),
-                    rawY = getPointerRawY(event, 0),
+                    rawX = rawX,
+                    rawY = rawY,
                     pointerId = pointerId,
                     isOnInteractiveControl = onControl
                 )
                 if (started) {
+                    tripleTapDetector.onDown(
+                        rawX = rawX,
+                        rawY = rawY,
+                        pointerId = pointerId,
+                        timestampMs = event.eventTime,
+                        isOnInteractiveControl = false
+                    )
                     scheduledHoldToken = holdAttemptToken
                     holdHandler.postDelayed(holdTimeoutRunnable, holdGestureController.holdDurationMs)
+                } else {
+                    tripleTapDetector.reset()
                 }
                 return started
             }
 
             MotionEvent.ACTION_POINTER_DOWN -> {
+                tripleTapDetector.onMultiPointerDown()
                 if (dragCoordinator.onNormalMultiPointerDown()) {
                     cancelScheduledHoldCallback()
                 }
@@ -2215,19 +2343,25 @@ class MinimalOverlayView(
                 if (ptrIndex < 0) return false
                 val rawX = getPointerRawX(event, ptrIndex)
                 val rawY = getPointerRawY(event, ptrIndex)
+                val pointerId = event.getPointerId(ptrIndex)
 
                 return when (holdGestureController.state) {
                     HudHoldGestureController.State.PENDING_HOLD -> {
+                        tripleTapDetector.onMove(rawX, rawY, pointerId)
                         if (dragCoordinator.onNormalMovePending(rawX, rawY)) {
                             cancelScheduledHoldCallback()
                         }
                         true
                     }
                     HudHoldGestureController.State.ACTIVE_REPOSITION -> {
+                        tripleTapDetector.onDragOrHoldActivated()
                         dragCoordinator.onNormalDragMove(rawX, rawY, ::computeNormalMoveBounds)
                         true
                     }
-                    HudHoldGestureController.State.CANCELLED_BEFORE_HOLD -> true
+                    HudHoldGestureController.State.CANCELLED_BEFORE_HOLD -> {
+                        tripleTapDetector.onDragOrHoldActivated()
+                        true
+                    }
                     HudHoldGestureController.State.IDLE -> false
                 }
             }
@@ -2235,14 +2369,24 @@ class MinimalOverlayView(
             MotionEvent.ACTION_POINTER_UP -> {
                 val liftedIndex = event.actionIndex
                 val liftedId = event.getPointerId(liftedIndex)
+                tripleTapDetector.onMultiPointerDown()
                 if (liftedId == holdGestureController.activePointerId) {
-                    finishHoldPointerUp()
+                    finishHoldPointerUp(
+                        pointerId = liftedId,
+                        eventTimeMs = event.eventTime,
+                        allowTripleTap = false
+                    )
                 }
                 return true
             }
 
             MotionEvent.ACTION_UP -> {
-                finishHoldPointerUp()
+                val pointerId = event.getPointerId(event.actionIndex)
+                finishHoldPointerUp(
+                    pointerId = pointerId,
+                    eventTimeMs = event.eventTime,
+                    allowTripleTap = true
+                )
                 return true
             }
 
@@ -2254,14 +2398,29 @@ class MinimalOverlayView(
         return false
     }
 
-    private fun finishHoldPointerUp() {
+    private fun finishHoldPointerUp(
+        pointerId: Int,
+        eventTimeMs: Long,
+        allowTripleTap: Boolean
+    ) {
         cancelScheduledHoldCallback()
         when (dragCoordinator.onNormalUp()) {
-            HudHoldGestureController.UpResult.TRIGGER_TAP -> Unit
+            HudHoldGestureController.UpResult.TRIGGER_TAP -> {
+                if (allowTripleTap &&
+                    !isClickThroughEnabled &&
+                    !isDragMode &&
+                    tripleTapDetector.onUp(pointerId = pointerId, timestampMs = eventTimeMs)
+                ) {
+                    onTripleTapRequested?.invoke()
+                    triggerTripleTapFeedback()
+                }
+            }
             HudHoldGestureController.UpResult.COMMIT_REPOSITION -> {
+                tripleTapDetector.onDragOrHoldActivated()
                 animateHoldFeedback(active = false)
             }
             HudHoldGestureController.UpResult.NONE -> {
+                tripleTapDetector.reset()
                 if (holdFeedbackProgress > 0f) {
                     animateHoldFeedback(active = false)
                 }
@@ -2803,3 +2962,164 @@ class HudDragTransactionCoordinator(
         return shouldRollback
     }
 }
+
+class HudTripleTapDetector(
+    private val tapTouchSlopPx: Float,
+    val maxTapDurationMs: Long = DEFAULT_MAX_TAP_DURATION_MS,
+    val maxTapIntervalMs: Long = DEFAULT_MAX_TAP_INTERVAL_MS,
+    val launchCooldownMs: Long = DEFAULT_LAUNCH_COOLDOWN_MS
+) {
+    var tapCount: Int = 0
+        private set
+    var isEnabled: Boolean = true
+        private set
+    private var activePointerId: Int = INVALID_POINTER_ID
+    private var downRawX: Float = 0f
+    private var downRawY: Float = 0f
+    private var downTimestampMs: Long = 0L
+    private var currentTouchInvalidated: Boolean = false
+    private var lastTapUpTimestampMs: Long = Long.MIN_VALUE
+    private var lastTriggerTimestampMs: Long = Long.MIN_VALUE
+
+    fun setEnabled(enabled: Boolean) {
+        if (isEnabled != enabled) {
+            isEnabled = enabled
+            if (!enabled) {
+                reset()
+            }
+        }
+    }
+
+    fun onDown(
+        rawX: Float,
+        rawY: Float,
+        pointerId: Int,
+        timestampMs: Long,
+        isOnInteractiveControl: Boolean = false
+    ): Boolean {
+        if (!isEnabled || isOnInteractiveControl) {
+            reset()
+            return false
+        }
+        if (lastTriggerTimestampMs != Long.MIN_VALUE &&
+            (timestampMs - lastTriggerTimestampMs) in 0L until launchCooldownMs
+        ) {
+            tapCount = 0
+            activePointerId = INVALID_POINTER_ID
+            currentTouchInvalidated = true
+            return false
+        }
+        if (tapCount > 0 &&
+            (lastTapUpTimestampMs == Long.MIN_VALUE ||
+                timestampMs < lastTapUpTimestampMs ||
+                (timestampMs - lastTapUpTimestampMs) > maxTapIntervalMs)
+        ) {
+            tapCount = 0
+            lastTapUpTimestampMs = Long.MIN_VALUE
+        }
+        activePointerId = pointerId
+        downRawX = rawX
+        downRawY = rawY
+        downTimestampMs = timestampMs
+        currentTouchInvalidated = false
+        return true
+    }
+
+    fun onMove(rawX: Float, rawY: Float, pointerId: Int): Boolean {
+        if (!isEnabled || currentTouchInvalidated || activePointerId == INVALID_POINTER_ID) {
+            return false
+        }
+        if (pointerId != activePointerId) {
+            return false
+        }
+        val dist = hypot(rawX - downRawX, rawY - downRawY)
+        if (dist > tapTouchSlopPx) {
+            invalidateSequence()
+            return true
+        }
+        return false
+    }
+
+    fun onMultiPointerDown() {
+        if (activePointerId != INVALID_POINTER_ID || tapCount > 0) {
+            invalidateSequence()
+        }
+    }
+
+    fun onDragOrHoldActivated() {
+        invalidateSequence()
+    }
+
+    fun onUp(pointerId: Int, timestampMs: Long): Boolean {
+        if (!isEnabled) {
+            reset()
+            return false
+        }
+        if (currentTouchInvalidated || activePointerId == INVALID_POINTER_ID || pointerId != activePointerId) {
+            val wasInvalidated = currentTouchInvalidated
+            resetActiveTouchOnly()
+            if (wasInvalidated) {
+                tapCount = 0
+                lastTapUpTimestampMs = Long.MIN_VALUE
+            }
+            return false
+        }
+        val durationMs = timestampMs - downTimestampMs
+        resetActiveTouchOnly()
+
+        if (durationMs < 0L || durationMs > maxTapDurationMs) {
+            tapCount = 0
+            lastTapUpTimestampMs = Long.MIN_VALUE
+            return false
+        }
+
+        tapCount += 1
+        lastTapUpTimestampMs = timestampMs
+
+        if (tapCount >= REQUIRED_TAP_COUNT) {
+            tapCount = 0
+            lastTapUpTimestampMs = Long.MIN_VALUE
+            lastTriggerTimestampMs = timestampMs
+            return true
+        }
+        return false
+    }
+
+    fun onCancel() {
+        reset()
+    }
+
+    fun reset() {
+        tapCount = 0
+        activePointerId = INVALID_POINTER_ID
+        downRawX = 0f
+        downRawY = 0f
+        downTimestampMs = 0L
+        currentTouchInvalidated = false
+        lastTapUpTimestampMs = Long.MIN_VALUE
+    }
+
+    private fun invalidateSequence() {
+        tapCount = 0
+        lastTapUpTimestampMs = Long.MIN_VALUE
+        currentTouchInvalidated = true
+        activePointerId = INVALID_POINTER_ID
+    }
+
+    private fun resetActiveTouchOnly() {
+        activePointerId = INVALID_POINTER_ID
+        downRawX = 0f
+        downRawY = 0f
+        downTimestampMs = 0L
+        currentTouchInvalidated = false
+    }
+
+    companion object {
+        const val REQUIRED_TAP_COUNT = 3
+        const val DEFAULT_MAX_TAP_DURATION_MS = 400L
+        const val DEFAULT_MAX_TAP_INTERVAL_MS = 450L
+        const val DEFAULT_LAUNCH_COOLDOWN_MS = 800L
+        const val INVALID_POINTER_ID = -1
+    }
+}
+

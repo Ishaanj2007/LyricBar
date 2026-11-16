@@ -203,6 +203,9 @@ class OverlayService : Service() {
             },
             onResyncRequested = {
                 playbackManager.resyncLyrics(forceRefresh = false)
+            },
+            onTripleTapRequested = {
+                openMainActivityFromOverlay()
             }
         ).apply {
             activeOrientation = initialGeometry.orientation
@@ -416,6 +419,13 @@ class OverlayService : Service() {
         try {
             wm.updateViewLayout(view, params)
         } catch (_: Exception) {}
+    }
+
+    private fun openMainActivityFromOverlay() {
+        if (isClickThroughMode || !currentPrefs.overlayEnabled) return
+        try {
+            startActivity(createMainActivityLaunchIntent(this))
+        } catch (_: Throwable) {}
     }
 
     private fun observeState() {
@@ -745,6 +755,19 @@ class OverlayService : Service() {
             clickThroughEnabled: Boolean
         ): Boolean {
             return dragModeRequested && !clickThroughEnabled
+        }
+
+        const val MAIN_ACTIVITY_LAUNCH_FLAGS: Int =
+            Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                Intent.FLAG_ACTIVITY_CLEAR_TOP
+
+        fun createMainActivityLaunchIntent(context: Context): Intent {
+            return Intent(context, MainActivity::class.java).apply {
+                action = Intent.ACTION_MAIN
+                addCategory(Intent.CATEGORY_LAUNCHER)
+                flags = MAIN_ACTIVITY_LAUNCH_FLAGS
+            }
         }
 
         fun start(context: Context) {
