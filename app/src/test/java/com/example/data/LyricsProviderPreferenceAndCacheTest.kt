@@ -367,6 +367,119 @@ class LyricsProviderPreferenceAndCacheTest {
     }
 
     // =========================================================================
+    // 5. Batch 2.3: Lyrica, LiriQo, Unison Preferences, 7-Provider Chain & Attribution Cache
+    // =========================================================================
+
+    @Test
+    fun `Lyrica LiriQo and Unison preferences persist and map correctly`() = runBlocking {
+        val storeFile = tempFolder.newFile("prefs_batch23.preferences_pb")
+        val scope1 = CoroutineScope(Dispatchers.Unconfined + SupervisorJob())
+        val repo1 = UserPreferencesRepository(PreferenceDataStoreFactory.create(scope = scope1) { storeFile })
+
+        repo1.setLyricsProvider(LyricsProviderPreference.LYRICA)
+        assertEquals(LyricsProviderPreference.LYRICA, repo1.userPreferencesFlow.first().lyricsProvider)
+
+        repo1.setLyricsProvider(LyricsProviderPreference.LIRIQO)
+        assertEquals(LyricsProviderPreference.LIRIQO, repo1.userPreferencesFlow.first().lyricsProvider)
+
+        repo1.setLyricsProvider(LyricsProviderPreference.UNISON)
+        assertEquals(LyricsProviderPreference.UNISON, repo1.userPreferencesFlow.first().lyricsProvider)
+        scope1.cancel()
+
+        val scope2 = CoroutineScope(Dispatchers.Unconfined + SupervisorJob())
+        try {
+            val repo2 = UserPreferencesRepository(PreferenceDataStoreFactory.create(scope = scope2) { storeFile })
+            assertEquals(LyricsProviderPreference.UNISON, repo2.userPreferencesFlow.first().lyricsProvider)
+        } finally {
+            scope2.cancel()
+        }
+
+        assertEquals(LyricsProviderPreference.LYRICA, LyricsProviderPreference.fromPersistedValue("Lyrica"))
+        assertEquals(LyricsProviderPreference.LIRIQO, LyricsProviderPreference.fromPersistedValue("LiriQo"))
+        assertEquals(LyricsProviderPreference.UNISON, LyricsProviderPreference.fromPersistedValue("Unison"))
+    }
+
+    @Test
+    fun `7-provider Automatic chain falls back through Lyrica then LiriQo then Unison and preserves Unison attribution in Room cache`() = runBlocking {
+        val callOrder = mutableListOf<String>()
+        val lrclib = fakeProvider("LRCLIB", callOrder, shouldSucceed = false)
+        val lrcRed = fakeProvider("lrc.red", callOrder, shouldSucceed = false)
+        val lyricsPlus = fakeProvider("LyricsPlus", callOrder, shouldSucceed = false)
+        val kugou = fakeProvider("KuGou", callOrder, shouldSucceed = false)
+        val lyrica = fakeProvider("Lyrica", callOrder, shouldSucceed = false)
+        val liriqo = fakeProvider("LiriQo", callOrder, shouldSucceed = false)
+        val unison = object : LyricsProvider {
+            override val name: String = "Unison"
+            override suspend fun fetchLyrics(title: String, artist: String, durationSec: Int?): Result<ParsedLyrics> {
+                callOrder.add(name)
+                val attribution = com.example.data.model.LyricsAttribution.forUnison(
+                    videoId = "dQw4w9WgXcQ",
+                    submitterDisplayName = "Aarav",
+                    submitterKeyId = "key_42"
+                )
+                val lines = listOf(
+                    LyricLine(1000L, "Community line 1"),
+                    LyricLine(4500L, "Community line 2")
+                )
+                return Result.success(
+                    ParsedLyrics(
+                        title = title,
+                        artist = artist,
+                        isSynced = true,
+                        lines = lines,
+                        plainText = lines.joinToString("\n") { it.text },
+                        source = "Unison",
+                        attribution = attribution
+                    )
+                )
+            }
+        }
+
+        val dao = InMemoryLyricsDao()
+        val repo = CompositeLyricsRepository(
+            lyricsDao = dao,
+            historyDao = NoOpHistoryDao(),
+            providers = listOf(lrclib, lrcRed, lyricsPlus, kugou, lyrica, liriqo, unison)
+        )
+
+        val track = TrackMetadata(title = "Bollywood Classic", artist = "Arijit Singh", durationSec = 210)
+        val autoResult = repo.getOrFetchLyrics(track, providerPreference = LyricsProviderPreference.AUTO)
+        assertTrue(autoResult.isSuccess)
+        assertEquals(
+            listOf("LRCLIB", "lrc.red", "LyricsPlus", "KuGou", "Lyrica", "LiriQo", "Unison"),
+            callOrder
+        )
+        val fetched = autoResult.getOrThrow()
+        assertEquals("Unison", fetched.displaySource)
+        assertEquals("https://unison.betterlyrics.org/song/dQw4w9WgXcQ", fetched.attribution?.songUrl)
+        assertEquals("Aarav", fetched.attribution?.submitterName)
+        assertEquals("https://unison.betterlyrics.org/curator/key_42", fetched.attribution?.curatorUrl)
+
+        // Reload offline from Room cache (both AUTO and manual UNISON) and verify full attribution survives!
+        callOrder.clear()
+        val cachedAuto = repo.getOrFetchLyrics(
+            track = track,
+            forceNetwork = false,
+            allowNetwork = false,
+            providerPreference = LyricsProviderPreference.AUTO
+        ).getOrThrow()
+        assertEquals("Unison", cachedAuto.displaySource)
+        assertEquals("https://unison.betterlyrics.org/song/dQw4w9WgXcQ", cachedAuto.attribution?.songUrl)
+        assertEquals("Aarav", cachedAuto.attribution?.submitterName)
+        assertEquals("https://unison.betterlyrics.org/curator/key_42", cachedAuto.attribution?.curatorUrl)
+
+        val cachedManualUnison = repo.getOrFetchLyrics(
+            track = track,
+            forceNetwork = false,
+            allowNetwork = false,
+            providerPreference = LyricsProviderPreference.UNISON
+        ).getOrThrow()
+        assertEquals("Unison", cachedManualUnison.displaySource)
+        assertEquals("Aarav", cachedManualUnison.attribution?.submitterName)
+        assertTrue(callOrder.isEmpty())
+    }
+
+    // =========================================================================
     // Helpers
     // =========================================================================
 

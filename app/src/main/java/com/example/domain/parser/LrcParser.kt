@@ -1,12 +1,17 @@
 package com.example.domain.parser
 
 import com.example.data.model.LyricLine
+import com.example.data.model.LyricsAttribution
 import com.example.data.model.ParsedLyrics
 
 object LrcParser {
 
     private val TIMESTAMP_REGEX = Regex("\\[(\\d{1,3}):(\\d{2})(?:[.:](\\d{1,3}))?\\]")
     private val OFFSET_REGEX = Regex("\\[offset:\\s*([+-]?\\d+)\\]", RegexOption.IGNORE_CASE)
+    private val ATTR_SOURCE_REGEX = Regex("\\[x-attribution-source:(.*?)\\]", RegexOption.IGNORE_CASE)
+    private val ATTR_SONG_URL_REGEX = Regex("\\[x-attribution-song-url:(.*?)\\]", RegexOption.IGNORE_CASE)
+    private val ATTR_SUBMITTER_REGEX = Regex("\\[x-attribution-submitter:(.*?)\\]", RegexOption.IGNORE_CASE)
+    private val ATTR_CURATOR_URL_REGEX = Regex("\\[x-attribution-curator-url:(.*?)\\]", RegexOption.IGNORE_CASE)
 
     fun isTtml(content: String): Boolean {
         val trimmed = content.trim()
@@ -45,13 +50,46 @@ object LrcParser {
         val lines = cleanContent.lines()
         val parsedLines = mutableListOf<LyricLine>()
         var offsetMs = 0L
+        var attrSource: String? = null
+        var attrSongUrl: String? = null
+        var attrSubmitter: String? = null
+        var attrCuratorUrl: String? = null
 
-        // First pass: look for offset tags
+        // First pass: look for offset and attribution metadata tags
         for (line in lines) {
             val offsetMatch = OFFSET_REGEX.find(line)
             if (offsetMatch != null) {
                 offsetMs = offsetMatch.groupValues[1].toLongOrNull() ?: 0L
             }
+            if (attrSource == null) {
+                ATTR_SOURCE_REGEX.find(line)?.groupValues?.getOrNull(1)?.let {
+                    attrSource = LyricsAttribution.cleanField(it)
+                }
+            }
+            if (attrSongUrl == null) {
+                ATTR_SONG_URL_REGEX.find(line)?.groupValues?.getOrNull(1)?.let {
+                    attrSongUrl = LyricsAttribution.cleanField(it)?.takeIf { u -> u.startsWith("https://") }
+                }
+            }
+            if (attrSubmitter == null) {
+                ATTR_SUBMITTER_REGEX.find(line)?.groupValues?.getOrNull(1)?.let {
+                    attrSubmitter = LyricsAttribution.cleanField(it)
+                }
+            }
+            if (attrCuratorUrl == null) {
+                ATTR_CURATOR_URL_REGEX.find(line)?.groupValues?.getOrNull(1)?.let {
+                    attrCuratorUrl = LyricsAttribution.cleanField(it)?.takeIf { u -> u.startsWith("https://") }
+                }
+            }
+        }
+
+        val parsedAttribution = attrSource?.let { src ->
+            LyricsAttribution(
+                sourceName = src,
+                songUrl = attrSongUrl,
+                submitterName = attrSubmitter,
+                curatorUrl = attrCuratorUrl
+            ).takeIf { it.hasValidContent }
         }
 
         // Second pass: extract lyrics lines
@@ -59,7 +97,7 @@ object LrcParser {
             val trimmed = line.trim()
             if (trimmed.isEmpty()) continue
 
-            // Skip metadata tags like [ti:], [ar:], [al:], [by:], [offset:]
+            // Skip metadata tags like [ti:], [ar:], [al:], [by:], [offset:], [x-attribution-*:]
             if (trimmed.startsWith("[") && trimmed.contains(":") && !trimmed.contains(TIMESTAMP_REGEX)) {
                 continue
             }
@@ -104,7 +142,8 @@ object LrcParser {
                 plainText = parsedLines.joinToString("\n") { it.text },
                 source = source,
                 offsetMs = offsetMs,
-                rawContent = content
+                rawContent = content,
+                attribution = parsedAttribution
             )
         } else {
             // Plain text lyrics fallback
@@ -125,7 +164,8 @@ object LrcParser {
                 plainText = if (plainLines.isNotEmpty()) plainLines.joinToString("\n") else "",
                 source = source,
                 offsetMs = 0L,
-                rawContent = if (plainLines.isNotEmpty()) content else ""
+                rawContent = if (plainLines.isNotEmpty()) content else "",
+                attribution = parsedAttribution
             )
         }
     }
@@ -134,9 +174,27 @@ object LrcParser {
         return TIMESTAMP_REGEX.containsMatchIn(content)
     }
 
-    fun formatLrc(lines: List<LyricLine>, offsetMs: Long = 0L): String {
+    fun formatLrc(
+        lines: List<LyricLine>,
+        offsetMs: Long = 0L,
+        attribution: LyricsAttribution? = null
+    ): String {
         if (lines.isEmpty()) return ""
         val sb = StringBuilder()
+        if (attribution != null && attribution.hasValidContent) {
+            sanitizeTagValue(attribution.sourceName)?.let {
+                sb.append("[x-attribution-source:").append(it).append("]\n")
+            }
+            sanitizeTagValue(attribution.songUrl)?.let {
+                sb.append("[x-attribution-song-url:").append(it).append("]\n")
+            }
+            sanitizeTagValue(attribution.submitterName)?.let {
+                sb.append("[x-attribution-submitter:").append(it).append("]\n")
+            }
+            sanitizeTagValue(attribution.curatorUrl)?.let {
+                sb.append("[x-attribution-curator-url:").append(it).append("]\n")
+            }
+        }
         if (offsetMs != 0L) {
             sb.append("[offset:").append(offsetMs).append("]\n")
         }
@@ -158,5 +216,11 @@ object LrcParser {
             if (index < lines.lastIndex) sb.append('\n')
         }
         return sb.toString()
+    }
+
+    private fun sanitizeTagValue(raw: String?): String? {
+        val cleaned = LyricsAttribution.cleanField(raw) ?: return null
+        return cleaned.replace("[", "").replace("]", "").replace("\r", "").replace("\n", " ").trim()
+            .takeIf { it.isNotEmpty() }
     }
 }

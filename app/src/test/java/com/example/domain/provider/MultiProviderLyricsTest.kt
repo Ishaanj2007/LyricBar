@@ -38,17 +38,23 @@ class MultiProviderLyricsTest {
     // =========================================================================
 
     @Test
-    fun `default provider priority is LRCLIB then lrc_red then KuGou then LyricsPlus`() {
+    fun `default provider priority is LRCLIB then lrc_red then LyricsPlus then KuGou then Lyrica then LiriQo then Unison`() {
         val providers = CompositeLyricsRepository.createDefaultProviders()
-        assertEquals(4, providers.size)
+        assertEquals(7, providers.size)
         assertEquals("LRCLIB", providers[0].name)
         assertEquals("lrc.red", providers[1].name)
-        assertEquals("KuGou", providers[2].name)
-        assertEquals("LyricsPlus", providers[3].name)
+        assertEquals("LyricsPlus", providers[2].name)
+        assertEquals("KuGou", providers[3].name)
+        assertEquals("Lyrica", providers[4].name)
+        assertEquals("LiriQo", providers[5].name)
+        assertEquals("Unison", providers[6].name)
         assertTrue(providers[0] is LrcLibProvider)
         assertTrue(providers[1] is LrcRedProvider)
-        assertTrue(providers[2] is KugouProvider)
-        assertTrue(providers[3] is LyricsPlusProvider)
+        assertTrue(providers[2] is LyricsPlusProvider)
+        assertTrue(providers[3] is KugouProvider)
+        assertTrue(providers[4] is LyricaProvider)
+        assertTrue(providers[5] is LiriQoProvider)
+        assertTrue(providers[6] is UnisonProvider)
     }
 
     // =========================================================================

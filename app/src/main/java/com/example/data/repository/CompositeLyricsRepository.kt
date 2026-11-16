@@ -10,11 +10,14 @@ import com.example.data.preferences.LyricsProviderPreference
 import com.example.domain.parser.LrcParser
 import com.example.domain.provider.BiniLyricsApi
 import com.example.domain.provider.KugouProvider
+import com.example.domain.provider.LiriQoProvider
 import com.example.domain.provider.LrcLibProvider
 import com.example.domain.provider.LrcRedProvider
+import com.example.domain.provider.LyricaProvider
 import com.example.domain.provider.LyricsMatchingUtils
 import com.example.domain.provider.LyricsPlusProvider
 import com.example.domain.provider.LyricsProvider
+import com.example.domain.provider.UnisonProvider
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -202,13 +205,18 @@ class CompositeLyricsRepository internal constructor(
                         }
 
                         val plainText = normalizedLines.joinToString("\n") { it.text }
-                        val formattedLrc = if (rawLyrics.rawContent.isNotBlank() &&
+                        val hasExistingValidLrc = rawLyrics.rawContent.isNotBlank() &&
                             LrcParser.hasTimestampTags(rawLyrics.rawContent) &&
-                            !rawLyrics.rawContent.contains('<')
-                        ) {
+                            !rawLyrics.rawContent.contains('<') &&
+                            (rawLyrics.attribution == null || rawLyrics.rawContent.contains("[x-attribution-source:", ignoreCase = true))
+                        val formattedLrc = if (hasExistingValidLrc) {
                             rawLyrics.rawContent
                         } else {
-                            LrcParser.formatLrc(normalizedLines, offsetMs = rawLyrics.offsetMs)
+                            LrcParser.formatLrc(
+                                lines = normalizedLines,
+                                offsetMs = rawLyrics.offsetMs,
+                                attribution = rawLyrics.attribution
+                            )
                         }
 
                         rawLyrics.copy(
@@ -217,7 +225,8 @@ class CompositeLyricsRepository internal constructor(
                             rawContent = formattedLrc,
                             isSynced = true,
                             isWordSynced = false,
-                            source = provider.name
+                            source = provider.name,
+                            attribution = rawLyrics.attribution
                         )
                     }
 
@@ -442,8 +451,11 @@ class CompositeLyricsRepository internal constructor(
             return listOf(
                 LrcLibProvider(okHttpClient),
                 LrcRedProvider(okHttpClient, biniApi),
+                LyricsPlusProvider(okHttpClient, biniApi = biniApi),
                 KugouProvider(okHttpClient),
-                LyricsPlusProvider(okHttpClient, biniApi = biniApi)
+                LyricaProvider(okHttpClient),
+                LiriQoProvider(okHttpClient),
+                UnisonProvider(okHttpClient)
             )
         }
 

@@ -26,7 +26,7 @@ enum class LyricsProviderPreference(
 ) {
     AUTO(
         displayName = "Automatic",
-        description = "Tries LRCLIB → lrc.red → KuGou → LyricsPlus in order",
+        description = "Tries LRCLIB → lrc.red → LyricsPlus → KuGou → Lyrica → LiriQo → Unison in order",
         providerName = null
     ),
     LRCLIB(
@@ -39,15 +39,30 @@ enum class LyricsProviderPreference(
         description = "ISRC-matched synchronized LRC lyrics catalog",
         providerName = "lrc.red"
     ),
+    LYRICS_PLUS(
+        displayName = "LyricsPlus",
+        description = "Multi-mirror synchronized lyrics aggregator",
+        providerName = "LyricsPlus"
+    ),
     KUGOU(
         displayName = "KuGou",
         description = "Title and artist matched synchronized lyrics catalog",
         providerName = "KuGou"
     ),
-    LYRICS_PLUS(
-        displayName = "LyricsPlus",
-        description = "Multi-mirror synchronized lyrics aggregator",
-        providerName = "LyricsPlus"
+    LYRICA(
+        displayName = "Lyrica",
+        description = "Hindi, Bollywood, regional Indian, and global synchronized lyrics",
+        providerName = "Lyrica"
+    ),
+    LIRIQO(
+        displayName = "LiriQo",
+        description = "International and Asian synchronized lyrics catalog",
+        providerName = "LiriQo"
+    ),
+    UNISON(
+        displayName = "Unison",
+        description = "Community-submitted synchronized LRC and TTML lyrics",
+        providerName = "Unison"
     );
 
     companion object {

@@ -255,7 +255,7 @@ internal fun computeResponsiveNowPlayingMetrics(
 
 /**
  * Resolves the actual lyrics provider badge text for the current track.
- * - Returns the actual provider that supplied the lyrics (`LRCLIB`, `lrc.red`, `KuGou`, `LyricsPlus`, or `Local Import`).
+ * - Returns the actual provider that supplied the lyrics (`LRCLIB`, `lrc.red`, `LyricsPlus`, `KuGou`, `Lyrica`, `LiriQo`, `Unison`, or `Local Import`).
  * - Never returns the user's selected provider preference (`AUTO`, etc.).
  * - Never fabricates a provider name when no valid lyrics are loaded.
  */
@@ -596,6 +596,15 @@ fun NowPlayingScreen(
     val sourceBadgeText = remember(lyrics, hasValidLyrics) {
         resolveNowPlayingSourceBadge(lyrics = lyrics, hasValidLyrics = hasValidLyrics)
     }
+    val sourceBadgeUrl = remember(lyrics, hasValidLyrics) {
+        if (hasValidLyrics && lyrics?.displaySource.equals("Unison", ignoreCase = true)) {
+            lyrics?.attribution?.songUrl?.takeIf {
+                it.startsWith("https://", ignoreCase = true) || it.startsWith("http://", ignoreCase = true)
+            } ?: "https://unison.betterlyrics.org"
+        } else {
+            null
+        }
+    }
 
     val lyricsCardState = remember(
         hasSession,
@@ -746,6 +755,7 @@ fun NowPlayingScreen(
                                         NowPlayingSongInfoSection(
                                             track = track,
                                             sourceBadgeText = sourceBadgeText,
+                                            sourceBadgeUrl = sourceBadgeUrl,
                                             titleFontSizeSp = metrics.titleFontSizeSp,
                                             artistFontSizeSp = metrics.artistFontSizeSp,
                                             primaryColor = primaryColor,
@@ -769,6 +779,7 @@ fun NowPlayingScreen(
                                     NowPlayingSongInfoSection(
                                         track = track,
                                         sourceBadgeText = sourceBadgeText,
+                                        sourceBadgeUrl = sourceBadgeUrl,
                                         titleFontSizeSp = metrics.titleFontSizeSp,
                                         artistFontSizeSp = metrics.artistFontSizeSp,
                                         primaryColor = primaryColor,
@@ -896,6 +907,7 @@ fun NowPlayingScreen(
                         NowPlayingSongInfoSection(
                             track = track,
                             sourceBadgeText = sourceBadgeText,
+                            sourceBadgeUrl = sourceBadgeUrl,
                             titleFontSizeSp = metrics.titleFontSizeSp,
                             artistFontSizeSp = metrics.artistFontSizeSp,
                             primaryColor = primaryColor
@@ -1013,6 +1025,7 @@ fun NowPlayingScreen(
                         NowPlayingSongInfoSection(
                             track = track,
                             sourceBadgeText = sourceBadgeText,
+                            sourceBadgeUrl = sourceBadgeUrl,
                             titleFontSizeSp = metrics.titleFontSizeSp,
                             artistFontSizeSp = metrics.artistFontSizeSp,
                             primaryColor = primaryColor
@@ -1293,6 +1306,7 @@ private fun NowPlayingArtworkHero(
 private fun NowPlayingSongInfoSection(
     track: TrackMetadata?,
     sourceBadgeText: String?,
+    sourceBadgeUrl: String? = null,
     titleFontSizeSp: Float,
     artistFontSizeSp: Float,
     primaryColor: Color,
@@ -1300,6 +1314,7 @@ private fun NowPlayingSongInfoSection(
     horizontalAlignment: Alignment.Horizontal = Alignment.CenterHorizontally,
     compactBadge: Boolean = false
 ) {
+    val context = LocalContext.current
     val textAlign = if (horizontalAlignment == Alignment.Start) TextAlign.Start else TextAlign.Center
     Column(
         modifier = modifier
@@ -1337,11 +1352,29 @@ private fun NowPlayingSongInfoSection(
 
         if (!sourceBadgeText.isNullOrBlank()) {
             Spacer(modifier = Modifier.height(if (compactBadge) 6.dp else 8.dp))
+            val badgeShape = RoundedCornerShape(50)
             Surface(
-                shape = RoundedCornerShape(50),
+                shape = badgeShape,
                 color = Color.White.copy(alpha = 0.10f),
                 border = BorderStroke(0.75.dp, Color.White.copy(alpha = 0.22f)),
-                modifier = Modifier.testTag("now_playing_source_badge")
+                modifier = Modifier
+                    .clip(badgeShape)
+                    .then(
+                        if (!sourceBadgeUrl.isNullOrBlank()) {
+                            Modifier.clickable(role = Role.Button) {
+                                try {
+                                    context.startActivity(
+                                        Intent(Intent.ACTION_VIEW, Uri.parse(sourceBadgeUrl)).apply {
+                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        }
+                                    )
+                                } catch (_: Exception) {}
+                            }
+                        } else {
+                            Modifier
+                        }
+                    )
+                    .testTag("now_playing_source_badge")
             ) {
                 Row(
                     modifier = Modifier.padding(

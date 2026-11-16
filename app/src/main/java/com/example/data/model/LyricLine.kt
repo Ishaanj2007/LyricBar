@@ -16,6 +16,49 @@ data class LyricLine(
     val isWordSynced: Boolean = words.isNotEmpty()
 )
 
+data class LyricsAttribution(
+    val sourceName: String = "",
+    val songUrl: String? = null,
+    val submitterName: String? = null,
+    val curatorUrl: String? = null
+) {
+    val hasValidContent: Boolean
+        get() = sourceName.isNotBlank() && (!songUrl.isNullOrBlank() || !submitterName.isNullOrBlank())
+
+    companion object {
+        fun cleanField(value: String?): String? {
+            val trimmed = value?.trim() ?: return null
+            return if (trimmed.isEmpty() ||
+                trimmed.equals("null", ignoreCase = true) ||
+                trimmed.equals("undefined", ignoreCase = true)
+            ) {
+                null
+            } else {
+                trimmed
+            }
+        }
+
+        fun forUnison(
+            videoId: String?,
+            submitterDisplayName: String?,
+            submitterKeyId: String?
+        ): LyricsAttribution {
+            val cleanVideoId = cleanField(videoId)
+            val cleanSubmitter = cleanField(submitterDisplayName)
+            val cleanKeyId = cleanField(submitterKeyId)
+            val songUrl = cleanVideoId?.let { "https://unison.betterlyrics.org/song/$it" }
+                ?: "https://unison.betterlyrics.org"
+            val curatorUrl = cleanKeyId?.let { "https://unison.betterlyrics.org/curator/$it" }
+            return LyricsAttribution(
+                sourceName = "Unison",
+                songUrl = songUrl,
+                submitterName = cleanSubmitter,
+                curatorUrl = curatorUrl
+            )
+        }
+    }
+}
+
 data class ParsedLyrics(
     val title: String,
     val artist: String,
@@ -26,7 +69,8 @@ data class ParsedLyrics(
     val offsetMs: Long = 0L,
     val isWordSynced: Boolean = lines.any { it.isWordSynced },
     val format: String = if (isSynced) "LRC" else "PLAIN",
-    val rawContent: String = ""
+    val rawContent: String = "",
+    val attribution: LyricsAttribution? = null
 ) {
     val hasValidLyrics: Boolean
         get() {

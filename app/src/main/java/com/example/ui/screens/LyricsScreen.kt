@@ -39,6 +39,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.material3.ripple
@@ -1631,6 +1632,186 @@ private fun LyricsLinesLazyColumn(
                 }
             }
         }
+
+        val attributionDisplay = resolveUnisonAttributionDisplay(lyrics)
+        if (attributionDisplay != null) {
+            item(key = "lyrics_attribution_footer") {
+                UnisonLyricsAttributionFooter(
+                    attribution = attributionDisplay,
+                    themePrimary = themePrimary,
+                    textAlign = textAlign
+                )
+            }
+        }
+    }
+}
+
+internal data class UnisonAttributionDisplay(
+    val songUrl: String?,
+    val submitterName: String?,
+    val curatorUrl: String?
+)
+
+internal fun resolveUnisonAttributionDisplay(
+    lyrics: com.example.data.model.ParsedLyrics?
+): UnisonAttributionDisplay? {
+    if (lyrics == null || !lyrics.hasValidLyrics) return null
+    val attr = lyrics.attribution
+    val isUnisonSource = lyrics.displaySource.equals("Unison", ignoreCase = true) ||
+        attr?.sourceName.equals("Unison", ignoreCase = true)
+    if (!isUnisonSource) return null
+
+    val songUrl = com.example.data.model.LyricsAttribution.cleanField(attr?.songUrl)
+        ?.takeIf { it.startsWith("https://", ignoreCase = true) || it.startsWith("http://", ignoreCase = true) }
+        ?: "https://unison.betterlyrics.org"
+    val submitterName = com.example.data.model.LyricsAttribution.cleanField(attr?.submitterName)
+    val curatorUrl = if (submitterName != null) {
+        com.example.data.model.LyricsAttribution.cleanField(attr?.curatorUrl)
+            ?.takeIf { it.startsWith("https://", ignoreCase = true) || it.startsWith("http://", ignoreCase = true) }
+    } else {
+        null
+    }
+    return UnisonAttributionDisplay(
+        songUrl = songUrl,
+        submitterName = submitterName,
+        curatorUrl = curatorUrl
+    )
+}
+
+private fun openAttributionUrl(context: Context, url: String) {
+    val cleanUrl = com.example.data.model.LyricsAttribution.cleanField(url) ?: return
+    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(cleanUrl)).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    try {
+        context.startActivity(intent)
+    } catch (_: Exception) {
+        Toast.makeText(context, "No web browser app found to open link", Toast.LENGTH_SHORT).show()
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun UnisonLyricsAttributionFooter(
+    attribution: UnisonAttributionDisplay,
+    themePrimary: Color,
+    textAlign: TextAlign,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val horizontalArrangement = if (textAlign == TextAlign.Start) {
+        Arrangement.spacedBy(8.dp, Alignment.Start)
+    } else {
+        Arrangement.spacedBy(8.dp, Alignment.End)
+    }
+    val horizontalAlignment = if (textAlign == TextAlign.Start) Alignment.Start else Alignment.End
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 14.dp)
+            .testTag("unison_lyrics_attribution_footer"),
+        horizontalAlignment = horizontalAlignment
+    ) {
+        HorizontalDivider(
+            color = Color.White.copy(alpha = 0.14f),
+            thickness = 0.75.dp,
+            modifier = Modifier.padding(bottom = 10.dp)
+        )
+
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = horizontalArrangement,
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            val songUrl = attribution.songUrl
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = Color.White.copy(alpha = 0.08f),
+                border = BorderStroke(0.75.dp, Color.White.copy(alpha = 0.16f)),
+                modifier = Modifier
+                    .defaultMinSize(minHeight = 36.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .then(
+                        if (!songUrl.isNullOrBlank()) {
+                            Modifier.clickable(role = Role.Button) {
+                                openAttributionUrl(context, songUrl)
+                            }
+                        } else {
+                            Modifier
+                        }
+                    )
+                    .testTag("unison_song_link")
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Text(
+                        text = "Lyrics from Unison",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = themePrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (!songUrl.isNullOrBlank()) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                            contentDescription = "Open song on Unison",
+                            tint = themePrimary.copy(alpha = 0.90f),
+                            modifier = Modifier.size(13.dp)
+                        )
+                    }
+                }
+            }
+
+            if (!attribution.submitterName.isNullOrBlank()) {
+                val curatorUrl = attribution.curatorUrl
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = Color.White.copy(alpha = 0.06f),
+                    border = BorderStroke(0.75.dp, Color.White.copy(alpha = 0.14f)),
+                    modifier = Modifier
+                        .defaultMinSize(minHeight = 36.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .then(
+                            if (!curatorUrl.isNullOrBlank()) {
+                                Modifier.clickable(role = Role.Button) {
+                                    openAttributionUrl(context, curatorUrl)
+                                }
+                            } else {
+                                Modifier
+                            }
+                        )
+                        .testTag("unison_curator_link")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Text(
+                            text = "Curated by ${attribution.submitterName}",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = Color.White.copy(alpha = 0.88f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (!curatorUrl.isNullOrBlank()) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                                contentDescription = "Open curator profile on Unison",
+                                tint = Color.White.copy(alpha = 0.72f),
+                                modifier = Modifier.size(12.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1851,8 +2032,11 @@ private fun com.example.data.preferences.LyricsProviderPreference.compactMenuDes
     com.example.data.preferences.LyricsProviderPreference.AUTO -> "Tries providers in priority order."
     com.example.data.preferences.LyricsProviderPreference.LRCLIB -> "Synchronized LRC catalog."
     com.example.data.preferences.LyricsProviderPreference.LRC_RED -> "ISRC-based lyrics."
-    com.example.data.preferences.LyricsProviderPreference.KUGOU -> "Title and artist matching."
     com.example.data.preferences.LyricsProviderPreference.LYRICS_PLUS -> "Multi-mirror lyrics."
+    com.example.data.preferences.LyricsProviderPreference.KUGOU -> "Title and artist matching."
+    com.example.data.preferences.LyricsProviderPreference.LYRICA -> "Hindi, Bollywood & global sync."
+    com.example.data.preferences.LyricsProviderPreference.LIRIQO -> "International & Asian catalog."
+    com.example.data.preferences.LyricsProviderPreference.UNISON -> "Community LRC & TTML catalog."
 }
 
 @Composable
