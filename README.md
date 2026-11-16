@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Ishaanj2007/LyricBar/releases/latest"><img src="https://img.shields.io/badge/Release-v2.5.0-6C5CE7?style=flat-square&logo=android" alt="Latest Release" /></a>
+  <a href="https://github.com/Ishaanj2007/LyricBar/releases/latest"><img src="https://img.shields.io/badge/Release-v2.6.0-6C5CE7?style=flat-square&logo=android" alt="Latest Release" /></a>
   <a href="https://android.com"><img src="https://img.shields.io/badge/Platform-Android%207.0%2B%20(API%2024--35)-00B894?style=flat-square&logo=android" alt="Android Version" /></a>
   <a href="https://kotlinlang.org"><img src="https://img.shields.io/badge/Kotlin-2.0.21-7F52FF?style=flat-square&logo=kotlin" alt="Kotlin" /></a>
   <a href="https://developer.android.com/jetpack/compose"><img src="https://img.shields.io/badge/UI-Jetpack%20Compose%20%2B%20M3-4285F4?style=flat-square&logo=jetpackcompose" alt="Jetpack Compose" /></a>
@@ -17,8 +17,12 @@
 </p>
 
 <p align="center">
+  <b>LyricBar v2.6.0</b> — Synchronized Floating Lyrics for Android
+</p>
+
+<p align="center">
   <a href="#screenshots-">Screenshots</a> •
-  <a href="#whats-new-in-v250-">What's New</a> •
+  <a href="#whats-new-in-v260-">What's New</a> •
   <a href="#features-">Features</a> •
   <a href="#multi-provider-lyrics-architecture-">Lyrics Providers</a> •
   <a href="#floating-hud--customization-">Floating HUD</a> •
@@ -40,27 +44,27 @@
 
 ---
 
-## What's New in v2.5.0 🚀
+## What's New in v2.6.0 🚀
 
-- **Automatic 48-Hour Update Checks & Notifications** — Background GitHub Releases checks via Android WorkManager every 48 hours (plus overdue launch catch-up checks), ETag (`304 Not Modified`) caching, notification deduplication, and Android 13+ permission handling.
-- **Adaptive Landscape & Tablet Redesign** — Two-column responsive layouts across **Now Playing**, **Lyrics**, and **Settings** paired with an adaptive side navigation rail (`AdaptiveNavRail`) and full display-cutout / gesture-bar inset support.
-- **Orientation-Aware Floating HUD** — Independent persistent X/Y coordinates and dimensions for **Portrait** and **Landscape** modes with safe cutout clamping and an interactive Orientation Mode chip in Settings.
-- **1-Second Hold-to-Reposition & Drag Rollback** — Hold anywhere on the HUD for `1000 ms` to enter reposition mode with subtle neutral visual feedback, or let go cleanly; interrupted drags automatically roll back to original bounds.
-- **Clean HUD Backdrop & Custom Lyric Colours** — Two neutral backdrop styles (**Black** and **Grey**) with opacity, corner radius, and padding controls, plus independent **Active** and **Inactive** lyric colour presets, HSV/Hex picker, and improved `0.64f` inactive-to-active lyric contrast.
+- **Expanded 7-Provider Lyrics Lineup (`Lyrica`, `LiriQo`, `Unison`)** — Added **Lyrica** (Hindi, Bollywood, Marathi, Punjabi, Tamil, Telugu, and global tracks), **LiriQo** (international and Asian catalogs with strict candidate/version filtering), and **Unison** (community-submitted LRC & safe TTML-to-line-synced lyrics with ETag caching, offline attribution persistence, and clickable song/curator links), alongside **LRCLIB**, **lrc.red**, **LyricsPlus** (promoted above KuGou), and **KuGou**.
+- **Click-through Overlay Mode** — New toggle under **Settings → Floating Overlay & Timeline** that makes the floating HUD non-touchable (`FLAG_NOT_TOUCHABLE`) so taps and swipes pass cleanly through to underlying apps, automatically pausing 2D drag mode while active.
+- **Triple-tap Floating HUD to Open LyricBar** — Triple-tap anywhere on the interactive floating HUD (`HudTripleTapDetector`) to open LyricBar's main activity with subtle visual pulse feedback, while safely ignoring single/double taps, 4th+ taps, long presses, dragging, and multi-pointer gestures.
+- **Settings & Menu Refinements** — Organized **HUD Backdrop** into its own dedicated accordion section (`SECTION_HUD_BACKDROP`) with live preview, improved accordion state management (collapsed by default with *Expand All / Collapse All*), and refined the frosted-glass provider dropdown (`ProviderFloatingGlassMenu`) with viewport clamping and scrollable provider rows.
+- **Accurate MediaSession Eligibility & Stale-Lyrics Prevention** — Added `MediaSessionEligibility` and `MediaSessionPipelineEngine` filtering so non-music browser videos, podcasts, and audiobooks do not trigger unnecessary lyrics fetches, show stale lyrics from previous songs, or pollute playback history.
 
 ---
 
 ## Features ✨
 
-- **Multi-Provider Lyrics Engine** — Broad song coverage powered by four synchronized providers (`LRCLIB`, `lrc.red`, `KuGou`, `LyricsPlus`) with customizable fallback priority.
-- **Synchronized Provider Selection** — Choose between `Automatic` and manual provider selection directly from either the **Lyrics Screen** or **Settings Screen**, sharing the same persistent preference.
+- **Multi-Provider Lyrics Engine** — Broad song coverage powered by seven synchronized providers (`LRCLIB`, `lrc.red`, `LyricsPlus`, `KuGou`, `Lyrica`, `LiriQo`, `Unison`) with priority fallback and safe TTML-to-line-synced conversion (`TtmlParser`).
+- **Synchronized Provider Selection** — Choose between `Automatic` and any individual provider directly from either the **Lyrics Screen** (frosted floating dropdown) or **Settings Screen**, sharing the same persistent DataStore preference.
 - **Responsive Portrait & Landscape UI** — Streamlined **Now Playing**, **Lyrics**, **History**, and **Settings** screens that adapt seamlessly between compact phones (`FloatingBottomNavPill`) and wide/landscape screens (`AdaptiveNavRail` + two-column layouts).
 - **Orientation-Aware Floating Lyrics Overlay** — Live synchronized lyrics rendered above any active music or media app (Spotify, YouTube Music, Apple Music, local players, etc.) with separate persistent **Portrait** and **Landscape** positioning profiles.
-- **1-Second Hold-to-Reposition & 2D Resize** — Hold the HUD for 1 second to reposition it cleanly anywhere inside safe screen bounds (with automatic rollback on cancellation), short-tap to resync, or toggle 2D Drag & Resize handles in Settings.
-- **Clean HUD Backdrop & Independent Lyric Colours** — Switch between a text-only HUD or crisp **Black** / **Grey** backdrops with independent **Active** and **Inactive** lyric colour customization, HSV/Hex colour picker, saved swatches, and contrast warnings.
+- **Interactive HUD Gestures & Click-through Mode** — Short-tap the HUD to resync, triple-tap anywhere on the interactive HUD to open LyricBar, hold for `1000 ms` to reposition safely (with automatic rollback on cancellation), toggle 2D Drag & Resize handles, or enable **Click-through Overlay** to pass all touches to the app underneath.
+- **Dedicated HUD Backdrop & Independent Lyric Colours** — Configure a text-only HUD or crisp **Black** / **Grey** backdrops inside the dedicated **HUD Backdrop** section with live preview, opacity, corner radius, padding, independent **Active** and **Inactive** lyric colours, HSV/Hex picker, saved swatches, and contrast warnings.
 - **Cinematic Ambient Artwork Glow** — Dynamic diffused ambient illumination engine derived from active album artwork palettes for in-app frosted-glass surfaces.
 - **Intelligent Auto-Scroll with Reading Pause** — Smooth automatic lyric following that pauses instantly when the user scrolls manually and provides a one-tap resume affordance.
-- **Automatic Media Detection** — Detects active playback state, track metadata, and album artwork via Android's `MediaSession` API with strict track-identity cache isolation.
+- **Eligible MediaSession Detection** — Filters active `MediaSession` updates by app context, playback state, duration, and metadata signals (`MediaSessionEligibility`) to ignore non-music video/browser sessions and prevent stale lyrics or history pollution.
 - **Safe & Bounded Local LRC Import** — Bounded, memory-safe local `.lrc` import system with UTF-8/UTF-16/BOM auto-detection and file-size protection.
 - **Multiple Animation Styles** — Apple-style Karaoke glow sweeps, Smooth Line Transitions, Fade, Blur Reveal, Typewriter, and Instant animations synchronized to playback timing.
 - **Typography & Timing Precision** — Customize HUD text size, opacity, alignment, single-line mode, 12 bundled Google Fonts (`Inter`, `Poppins`, `Montserrat`, `Lora`, `Roboto Mono`, etc.), and per-track lyric offsets (`-0.5s`, `-0.1s`, `+0.1s`, `+0.5s`).
@@ -73,33 +77,38 @@
 
 ## Multi-Provider Lyrics Architecture 🎵
 
-LyricBar uses a modular, 4-tier lyrics provider architecture to maximize song coverage and line synchronization:
+LyricBar uses a modular, 7-tier lyrics provider architecture to maximize regional, international, and community-curated synchronized lyrics coverage:
 
 | Priority | Provider | Identification Method | Strengths |
 | :---: | :--- | :--- | :--- |
-| **1** | **LRCLIB** | Title, Artist, Album, Duration | Community-driven synchronized lyrics catalog with broad international coverage. |
+| **1** | **LRCLIB** | Title, Artist, Album, Duration | Community-driven synchronized LRC catalog with broad international coverage. |
 | **2** | **lrc.red** | ISRC, Title, Artist | Exact recording identification via ISRC with synchronized line timing. |
-| **3** | **KuGou** | Title, Artist | Extensive catalog with resilient fuzzy matching and Base64-decoded LRC timestamps. |
-| **4** | **LyricsPlus** | Title, Artist, Album, Duration | Multi-mirror synchronized lyrics aggregator. |
+| **3** | **LyricsPlus** | Title, Artist, Album, Duration | Fast multi-mirror synchronized lyrics aggregator with slow-mirror cancellation. |
+| **4** | **KuGou** | Title, Artist, Duration | Large catalog with fuzzy candidate scoring and decrypted KRC line-level timing. |
+| **5** | **Lyrica** | Artist, Title (`fast=true`) | Strong coverage across Hindi, Bollywood, Marathi, Punjabi, Tamil, Telugu, and global tracks. |
+| **6** | **LiriQo** | Title, Artist, Duration, Album, ISRC | International and Asian catalog with strict recording-version and artist validation across multi-track candidates. |
+| **7** | **Unison** | ISRC, Title, Artist, Search + Video ID | Community-submitted LRC and TTML lyrics (`TtmlParser`) with `ETag`/`304` caching and clickable song & curator attribution. |
 
 ### Provider Selection & Cache Isolation
-- **Automatic Mode (`AUTO`):** Queries `LRCLIB → lrc.red → KuGou → LyricsPlus` in fallback priority order and stops at the first valid lyrics result.
-- **Manual Mode:** When a specific provider (`LRCLIB`, `lrc.red`, `KuGou`, or `LyricsPlus`) is selected, LyricBar queries **only** that provider without falling back, presenting the missing-lyrics state if unavailable.
-- **Dual-Screen Synchronization:** The provider selector is accessible from both the **Lyrics Screen** (frosted provider menu) and the **Settings Screen** (*Lyrics Provider* section), backed by a shared Jetpack DataStore preference.
-- **Cache Isolation:** Room database caching isolates entries by provider (`<identityKey>::provider::<name>`). Manual provider selection never returns cached lyrics from a different provider, and switching providers preserves existing valid cache records without deleting them.
-- **Transparent Source Attribution:** The active lyrics source is displayed subtly (`Source: LRCLIB`, `Source: lrc.red`, `Source: KuGou`, `Source: LyricsPlus`, or `Source: Local Import`).
+- **Automatic Mode (`AUTO`):** Queries `LRCLIB → lrc.red → LyricsPlus → KuGou → Lyrica → LiriQo → Unison` in fallback priority order and stops at the first valid synchronized lyrics result.
+- **Manual Mode:** When a specific provider (`LRCLIB`, `lrc.red`, `LyricsPlus`, `KuGou`, `Lyrica`, `LiriQo`, or `Unison`) is selected, LyricBar queries **only** that provider without falling back, presenting the missing-lyrics state if unavailable.
+- **Dual-Screen Synchronization:** The provider selector is accessible from both the **Lyrics Screen** (scrollable frosted floating menu) and the **Settings Screen** (*Lyrics Provider* section), backed by a shared Jetpack DataStore preference.
+- **Cache Isolation & Attribution Persistence:** Room database caching isolates entries by provider (`<identityKey>::provider::<name>`). Manual provider selection never returns cached lyrics from a different provider, switching providers preserves existing cache records, and Unison song/curator attribution metadata (`[x-attribution-*]`) survives offline Room cache reloads.
+- **Transparent Source Attribution:** The active lyrics source is displayed on Now Playing (`LRCLIB`, `lrc.red`, `LyricsPlus`, `KuGou`, `Lyrica`, `LiriQo`, `Unison`, or `Local Import`), and Unison tracks render clickable **Lyrics from Unison** and **Curated by &lt;name&gt;** links directly below the lyrics.
 
 ---
 
 ## Floating HUD & Customization 🎛️
 
 - **Orientation Profiles (`HudPositioningEngine`)**: Portrait and Landscape each persist independent `X`, `Y`, `Width`, and `Height` values in DataStore, clamped safely away from status bars, navigation bars, and display cutouts.
-- **Touch Interaction (`HudHoldGestureController` & `HudDragTransactionCoordinator`)**:
+- **Touch Interaction (`HudHoldGestureController`, `HudTripleTapDetector`, `HudDragTransactionCoordinator`)**:
   - **Short Tap**: Triggers lyric playback resync.
+  - **Triple-Tap**: Opens LyricBar's `MainActivity` from the interactive HUD (disabled automatically when Click-through or 2D Drag mode is active; ignores long presses, drags, multi-pointer input, and 4th+ taps).
   - **1-Second Hold (`1000 ms`)**: Enters reposition mode with subtle neutral visual feedback; dragging updates the HUD smoothly and saves to the active orientation profile on release.
+  - **Click-through Overlay Mode**: Makes the overlay window non-touchable (`FLAG_NOT_TOUCHABLE`) so all taps and gestures pass through to apps underneath.
   - **Safety**: Cancels pending holds on touch slop, multi-pointer input, or control touches, and rolls back active drags to original coordinates if interrupted or cancelled.
-- **Backdrop & Colour Hierarchy (`HudColorSystem`)**:
-  - Optional backdrop with **Black** (`#0A0A0A`) or **Grey** (`#B8B8B8`) style, adjustable opacity (`0%–100%`), corner radius (`0–32 dp`), and horizontal/vertical padding.
+- **Dedicated HUD Backdrop & Colour Hierarchy (`HudColorSystem`)**:
+  - Dedicated **HUD Backdrop** Settings card featuring live preview, **Black** (`#0A0A0A`) or **Grey** (`#B8B8B8`) style, adjustable opacity (`0%–100%`), corner radius (`0–32 dp`), and horizontal/vertical padding.
   - Independent **Active Lyric** and **Inactive Lyric** colours via curated presets, full HSV/Hex custom picker, up to 8 saved custom swatches, contrast readability warnings, and a `0.64f` inactive opacity ratio so the currently sung line stays visually prominent.
 
 ---
@@ -113,11 +122,11 @@ LyricBar uses a modular, 4-tier lyrics provider architecture to maximize song co
 
 ---
 
-## 📲 Download
+## Download 📲
 
 👉 **[Download the Latest Release](https://github.com/Ishaanj2007/LyricBar/releases/latest)**
 
-1. Download `LyricBar-2.5.0.apk` (or architecture-specific variant) from the latest release assets.
+1. Download `LyricBar-2.6.0.apk` (or architecture-specific variant) from the latest release assets.
 2. Open the APK on your Android device.
 3. Allow installation from unknown sources if prompted.
 4. Launch LyricBar and grant the required permissions (Overlay & Notification Listener).
@@ -185,7 +194,7 @@ chmod +x gradlew
 # Build Debug APK
 ./gradlew :app:assembleDebug
 
-# Run Unit Tests (283 tests across 31 suites)
+# Run Unit Tests (332 tests across 37 suites)
 ./gradlew :app:testDebugUnitTest
 
 # Compile Android Instrumented Tests
@@ -207,10 +216,10 @@ LyricBar maintains automated test coverage across its data, parsing, HUD positio
 
 | Test Scope | Count | Status | Notes |
 | :--- | :---: | :---: | :--- |
-| **Local JVM Unit Tests** | 283 | **Passing (100%)** | 31 test suites in `app/src/test/java/` covering multi-provider fallback (`LRCLIB`, `lrc.red`, `KuGou`, `LyricsPlus`), LRC import bounds, HUD orientation positioning, 1s hold-to-reposition & drag rollback, HUD colour/contrast system, Room migrations, and 48h WorkManager updater / notification deduplication. |
-| **Executed Test Cases** | 283 | **283 Passed (0 failed)** | Verified via `:app:testDebugUnitTest`. |
+| **Local JVM Unit Tests** | 332 | **Passing (100%)** | 37 test suites in `app/src/test/java/` covering the 7-provider fallback chain (`LRCLIB`, `lrc.red`, `LyricsPlus`, `KuGou`, `Lyrica`, `LiriQo`, `Unison`), `TtmlParser`, LRC import bounds, `MediaSession` eligibility & pipeline filtering, HUD orientation positioning, 1s hold-to-reposition & drag rollback, Click-through overlay mode, Triple-tap HUD launch, Settings accordion state, HUD colour/contrast system, Room migrations, and 48h WorkManager updater / notification deduplication. |
+| **Executed Test Cases** | 332 | **332 Passed (0 failed)** | Verified via `:app:testDebugUnitTest`. |
 | **Instrumented Tests** | 1 | **Configured & Compiles** | Located in `app/src/androidTest/java/` using AndroidX Test Runner and JUnit4. |
-| **Total Test Methods** | 284 | — | 283 local unit tests + 1 instrumented test. |
+| **Total Test Methods** | 333 | — | 332 local unit tests + 1 instrumented test. |
 
 ---
 
@@ -230,7 +239,7 @@ LyricBar maintains automated test coverage across its data, parsing, HUD positio
 │   ├── Screenshot5_LyricBar.png      # Settings & Material Themes
 │   └── lyricbarlogo.png              # App Brand Logo
 ├── app/
-│   ├── build.gradle.kts              # Application build config & dependencies (v2.5.0)
+│   ├── build.gradle.kts              # Application build config & dependencies
 │   └── src/
 │       ├── main/
 │       │   ├── AndroidManifest.xml
@@ -238,11 +247,11 @@ LyricBar maintains automated test coverage across its data, parsing, HUD positio
 │       │   │   ├── LyricBarApp.kt
 │       │   │   ├── MainActivity.kt
 │       │   │   ├── data/             # Room DB, DataStore, Repositories & 48h WorkManager Updater
-│       │   │   ├── domain/           # Lyrics Timing Engine, Parser & Multi-Provider Clients
-│       │   │   ├── service/          # MediaListener, Overlay Service & HudPositioningEngine
+│       │   │   ├── domain/           # Lyrics Timing Engine, LRC/TTML Parsers & 7-Provider Clients
+│       │   │   ├── service/          # MediaListener, Eligibility Filter, Overlay Service & HudPositioningEngine
 │       │   │   └── ui/               # Responsive Compose Screens, MinimalOverlayView & Theme
 │       │   └── res/                  # Vector Assets, Bundled Google Fonts & XML Configs
-│       ├── test/                     # 283 Local Automated Unit Tests (31 test suites)
+│       ├── test/                     # 332 Local Automated Unit Tests (37 test suites)
 │       └── androidTest/              # Instrumented Android Tests
 ├── gradle/
 │   ├── libs.versions.toml            # Version Catalog
