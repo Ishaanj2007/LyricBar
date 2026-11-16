@@ -43,6 +43,7 @@ class OverlayService : Service() {
     private var currentX = 0
     private var currentY = 180
     private var isDragMode = false
+    private var isClickThroughMode = false
     private var hasAppliedInitialPrefs = false
     private var isInitializingLandscapeProfile = false
     private var currentPrefs = com.example.data.preferences.UserPreferences()
@@ -132,6 +133,11 @@ class OverlayService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_TOGGLE_DRAG_MODE -> {
+                if (isClickThroughMode) {
+                    updateOverlayFlags()
+                    updateNotification()
+                    return START_STICKY
+                }
                 isDragMode = !isDragMode
                 serviceScope.launch {
                     playbackManager.preferencesRepository.setDragRepositionMode(isDragMode)
@@ -158,10 +164,8 @@ class OverlayService : Service() {
         currentX = placeholderBounds.x
         currentY = placeholderBounds.y
 
-        val flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+        // Start non-touchable while hidden until persisted preferences apply
+        val flags = computeOverlayWindowFlags(clickThroughEnabled = true)
 
         val params = WindowManager.LayoutParams(
             placeholderBounds.widthPx,
@@ -258,7 +262,11 @@ class OverlayService : Service() {
             return
         }
 
-        val shouldShow = isDragMode || (playbackState.isPlaying && playbackState.hasActiveSession && playbackState.track != null)
+        val effectiveDragMode = resolveEffectiveDragMode(
+            dragModeRequested = isDragMode,
+            clickThroughEnabled = isClickThroughMode
+        )
+        val shouldShow = effectiveDragMode || (playbackState.isPlaying && playbackState.hasActiveSession && playbackState.track != null)
 
         if (shouldShow) {
             if (lastTargetVisible == true && view.visibility == android.view.View.VISIBLE && !isFadingOut && view.alpha >= 1f) {
@@ -392,13 +400,18 @@ class OverlayService : Service() {
         val view = overlayView ?: return
         val params = layoutParams ?: return
 
-        val flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+        val effectiveDragMode = resolveEffectiveDragMode(
+            dragModeRequested = isDragMode,
+            clickThroughEnabled = isClickThroughMode
+        )
+        if (isClickThroughMode) {
+            view.cancelActiveDrag()
+        }
+        view.isClickThroughEnabled = isClickThroughMode
+        view.isDragMode = effectiveDragMode
 
+        val flags = computeOverlayWindowFlags(clickThroughEnabled = isClickThroughMode)
         params.flags = flags
-        view.isDragMode = isDragMode
 
         try {
             wm.updateViewLayout(view, params)
@@ -514,8 +527,18 @@ class OverlayService : Service() {
                         }
                         view.primaryColor = resolvedPrimary
 
-                        // Update drag mode if changed externally from settings
-                        if (isDragMode != prefs.isDragRepositionMode) {
+                        // Synchronize click-through and drag modes when preferences load or change
+                        val effectiveDrag = resolveEffectiveDragMode(
+                            dragModeRequested = prefs.isDragRepositionMode,
+                            clickThroughEnabled = prefs.clickThroughOverlay
+                        )
+                        if (!hasAppliedInitialPrefs ||
+                            isClickThroughMode != prefs.clickThroughOverlay ||
+                            isDragMode != prefs.isDragRepositionMode ||
+                            view.isDragMode != effectiveDrag ||
+                            view.isClickThroughEnabled != prefs.clickThroughOverlay
+                        ) {
+                            isClickThroughMode = prefs.clickThroughOverlay
                             isDragMode = prefs.isDragRepositionMode
                             updateOverlayFlags()
                             updateNotification()
@@ -643,7 +666,11 @@ class OverlayService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val dragTitle = if (isDragMode) "Save Position (Lock)" else getString(R.string.notification_reposition)
+        val effectiveDrag = resolveEffectiveDragMode(
+            dragModeRequested = isDragMode,
+            clickThroughEnabled = isClickThroughMode
+        )
+        val dragTitle = if (effectiveDrag) "Save Position (Lock)" else getString(R.string.notification_reposition)
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.notification_title))
@@ -659,7 +686,11 @@ class OverlayService : Service() {
 
     private fun updateNotification() {
         val notificationManager = getSystemService(NotificationManager::class.java)
-        val status = if (isDragMode) "Repositioning active — drag lyrics on screen" else "Minimal Floating Lyrics active"
+        val status = when {
+            isClickThroughMode -> "Click-through active — touches pass through HUD"
+            resolveEffectiveDragMode(isDragMode, isClickThroughMode) -> "Repositioning active — drag lyrics on screen"
+            else -> "Minimal Floating Lyrics active"
+        }
         notificationManager.notify(NOTIFICATION_ID, buildNotification(status))
     }
 
@@ -694,6 +725,27 @@ class OverlayService : Service() {
 
         const val ACTION_TOGGLE_DRAG_MODE = "com.example.lyricbar.action.TOGGLE_DRAG_MODE"
         const val ACTION_STOP_OVERLAY = "com.example.lyricbar.action.STOP_OVERLAY"
+
+        const val BASE_OVERLAY_WINDOW_FLAGS: Int =
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+
+        fun computeOverlayWindowFlags(clickThroughEnabled: Boolean): Int {
+            return if (clickThroughEnabled) {
+                BASE_OVERLAY_WINDOW_FLAGS or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+            } else {
+                BASE_OVERLAY_WINDOW_FLAGS
+            }
+        }
+
+        fun resolveEffectiveDragMode(
+            dragModeRequested: Boolean,
+            clickThroughEnabled: Boolean
+        ): Boolean {
+            return dragModeRequested && !clickThroughEnabled
+        }
 
         fun start(context: Context) {
             val intent = Intent(context, OverlayService::class.java)

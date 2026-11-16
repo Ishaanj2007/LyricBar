@@ -508,5 +508,79 @@ class HudHoldGestureTest {
         assertEquals(155, persisted.overlayXPosition)
         assertEquals(410, persisted.overlayYPosition)
     }
+
+    @Test
+    fun `click-through mode blocks touch, tap resync, hold reposition, and edit drag until disabled`() = runBlocking {
+        val repo = createRepo("click_through_blocks_gestures")
+        val initialBounds = HudWindowBounds(x = 120, y = 300, width = 760, height = 140)
+        repo.setOverlayBounds(
+            x = initialBounds.x,
+            y = initialBounds.y,
+            widthPx = initialBounds.width,
+            heightPx = initialBounds.height,
+            orientation = HudOrientation.PORTRAIT
+        )
+        val harness = TestHudHarness(initialBounds, portraitGeometry(), repo)
+
+        assertFalse(harness.coordinator.setClickThroughEnabled(true))
+        assertTrue(harness.coordinator.isClickThroughEnabled)
+
+        // Normal touch / tap / 1s hold / edit drag must all be rejected while click-through is ON
+        assertFalse(harness.coordinator.onNormalDown(rawX = 200f, rawY = 320f, pointerId = 0))
+        assertFalse(harness.coordinator.onHoldTimeout(HudOrientation.PORTRAIT))
+        assertEquals(HudHoldGestureController.UpResult.NONE, harness.coordinator.onNormalUp())
+        assertEquals(0, harness.tapCount)
+        assertNull(harness.coordinator.onEditDown(HudOrientation.PORTRAIT, rawX = 200f, rawY = 320f))
+        assertFalse(harness.coordinator.isEditDragActive)
+        assertEquals(initialBounds, harness.windowBounds)
+        assertEquals(0, harness.commitCount)
+
+        // Disabling click-through immediately restores tap resync and 1s hold-to-reposition
+        assertFalse(harness.coordinator.setClickThroughEnabled(false))
+        assertFalse(harness.coordinator.isClickThroughEnabled)
+
+        assertTrue(harness.coordinator.onNormalDown(rawX = 200f, rawY = 320f, pointerId = 0))
+        assertEquals(HudHoldGestureController.UpResult.TRIGGER_TAP, harness.coordinator.onNormalUp())
+        assertEquals(1, harness.tapCount)
+
+        assertTrue(harness.coordinator.onNormalDown(rawX = 250f, rawY = 340f, pointerId = 0))
+        assertTrue(harness.coordinator.onHoldTimeout(HudOrientation.PORTRAIT))
+        assertTrue(harness.dragNormalBy(dx = 100, dy = 140, rawX = 350f, rawY = 480f))
+        assertEquals(HudHoldGestureController.UpResult.COMMIT_REPOSITION, harness.coordinator.onNormalUp())
+        assertEquals(HudWindowBounds(x = 220, y = 440, width = 760, height = 140), harness.windowBounds)
+        assertEquals(1, harness.commitCount)
+    }
+
+    @Test
+    fun `enabling click-through mid-drag rolls back HUD position without overwriting saved coordinates`() = runBlocking {
+        val repo = createRepo("click_through_mid_drag_rollback")
+        val initialBounds = HudWindowBounds(x = 130, y = 310, width = 760, height = 140)
+        repo.setOverlayBounds(
+            x = initialBounds.x,
+            y = initialBounds.y,
+            widthPx = initialBounds.width,
+            heightPx = initialBounds.height,
+            orientation = HudOrientation.PORTRAIT
+        )
+        val harness = TestHudHarness(initialBounds, portraitGeometry(), repo)
+
+        assertTrue(harness.coordinator.onNormalDown(rawX = 300f, rawY = 400f, pointerId = 0))
+        assertTrue(harness.coordinator.onHoldTimeout(HudOrientation.PORTRAIT))
+        assertTrue(harness.dragNormalBy(dx = 180, dy = 380, rawX = 480f, rawY = 780f))
+        assertEquals(HudWindowBounds(x = 310, y = 690, width = 760, height = 140), harness.windowBounds)
+
+        assertTrue(
+            "Enabling click-through mid-drag must cancel and roll back to original bounds",
+            harness.coordinator.setClickThroughEnabled(true)
+        )
+        assertEquals(initialBounds, harness.windowBounds)
+        assertEquals(0, harness.commitCount)
+        assertFalse(harness.coordinator.isTransactionActive)
+
+        val persisted = repo.userPreferencesFlow.first()
+        assertEquals(130, persisted.hudPortraitX)
+        assertEquals(310, persisted.hudPortraitY)
+    }
 }
+
 

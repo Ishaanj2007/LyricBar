@@ -656,6 +656,18 @@ class MinimalOverlayView(
             }
         }
 
+    var isClickThroughEnabled: Boolean = false
+        set(value) {
+            if (field != value) {
+                field = value
+                if (value) {
+                    cancelActiveDrag()
+                }
+                dragCoordinator.setClickThroughEnabled(value)
+                invalidate()
+            }
+        }
+
     var activeOrientation: HudOrientation = HudOrientation.PORTRAIT
     var displayGeometry: HudDisplayGeometry? = null
         set(value) {
@@ -704,7 +716,7 @@ class MinimalOverlayView(
         if (scheduledHoldToken != holdAttemptToken) {
             return@Runnable
         }
-        if (!isAttachedToWindow || visibility != VISIBLE || isDragMode) {
+        if (!isAttachedToWindow || visibility != VISIBLE || isDragMode || isClickThroughEnabled) {
             dragCoordinator.cancelActiveDrag()
             return@Runnable
         }
@@ -1856,8 +1868,8 @@ class MinimalOverlayView(
         canvas.restore() // Restore horizontal translation
         canvas.restore() // Restore container clipRect
 
-        // 3. EDIT MODE BOUNDING BOX & HANDLES (Only visible during edit mode, hidden during normal playback)
-        if (isDragMode) {
+        // 3. EDIT MODE BOUNDING BOX & HANDLES (Only visible during edit mode when click-through is disabled)
+        if (isDragMode && !isClickThroughEnabled) {
             val handleSize = 24f
             // Thin mint outline
             canvas.drawRect(2f, 2f, width - 2f, height - 2f, editBorderPaint)
@@ -1875,7 +1887,7 @@ class MinimalOverlayView(
             canvas.drawRect(width / 2f - edgePillW / 2f, height - edgePillH, width / 2f + edgePillW / 2f, height.toFloat(), editHandlePaint) // Bottom
             canvas.drawRect(0f, height / 2f - edgePillW / 2f, edgePillH, height / 2f + edgePillW / 2f, editHandlePaint) // Left
             canvas.drawRect(width - edgePillH, height / 2f - edgePillW / 2f, width.toFloat(), height / 2f + edgePillW / 2f, editHandlePaint) // Right
-        } else if (holdFeedbackProgress > 0.01f) {
+        } else if (!isClickThroughEnabled && holdFeedbackProgress > 0.01f) {
             drawHoldRepositionFeedback(canvas)
         }
     }
@@ -1964,8 +1976,20 @@ class MinimalOverlayView(
         }
     }
 
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (isClickThroughEnabled) {
+            cancelActiveDrag()
+            return false
+        }
+        return super.dispatchTouchEvent(event)
+    }
+
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (isClickThroughEnabled) {
+            cancelActiveDrag()
+            return false
+        }
         if (!isDragMode) {
             return handleNormalTouchEvent(event)
         }
@@ -2611,6 +2635,8 @@ class HudDragTransactionCoordinator(
         private set
     var isEditDragActive: Boolean = false
         private set
+    var isClickThroughEnabled: Boolean = false
+        private set
     var initialTouchX: Float = 0f
         private set
     var initialTouchY: Float = 0f
@@ -2620,12 +2646,21 @@ class HudDragTransactionCoordinator(
         get() = activeSnapshot != null &&
             (isEditDragActive || holdController.state == HudHoldGestureController.State.ACTIVE_REPOSITION)
 
+    fun setClickThroughEnabled(enabled: Boolean): Boolean {
+        isClickThroughEnabled = enabled
+        return if (enabled) cancelActiveDrag() else false
+    }
+
     fun onNormalDown(
         rawX: Float,
         rawY: Float,
         pointerId: Int,
         isOnInteractiveControl: Boolean = false
     ): Boolean {
+        if (isClickThroughEnabled) {
+            cancelActiveDrag()
+            return false
+        }
         if (isTransactionActive) {
             cancelActiveDrag()
         }
@@ -2637,14 +2672,24 @@ class HudDragTransactionCoordinator(
         )
     }
 
-    fun onNormalMultiPointerDown(): Boolean = holdController.onMultiPointerDown()
+    fun onNormalMultiPointerDown(): Boolean {
+        if (isClickThroughEnabled) return false
+        return holdController.onMultiPointerDown()
+    }
 
-    fun onNormalMovePending(rawX: Float, rawY: Float): Boolean = holdController.onMove(rawX, rawY)
+    fun onNormalMovePending(rawX: Float, rawY: Float): Boolean {
+        if (isClickThroughEnabled) return false
+        return holdController.onMove(rawX, rawY)
+    }
 
     fun onHoldTimeout(
         orientation: HudOrientation,
         elapsedMs: Long = holdController.holdDurationMs
     ): Boolean {
+        if (isClickThroughEnabled) {
+            cancelActiveDrag()
+            return false
+        }
         if (!holdController.onHoldTimeout(elapsedMs)) {
             return false
         }
@@ -2662,7 +2707,7 @@ class HudDragTransactionCoordinator(
         rawY: Float,
         computeTarget: (initialBounds: HudWindowBounds, dx: Int, dy: Int) -> HudWindowBounds
     ): Boolean {
-        if (holdController.state != HudHoldGestureController.State.ACTIVE_REPOSITION) {
+        if (isClickThroughEnabled || holdController.state != HudHoldGestureController.State.ACTIVE_REPOSITION) {
             return false
         }
         val snapshot = activeSnapshot ?: return false
@@ -2673,6 +2718,10 @@ class HudDragTransactionCoordinator(
     }
 
     fun onNormalUp(): HudHoldGestureController.UpResult {
+        if (isClickThroughEnabled) {
+            cancelActiveDrag()
+            return HudHoldGestureController.UpResult.NONE
+        }
         val result = holdController.onUp()
         when (result) {
             HudHoldGestureController.UpResult.TRIGGER_TAP -> {
@@ -2693,7 +2742,11 @@ class HudDragTransactionCoordinator(
         return result
     }
 
-    fun onEditDown(orientation: HudOrientation, rawX: Float, rawY: Float): HudDragSnapshot {
+    fun onEditDown(orientation: HudOrientation, rawX: Float, rawY: Float): HudDragSnapshot? {
+        if (isClickThroughEnabled) {
+            cancelActiveDrag()
+            return null
+        }
         if (isTransactionActive || holdController.state != HudHoldGestureController.State.IDLE) {
             cancelActiveDrag()
         }

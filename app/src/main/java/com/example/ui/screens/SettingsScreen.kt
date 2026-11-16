@@ -227,14 +227,15 @@ fun SettingsScreen(
 
     val sectionOverlay: @Composable () -> Unit = {
         // SECTION 1: FLOATING OVERLAY & TIMELINE (Behaviour, lyric colours & timeline sync)
+        val effectiveDragMode = livePreferences.isDragRepositionMode && !livePreferences.clickThroughOverlay
         val overlayBehaviorSummary = buildList {
-            add(
-                if (livePreferences.isDragRepositionMode) {
-                    "Drag mode on"
-                } else {
-                    "Hold ${HudHoldGestureController.HOLD_REPOSITION_SECONDS}s to move"
-                }
-            )
+            if (livePreferences.clickThroughOverlay) {
+                add("Click-through on")
+            } else if (effectiveDragMode) {
+                add("Drag mode on")
+            } else {
+                add("Hold ${HudHoldGestureController.HOLD_REPOSITION_SECONDS}s to move")
+            }
             if (livePreferences.singleLineLyrics) {
                 add("Single-line")
             }
@@ -254,30 +255,117 @@ fun SettingsScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 12.dp)
+                    ) {
                         Text(
                             text = "2D Drag Reposition Mode",
                             fontWeight = FontWeight.Medium,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = if (livePreferences.isDragRepositionMode) {
-                                "Touch enabled: drag & resize overlay anywhere on screen"
-                            } else {
-                                "Hold HUD ${HudHoldGestureController.HOLD_REPOSITION_SECONDS}s to reposition; toggle ON for resize handles"
+                            text = when {
+                                livePreferences.clickThroughOverlay ->
+                                    "Paused while Click-through Overlay is enabled"
+                                effectiveDragMode ->
+                                    "Touch enabled: drag & resize overlay anywhere on screen"
+                                else ->
+                                    "Hold HUD ${HudHoldGestureController.HOLD_REPOSITION_SECONDS}s to reposition; toggle ON for resize handles"
                             },
                             fontSize = 12.sp,
-                            color = if (livePreferences.isDragRepositionMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            color = when {
+                                livePreferences.clickThroughOverlay ->
+                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
+                                effectiveDragMode ->
+                                    MaterialTheme.colorScheme.primary
+                                else ->
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                            }
                         )
                     }
                     Switch(
-                        checked = livePreferences.isDragRepositionMode,
+                        checked = effectiveDragMode,
+                        enabled = !livePreferences.clickThroughOverlay,
                         onCheckedChange = { isDrag ->
                             coroutineScope.launch {
                                 playbackManager.preferencesRepository.setDragRepositionMode(isDrag)
                             }
                         },
                         modifier = Modifier.testTag("settings_drag_mode_switch")
+                    )
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
+                // Toggle: Click-through Overlay
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("settings_click_through_row"),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 12.dp)
+                    ) {
+                        Text(
+                            text = "Click-through Overlay",
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Allow touches to pass through the floating HUD to the app underneath.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Surface(
+                            shape = RoundedCornerShape(999.dp),
+                            color = if (livePreferences.clickThroughOverlay) {
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                            } else {
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                            },
+                            border = BorderStroke(
+                                width = 1.dp,
+                                color = if (livePreferences.clickThroughOverlay) {
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.38f)
+                                } else {
+                                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                                }
+                            )
+                        ) {
+                            Text(
+                                text = if (livePreferences.clickThroughOverlay) {
+                                    "On • Touches pass through; HUD gestures disabled"
+                                } else {
+                                    "Off • HUD touch & hold gestures enabled"
+                                },
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = if (livePreferences.clickThroughOverlay) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                modifier = Modifier
+                                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                                    .testTag("settings_click_through_status")
+                            )
+                        }
+                    }
+                    Switch(
+                        checked = livePreferences.clickThroughOverlay,
+                        onCheckedChange = { enabled ->
+                            coroutineScope.launch {
+                                playbackManager.preferencesRepository.setClickThroughOverlay(enabled)
+                            }
+                        },
+                        modifier = Modifier.testTag("settings_click_through_switch")
                     )
                 }
 

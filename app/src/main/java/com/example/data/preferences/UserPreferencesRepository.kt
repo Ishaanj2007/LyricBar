@@ -166,6 +166,7 @@ data class UserPreferences(
     val upwardAnimationEnabled: Boolean = true,
     val animationStyle: String = OverlayAnimationStyle.KARAOKE.name,
     val isDragRepositionMode: Boolean = false,
+    val clickThroughOverlay: Boolean = false,
     val autoShowOnPlayback: Boolean = true,
     val autoFetchLyrics: Boolean = true,
     val lyricsProvider: LyricsProviderPreference = LyricsProviderPreference.AUTO,
@@ -266,6 +267,7 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
         val ANIMATION_STYLE = stringPreferencesKey("animation_style")
         val APPLE_MUSIC_MESH_BLUR = booleanPreferencesKey("apple_music_mesh_blur")
         val IS_DRAG_MODE = booleanPreferencesKey("is_drag_mode")
+        val CLICK_THROUGH_OVERLAY = booleanPreferencesKey("click_through_overlay")
         val AUTO_SHOW_ON_PLAYBACK = booleanPreferencesKey("auto_show_on_playback")
         val AUTO_FETCH_LYRICS = booleanPreferencesKey("auto_fetch_lyrics")
         val LYRICS_PROVIDER = stringPreferencesKey("lyrics_provider")
@@ -408,6 +410,7 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
                 upwardAnimationEnabled = preferences[PreferencesKeys.UPWARD_ANIMATION] ?: true,
                 animationStyle = animStyle,
                 isDragRepositionMode = preferences[PreferencesKeys.IS_DRAG_MODE] ?: false,
+                clickThroughOverlay = preferences[PreferencesKeys.CLICK_THROUGH_OVERLAY] ?: false,
                 autoShowOnPlayback = preferences[PreferencesKeys.AUTO_SHOW_ON_PLAYBACK] ?: true,
                 autoFetchLyrics = preferences[PreferencesKeys.AUTO_FETCH_LYRICS] ?: true,
                 lyricsProvider = lyricsProvider,
@@ -794,6 +797,10 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
 
     suspend fun setDragRepositionMode(dragMode: Boolean) {
         dataStore.edit { it[PreferencesKeys.IS_DRAG_MODE] = dragMode }
+    }
+
+    suspend fun setClickThroughOverlay(enabled: Boolean) {
+        dataStore.edit { it[PreferencesKeys.CLICK_THROUGH_OVERLAY] = enabled }
     }
 
     suspend fun setAutoShowOnPlayback(enabled: Boolean) {
