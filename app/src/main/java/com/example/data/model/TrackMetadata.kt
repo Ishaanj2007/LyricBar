@@ -74,6 +74,16 @@ data class TrackMetadata(
     val isValidTrack: Boolean
         get() = title.isNotBlank() && lookupKey.isNotBlank() && lookupKey != "unknown artist - unknown title"
 
+    val hasRealMusicAttribution: Boolean
+        get() {
+            val cleanTitle = title.trim()
+            val cleanArtist = artist.trim()
+            return cleanTitle.isNotBlank() &&
+                cleanArtist.isNotBlank() &&
+                !com.example.service.MediaSessionEligibilityEvaluator.isGenericOrPlaceholderTitle(cleanTitle) &&
+                !com.example.service.MediaSessionEligibilityEvaluator.isPlaceholderOrInvalidArtist(cleanArtist)
+        }
+
     companion object {
         /**
          * Strips ONLY media wrapper clutter (YouTube / video tags) while strictly preserving

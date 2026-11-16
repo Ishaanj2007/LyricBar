@@ -3,20 +3,23 @@ package com.example.service
 import android.content.Context
 import android.media.MediaMetadata
 import android.media.session.MediaController
-import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.util.Log
+import com.example.data.model.LyricLine
 import com.example.data.model.ParsedLyrics
 import com.example.data.model.PlaybackStateInfo
 import com.example.data.model.TrackMetadata
 import com.example.data.preferences.LyricsProviderPreference
 import com.example.data.preferences.UserPreferencesRepository
 import com.example.data.repository.CompositeLyricsRepository
-import com.example.domain.parser.LrcParser
-import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 
 class MediaPlaybackManager private constructor(private val context: Context) {
 
@@ -24,46 +27,54 @@ class MediaPlaybackManager private constructor(private val context: Context) {
     private val lyricsRepository = CompositeLyricsRepository.getInstance(context)
     val preferencesRepository = UserPreferencesRepository(context)
 
-    private val _playbackState = MutableStateFlow(PlaybackStateInfo())
-    val playbackState: StateFlow<PlaybackStateInfo> = _playbackState.asStateFlow()
+    private val pipeline = MediaSessionPipelineEngine(
+        scope = scope,
+        repository = CompositeLyricsPipelineRepository(lyricsRepository),
+        offsetStore = PreferencesTrackOffsetStore(preferencesRepository)
+    )
 
-    private val _currentLyrics = MutableStateFlow<ParsedLyrics?>(null)
-    val currentLyrics: StateFlow<ParsedLyrics?> = _currentLyrics.asStateFlow()
-
-    private val _activeLyricLine = MutableStateFlow<String?>(null)
-    val activeLyricLine: StateFlow<String?> = _activeLyricLine.asStateFlow()
-
-    private val _activeLyricObject = MutableStateFlow<com.example.data.model.LyricLine?>(null)
-    val activeLyricObject: StateFlow<com.example.data.model.LyricLine?> = _activeLyricObject.asStateFlow()
-
-    private val _activeLyricIndex = MutableStateFlow(-1)
-    val activeLyricIndex: StateFlow<Int> = _activeLyricIndex.asStateFlow()
-
-    private val _trackOffsetMs = MutableStateFlow(0L)
-    val trackOffsetMs: StateFlow<Long> = _trackOffsetMs.asStateFlow()
-
-    private val _isLoadingLyrics = MutableStateFlow(false)
-    val isLoadingLyrics: StateFlow<Boolean> = _isLoadingLyrics.asStateFlow()
+    val playbackState: StateFlow<PlaybackStateInfo> = pipeline.playbackState
+    val currentLyrics: StateFlow<ParsedLyrics?> = pipeline.currentLyrics
+    val activeLyricLine: StateFlow<String?> = pipeline.activeLyricLine
+    val activeLyricObject: StateFlow<LyricLine?> = pipeline.activeLyricObject
+    val activeLyricIndex: StateFlow<Int> = pipeline.activeLyricIndex
+    val trackOffsetMs: StateFlow<Long> = pipeline.trackOffsetMs
+    val isLoadingLyrics: StateFlow<Boolean> = pipeline.isLoadingLyrics
 
     var activeController: MediaController? = null
         private set
 
     var onSessionDestroyedListener: (() -> Unit)? = null
 
-    private var currentSessionToken: MediaSession.Token? = null
-    private var currentTrackSessionToken: MediaSession.Token? = null
-
-    private var fetchJob: Job? = null
     private var tickerJob: Job? = null
 
-    // Controller callback
     private val controllerCallback = object : MediaController.Callback() {
         override fun onMetadataChanged(metadata: MediaMetadata?) {
-            updateFromMetadata(metadata, force = false)
+            val controller = activeController ?: return
+            val pkg = safePackageName(controller)
+            val appName = TrackMetadata.resolveAppName(pkg, context.packageManager)
+            val pbState = safePlaybackState(controller)
+            val snapshot = MediaSessionEligibilityEvaluator.fromMediaMetadata(
+                packageName = pkg,
+                appName = appName,
+                metadata = metadata,
+                playbackState = pbState
+            )
+            pipeline.updateMetadata(controller.sessionToken, snapshot, force = false)
+            if (pipeline.currentSessionToken == null) {
+                detachControllerCallbackOnly()
+                onSessionDestroyedListener?.invoke()
+            }
         }
 
         override fun onPlaybackStateChanged(state: PlaybackState?) {
+            val controller = activeController ?: return
             updateFromPlaybackState(state)
+            // Re-evaluate metadata + playback state when transitioning to an active state if needed
+            if (pipeline.currentSessionToken == null) {
+                detachControllerCallbackOnly()
+                onSessionDestroyedListener?.invoke()
+            }
         }
 
         override fun onSessionDestroyed() {
@@ -71,37 +82,20 @@ class MediaPlaybackManager private constructor(private val context: Context) {
         }
     }
 
-    var autoFetchLyrics: Boolean = true
-        private set
+    val autoFetchLyrics: Boolean
+        get() = pipeline.autoFetchLyrics
 
-    var selectedLyricsProvider: LyricsProviderPreference = LyricsProviderPreference.AUTO
-        private set
+    val selectedLyricsProvider: LyricsProviderPreference
+        get() = pipeline.selectedLyricsProvider
 
     init {
         startLyricsTicker()
         scope.launch {
             preferencesRepository.userPreferencesFlow.collect { prefs ->
-                val previousAutoFetch = autoFetchLyrics
-                val previousProvider = selectedLyricsProvider
-                autoFetchLyrics = prefs.autoFetchLyrics
-                selectedLyricsProvider = prefs.lyricsProvider
-
-                if (previousProvider != selectedLyricsProvider) {
-                    val currentTrack = _playbackState.value.track
-                    if (currentTrack != null) {
-                        fetchLyricsForTrack(currentTrack, forceNetwork = false)
-                    }
-                } else if (!previousAutoFetch && autoFetchLyrics) {
-                    val currentTrack = _playbackState.value.track
-                    if (currentTrack != null && _currentLyrics.value == null && !_isLoadingLyrics.value) {
-                        fetchLyricsForTrack(currentTrack, forceNetwork = false)
-                    }
-                } else if (previousAutoFetch && !autoFetchLyrics) {
-                    if (_isLoadingLyrics.value && _currentLyrics.value == null) {
-                        fetchJob?.cancel()
-                        _isLoadingLyrics.value = false
-                    }
-                }
+                pipeline.onPreferencesChanged(
+                    newAutoFetch = prefs.autoFetchLyrics,
+                    newProvider = prefs.lyricsProvider
+                )
             }
         }
     }
@@ -118,19 +112,24 @@ class MediaPlaybackManager private constructor(private val context: Context) {
             return
         }
 
-        val isSameSession = activeController?.sessionToken == controller.sessionToken
-        if (isSameSession) {
-            // Already attached to this controller. Refresh metadata and playback state without re-registering callbacks.
-            updateFromMetadata(controller.metadata, force = false)
-            updateFromPlaybackState(controller.playbackState)
+        val snapshot = MediaSessionEligibilityEvaluator.fromMediaController(controller, context.packageManager)
+        val evaluation = MediaSessionEligibilityEvaluator.evaluate(snapshot)
+        if (!evaluation.isEligible) {
+            detachActiveController()
             return
         }
 
-        // Switching or attaching a new controller
-        detachActiveControllerInternal()
+        val isSameSession = activeController?.sessionToken == controller.sessionToken
+        if (isSameSession) {
+            pipeline.attachSession(controller.sessionToken, snapshot)
+            if (pipeline.currentSessionToken == null) {
+                detachControllerCallbackOnly()
+            }
+            return
+        }
 
+        detachControllerCallbackOnly()
         activeController = controller
-        currentSessionToken = controller.sessionToken
 
         try {
             controller.registerCallback(controllerCallback, android.os.Handler(android.os.Looper.getMainLooper()))
@@ -138,10 +137,10 @@ class MediaPlaybackManager private constructor(private val context: Context) {
             Log.w("MediaPlaybackManager", "Error registering controller callback: ${e.message}")
         }
 
-        // Force metadata update for a new controller so a new session/track is detected
-        // even if it shares the same title/artist as the previous session.
-        updateFromMetadata(controller.metadata, force = true)
-        updateFromPlaybackState(controller.playbackState)
+        val attached = pipeline.attachSession(controller.sessionToken, snapshot)
+        if (!attached) {
+            detachControllerCallbackOnly()
+        }
     }
 
     fun handleNoActiveSessions() {
@@ -158,278 +157,36 @@ class MediaPlaybackManager private constructor(private val context: Context) {
         onSessionDestroyedListener?.invoke()
     }
 
-    private fun detachActiveControllerInternal() {
+    private fun detachControllerCallbackOnly() {
         val old = activeController
         activeController = null
-        currentSessionToken = null
         try {
             old?.unregisterCallback(controllerCallback)
         } catch (_: Exception) {}
     }
 
     private fun detachActiveController() {
-        detachActiveControllerInternal()
-        lastRecordedTrackKey = null
-        // Mark playback as inactive; freeze position and preserve last lyric line & track metadata
-        _playbackState.value = _playbackState.value.copy(
-            isPlaying = false,
-            hasActiveSession = false,
-            lastUpdatedMs = System.currentTimeMillis()
-        )
-    }
-
-    private fun updateFromMetadata(metadata: MediaMetadata?, force: Boolean = false) {
-        if (metadata == null) return
-
-        val rawTitle = metadata.getString(MediaMetadata.METADATA_KEY_TITLE)
-            ?.trim()?.takeIf { it.isNotBlank() }
-            ?: metadata.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE)
-            ?.trim()?.takeIf { it.isNotBlank() }
-
-        // If title is missing or blank in this update, reject it to avoid overwriting valid playing tracks
-        // or inserting empty/corrupted history records
-        if (rawTitle.isNullOrBlank()) {
-            return
-        }
-
-        val title = rawTitle
-
-        val rawArtist = metadata.getString(MediaMetadata.METADATA_KEY_ARTIST)
-            ?.trim()?.takeIf { it.isNotBlank() }
-            ?: metadata.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
-            ?.trim()?.takeIf { it.isNotBlank() }
-            ?: metadata.getString(MediaMetadata.METADATA_KEY_AUTHOR)
-            ?.trim()?.takeIf { it.isNotBlank() }
-            ?: "Unknown Artist"
-        val artist = rawArtist
-
-        val album = (metadata.getString(MediaMetadata.METADATA_KEY_ALBUM)
-            ?: metadata.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE)
-            ?: "").trim()
-        val durationMs = metadata.getLong(MediaMetadata.METADATA_KEY_DURATION)
-        val durationSec = if (durationMs > 0) (durationMs / 1000).toInt() else 0
-        val artUri = (metadata.getString(MediaMetadata.METADATA_KEY_ART_URI)
-            ?: metadata.getString(MediaMetadata.METADATA_KEY_ALBUM_ART_URI)
-            ?: metadata.getString(MediaMetadata.METADATA_KEY_DISPLAY_ICON_URI)
-            ?: metadata.description?.iconUri?.toString())?.trim()?.takeIf { it.isNotBlank() }
-
-        val artBitmap = try {
-            metadata.getBitmap(MediaMetadata.METADATA_KEY_ART)
-                ?: metadata.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
-                ?: metadata.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON)
-                ?: metadata.description?.iconBitmap
-        } catch (_: Throwable) {
-            null
-        }
-
-        val pkgName = activeController?.packageName ?: ""
-        val appName = TrackMetadata.resolveAppName(pkgName, context.packageManager)
-
-        val track = TrackMetadata(
-            title = title,
-            artist = artist,
-            album = album,
-            durationSec = durationSec,
-            sourcePackage = pkgName,
-            sourceAppName = appName,
-            albumArtUri = artUri,
-            albumArtBitmap = artBitmap
-        )
-
-        val sessionToken = activeController?.sessionToken
-        val isNewSession = sessionToken != null && sessionToken != currentTrackSessionToken
-        val currentTrack = _playbackState.value.track
-        val isDifferentPlayer = currentTrack?.sourcePackage != track.sourcePackage
-
-        if (force || isNewSession || isDifferentPlayer || currentTrack?.key != track.key) {
-            currentTrackSessionToken = sessionToken
-            _playbackState.value = _playbackState.value.copy(
-                track = track,
-                hasActiveSession = true
-            )
-            onTrackChanged(track)
-        } else if (currentTrack != track) {
-            _playbackState.value = _playbackState.value.copy(
-                track = track,
-                hasActiveSession = true
-            )
-        }
+        detachControllerCallbackOnly()
+        pipeline.invalidateActiveSession(clearTrack = true)
     }
 
     fun updateFromPlaybackState(state: PlaybackState?) {
-        if (state == null) {
-            if (_playbackState.value.isPlaying || _playbackState.value.hasActiveSession) {
-                _playbackState.value = _playbackState.value.copy(
-                    isPlaying = false,
-                    hasActiveSession = false,
-                    lastUpdatedMs = System.currentTimeMillis()
-                )
-            }
-            return
-        }
-
-        val rawState = state.state
-        val isExplicitStoppedOrNone = rawState == PlaybackState.STATE_STOPPED ||
-            rawState == PlaybackState.STATE_NONE ||
-            rawState == PlaybackState.STATE_ERROR
-
-        val isPlaying = when (rawState) {
-            PlaybackState.STATE_PLAYING -> true
-            PlaybackState.STATE_BUFFERING, PlaybackState.STATE_CONNECTING -> {
-                // Prevent UI and floating overlay flicker during temporary audio/network buffering while playing
-                _playbackState.value.isPlaying
-            }
-            else -> false
-        }
-
-        val position = state.position
-        val speed = if (rawState == PlaybackState.STATE_BUFFERING || rawState == PlaybackState.STATE_CONNECTING) {
+        val controller = activeController ?: return
+        val speed = if (state == null) {
+            1.0f
+        } else if (state.state == PlaybackState.STATE_BUFFERING || state.state == PlaybackState.STATE_CONNECTING) {
             0.0f
         } else {
             state.playbackSpeed
         }
-        val validPosition = if (position >= 0L) position else _playbackState.value.positionMs
-
-        // If loop/repeat replayed the track from beginning after playing significantly into the track
-        val isReplay = isPlaying &&
-            _playbackState.value.positionMs > 20_000L &&
-            validPosition < 3_000L
-        if (isReplay) {
-            lastRecordedTrackKey = null
-        }
-
-        val hasSession = activeController != null && !isExplicitStoppedOrNone
-
-        _playbackState.value = _playbackState.value.copy(
-            isPlaying = isPlaying,
-            hasActiveSession = hasSession,
-            positionMs = validPosition,
-            playbackSpeed = if (speed > 0f) speed else 1.0f,
-            lastUpdatedMs = System.currentTimeMillis()
+        pipeline.updatePlaybackState(
+            token = controller.sessionToken,
+            rawState = state?.state,
+            positionMs = state?.position ?: -1L,
+            speed = speed
         )
-
-        if (isExplicitStoppedOrNone) {
-            detachActiveController()
-            return
-        }
-
-        if (isPlaying) {
-            recordSessionIfPlaying(_playbackState.value.track)
-        }
-
-        // Immediately sync active lyric line on playback/seek update so highlight is never stale
-        val track = _playbackState.value.track
-        if (track != null) {
-            updateActiveLyrics(validPosition, _trackOffsetMs.value)
-        }
-    }
-
-    private fun updateActiveLyrics(currentPos: Long, offset: Long) {
-        val lyrics = _currentLyrics.value
-        if (lyrics != null && lyrics.hasValidLyrics && lyrics.isSynced) {
-            val activeIdx = lyrics.findActiveIndex(currentPos, offset)
-            val activeObj = if (activeIdx in lyrics.lines.indices) lyrics.lines[activeIdx] else null
-            val lineText = activeObj?.text?.trim()
-            val cleanText = if (lineText.isNullOrBlank() || lineText.equals("null", ignoreCase = true) || lineText.equals("undefined", ignoreCase = true)) null else lineText
-
-            if (_activeLyricIndex.value != activeIdx) {
-                _activeLyricIndex.value = activeIdx
-            }
-            if (_activeLyricObject.value != activeObj) {
-                _activeLyricObject.value = activeObj
-            }
-            if (_activeLyricLine.value != cleanText) {
-                _activeLyricLine.value = cleanText
-            }
-        } else if (lyrics != null && lyrics.hasValidLyrics && !lyrics.isSynced) {
-            if (_activeLyricIndex.value != 0 && lyrics.lines.isNotEmpty()) {
-                _activeLyricIndex.value = 0
-            }
-            val activeObj = lyrics.getActiveLyricLine(currentPos, offset)
-            val lineText = activeObj?.text?.trim()
-            val cleanText = if (lineText.isNullOrBlank() || lineText.equals("null", ignoreCase = true) || lineText.equals("undefined", ignoreCase = true)) null else lineText
-
-            if (_activeLyricObject.value != activeObj) {
-                _activeLyricObject.value = activeObj
-            }
-            if (_activeLyricLine.value != cleanText) {
-                _activeLyricLine.value = cleanText
-            }
-        } else {
-            if (_activeLyricIndex.value != -1) _activeLyricIndex.value = -1
-            if (_activeLyricObject.value != null) _activeLyricObject.value = null
-            if (_activeLyricLine.value != null) _activeLyricLine.value = null
-        }
-    }
-
-    private var offsetJob: Job? = null
-    private var lastRecordedTrackKey: String? = null
-
-    private fun recordSessionIfPlaying(track: TrackMetadata?) {
-        if (track == null || !track.isValidTrack) return
-        if (!_playbackState.value.isPlaying) return
-
-        if (lastRecordedTrackKey == track.key) {
-            return
-        }
-
-        lastRecordedTrackKey = track.key
-        scope.launch {
-            lyricsRepository.recordHistory(track)
-        }
-    }
-
-    private fun onTrackChanged(track: TrackMetadata) {
-        // Cancel any pending stale network requests and offset collectors
-        fetchJob?.cancel()
-        offsetJob?.cancel()
-
-        _currentLyrics.value = null
-        _activeLyricIndex.value = -1
-        _activeLyricObject.value = null
-        _activeLyricLine.value = null
-
-        if (_playbackState.value.isPlaying) {
-            recordSessionIfPlaying(track)
-        }
-
-        // Load persisted offset for this specific track
-        offsetJob = scope.launch {
-            preferencesRepository.getTrackOffsetFlow(track.identityKey, track.lookupKey).collect { offset ->
-                _trackOffsetMs.value = offset
-            }
-        }
-
-        fetchLyricsForTrack(track, forceNetwork = false)
-    }
-
-    private fun fetchLyricsForTrack(track: TrackMetadata, forceNetwork: Boolean = false) {
-        fetchJob?.cancel()
-        _isLoadingLyrics.value = true
-
-        fetchJob = scope.launch {
-            val result = lyricsRepository.getOrFetchLyrics(
-                track = track,
-                forceNetwork = forceNetwork,
-                allowNetwork = autoFetchLyrics || forceNetwork,
-                providerPreference = selectedLyricsProvider
-            )
-            _isLoadingLyrics.value = false
-            if (result.isSuccess) {
-                val lyrics = result.getOrNull()
-                if (lyrics != null && lyrics.hasValidLyrics) {
-                    _currentLyrics.value = lyrics
-                    val currentPos = _playbackState.value.calculatedPositionMs
-                    val offset = _trackOffsetMs.value
-                    updateActiveLyrics(currentPos, offset)
-                } else {
-                    _currentLyrics.value = null
-                    updateActiveLyrics(0L, 0L)
-                }
-            } else {
-                _currentLyrics.value = null
-                updateActiveLyrics(0L, 0L)
-            }
+        if (pipeline.currentSessionToken == null) {
+            detachControllerCallbackOnly()
         }
     }
 
@@ -437,30 +194,26 @@ class MediaPlaybackManager private constructor(private val context: Context) {
         tickerJob?.cancel()
         tickerJob = scope.launch {
             while (isActive) {
-                // Periodically verify controller playback state to prevent any state desync
                 try {
                     val controller = activeController
                     val realState = controller?.playbackState
-                    if (realState != null) {
+                    if (controller != null && realState != null) {
                         val realPlaying = realState.state == PlaybackState.STATE_PLAYING
-                        if (realPlaying != _playbackState.value.isPlaying ||
-                            (realState.state == PlaybackState.STATE_STOPPED && _playbackState.value.hasActiveSession)) {
+                        val stateValue = playbackState.value
+                        val isStoppedOrError = realState.state == PlaybackState.STATE_STOPPED ||
+                            realState.state == PlaybackState.STATE_NONE ||
+                            realState.state == PlaybackState.STATE_ERROR
+                        if (realPlaying != stateValue.isPlaying ||
+                            (isStoppedOrError && stateValue.hasActiveSession)
+                        ) {
                             updateFromPlaybackState(realState)
                         }
                     }
                 } catch (_: Exception) {}
 
-                val state = _playbackState.value
-                val lyrics = _currentLyrics.value
+                pipeline.tickActiveLyrics()
 
-                // Only advance active lyric line when playback is actively playing and lyrics are synchronized
-                if (state.isPlaying && state.track != null && lyrics != null && lyrics.isSynced) {
-                    val currentPos = state.calculatedPositionMs
-                    val offset = _trackOffsetMs.value
-                    updateActiveLyrics(currentPos, offset)
-                }
-
-                if (!state.isPlaying) {
+                if (!playbackState.value.isPlaying) {
                     delay(300)
                 } else {
                     delay(50)
@@ -470,52 +223,21 @@ class MediaPlaybackManager private constructor(private val context: Context) {
     }
 
     fun adjustTrackOffset(deltaMs: Long) {
-        val currentTrack = _playbackState.value.track ?: return
-        val newOffset = _trackOffsetMs.value + deltaMs
-        _trackOffsetMs.value = newOffset
-        scope.launch {
-            preferencesRepository.setTrackOffset(currentTrack.key, newOffset)
-        }
-        val lyrics = _currentLyrics.value
-        if (lyrics != null && lyrics.isSynced) {
-            val currentPos = _playbackState.value.calculatedPositionMs
-            updateActiveLyrics(currentPos, newOffset)
-        }
+        pipeline.adjustTrackOffset(deltaMs)
     }
 
     fun setExplicitOffset(offsetMs: Long) {
-        val currentTrack = _playbackState.value.track ?: return
-        _trackOffsetMs.value = offsetMs
-        scope.launch {
-            preferencesRepository.setTrackOffset(currentTrack.key, offsetMs)
-        }
-        val lyrics = _currentLyrics.value
-        if (lyrics != null && lyrics.isSynced) {
-            val currentPos = _playbackState.value.calculatedPositionMs
-            updateActiveLyrics(currentPos, offsetMs)
-        }
+        pipeline.setExplicitOffset(offsetMs)
     }
 
     suspend fun saveImportedLyrics(
         track: TrackMetadata,
         content: String,
         source: String = "Local Import"
-    ): ParsedLyrics {
-        val parsed = lyricsRepository.saveImportedLyrics(track, content, source)
-        setManualLyrics(parsed)
-        return parsed
-    }
+    ): ParsedLyrics = pipeline.saveImportedLyrics(track, content, source)
 
     fun setManualLyrics(lyrics: ParsedLyrics) {
-        if (lyrics.hasValidLyrics) {
-            _currentLyrics.value = lyrics
-            val currentPos = _playbackState.value.calculatedPositionMs
-            val offset = _trackOffsetMs.value
-            updateActiveLyrics(currentPos, offset)
-        } else {
-            _currentLyrics.value = null
-            updateActiveLyrics(0L, 0L)
-        }
+        pipeline.setManualLyrics(lyrics)
     }
 
     private fun isControllerControllable(controller: MediaController?): Boolean {
@@ -533,13 +255,15 @@ class MediaPlaybackManager private constructor(private val context: Context) {
             handleSessionUnavailable()
             return
         }
+        val expectedToken = controller.sessionToken
+        val expectedGeneration = pipeline.sessionGeneration
         try {
             val controls = controller.transportControls ?: run {
                 handleSessionUnavailable()
                 return
             }
             val state = controller.playbackState
-            val isPlaying = state?.state == PlaybackState.STATE_PLAYING || _playbackState.value.isPlaying
+            val isPlaying = state?.state == PlaybackState.STATE_PLAYING || playbackState.value.isPlaying
             val actions = state?.actions ?: 0L
 
             if (isPlaying) {
@@ -551,18 +275,14 @@ class MediaPlaybackManager private constructor(private val context: Context) {
                     controls.pause()
                 }
             } else {
-                if (actions == 0L || (actions and PlaybackState.ACTION_PLAY) != 0L || (actions and PlaybackState.ACTION_PLAY_PAUSE) != 0L) {
-                    controls.play()
-                } else {
-                    controls.play()
-                }
+                controls.play()
             }
 
             scope.launch {
                 delay(80)
-                activeController?.playbackState?.let { updateFromPlaybackState(it) }
+                refreshIfSameGeneration(expectedToken, expectedGeneration, refreshMetadata = false)
                 delay(180)
-                activeController?.playbackState?.let { updateFromPlaybackState(it) }
+                refreshIfSameGeneration(expectedToken, expectedGeneration, refreshMetadata = false)
             }
         } catch (e: Exception) {
             Log.w("MediaPlaybackManager", "Error in togglePlayPause: ${e.message}")
@@ -578,6 +298,8 @@ class MediaPlaybackManager private constructor(private val context: Context) {
             handleSessionUnavailable()
             return
         }
+        val expectedToken = controller.sessionToken
+        val expectedGeneration = pipeline.sessionGeneration
         try {
             val controls = controller.transportControls ?: run {
                 handleSessionUnavailable()
@@ -586,10 +308,7 @@ class MediaPlaybackManager private constructor(private val context: Context) {
             controls.skipToNext()
             scope.launch {
                 delay(100)
-                activeController?.let {
-                    updateFromMetadata(it.metadata, force = false)
-                    updateFromPlaybackState(it.playbackState)
-                }
+                refreshIfSameGeneration(expectedToken, expectedGeneration, refreshMetadata = true)
             }
         } catch (e: Exception) {
             Log.w("MediaPlaybackManager", "Error in next: ${e.message}")
@@ -603,6 +322,8 @@ class MediaPlaybackManager private constructor(private val context: Context) {
             handleSessionUnavailable()
             return
         }
+        val expectedToken = controller.sessionToken
+        val expectedGeneration = pipeline.sessionGeneration
         try {
             val controls = controller.transportControls ?: run {
                 handleSessionUnavailable()
@@ -611,10 +332,7 @@ class MediaPlaybackManager private constructor(private val context: Context) {
             controls.skipToPrevious()
             scope.launch {
                 delay(100)
-                activeController?.let {
-                    updateFromMetadata(it.metadata, force = false)
-                    updateFromPlaybackState(it.playbackState)
-                }
+                refreshIfSameGeneration(expectedToken, expectedGeneration, refreshMetadata = true)
             }
         } catch (e: Exception) {
             Log.w("MediaPlaybackManager", "Error in previous: ${e.message}")
@@ -628,24 +346,18 @@ class MediaPlaybackManager private constructor(private val context: Context) {
             handleSessionUnavailable()
             return
         }
+        val expectedToken = controller.sessionToken
+        val expectedGeneration = pipeline.sessionGeneration
         try {
             val controls = controller.transportControls ?: run {
                 handleSessionUnavailable()
                 return
             }
             controls.seekTo(positionMs)
-            // Immediately reflect seeked position in local state
-            _playbackState.value = _playbackState.value.copy(
-                positionMs = positionMs,
-                lastUpdatedMs = System.currentTimeMillis()
-            )
-            val lyrics = _currentLyrics.value
-            if (lyrics != null && lyrics.isSynced) {
-                updateActiveLyrics(positionMs, _trackOffsetMs.value)
-            }
+            pipeline.updateSeekPreviewPosition(positionMs)
             scope.launch {
                 delay(80)
-                activeController?.playbackState?.let { updateFromPlaybackState(it) }
+                refreshIfSameGeneration(expectedToken, expectedGeneration, refreshMetadata = false)
             }
         } catch (e: Exception) {
             Log.w("MediaPlaybackManager", "Error in seekTo: ${e.message}")
@@ -653,66 +365,70 @@ class MediaPlaybackManager private constructor(private val context: Context) {
         }
     }
 
-    fun resyncLyrics(forceRefresh: Boolean = false) {
-        val track = _playbackState.value.track ?: return
+    private fun refreshIfSameGeneration(
+        expectedToken: Any?,
+        expectedGeneration: Long,
+        refreshMetadata: Boolean
+    ) {
+        val controller = activeController ?: return
+        if (controller.sessionToken != expectedToken) return
+        if (pipeline.currentSessionToken != expectedToken) return
+        if (pipeline.sessionGeneration != expectedGeneration) return
 
-        // 1. Immediately re-query latest hardware/app playback state from active MediaController
-        try {
-            activeController?.let { controller ->
-                updateFromPlaybackState(controller.playbackState)
+        if (refreshMetadata) {
+            val snapshot = MediaSessionEligibilityEvaluator.fromMediaController(controller, context.packageManager)
+            pipeline.updateMetadata(expectedToken, snapshot, force = false)
+            if (pipeline.currentSessionToken == null) {
+                detachControllerCallbackOnly()
+                onSessionDestroyedListener?.invoke()
+                return
             }
+        }
+        safePlaybackState(controller)?.let { updateFromPlaybackState(it) }
+    }
+
+    fun resyncLyrics(forceRefresh: Boolean = false) {
+        val controller = activeController ?: return
+        val snapshot = try {
+            MediaSessionEligibilityEvaluator.fromMediaController(controller, context.packageManager)
         } catch (e: Exception) {
             Log.w("MediaPlaybackManager", "Error querying playback state in resync: ${e.message}")
             handleSessionUnavailable()
+            return
         }
-
-        // 2. Reset any accumulated offset
-        _trackOffsetMs.value = 0L
-        scope.launch {
-            preferencesRepository.setTrackOffset(track.key, 0L)
-            if (forceRefresh || _currentLyrics.value == null || _currentLyrics.value?.isSynced != true) {
-                _isLoadingLyrics.value = true
-                val result = lyricsRepository.getOrFetchLyrics(
-                    track = track,
-                    forceNetwork = true,
-                    allowNetwork = true,
-                    providerPreference = selectedLyricsProvider
-                )
-                _isLoadingLyrics.value = false
-                if (result.isSuccess) {
-                    _currentLyrics.value = result.getOrNull()
-                }
-            }
+        pipeline.resyncLyrics(forceRefresh = forceRefresh, latestSnapshot = snapshot)
+        if (pipeline.currentSessionToken == null) {
+            detachControllerCallbackOnly()
+            onSessionDestroyedListener?.invoke()
         }
     }
 
     fun reAnchorTimelineToCurrentPosition(targetLineIndex: Int? = null) {
-        val lyrics = _currentLyrics.value ?: return
-        val track = _playbackState.value.track ?: return
-
-        // Refresh latest controller playback state
-        try {
-            activeController?.let { controller ->
-                updateFromPlaybackState(controller.playbackState)
-            }
+        val controller = activeController ?: return
+        val snapshot = try {
+            MediaSessionEligibilityEvaluator.fromMediaController(controller, context.packageManager)
         } catch (e: Exception) {
             Log.w("MediaPlaybackManager", "Error querying playback state in reAnchor: ${e.message}")
             handleSessionUnavailable()
+            return
         }
-
-        val curPos = _playbackState.value.calculatedPositionMs
-        val targetIdx = targetLineIndex ?: lyrics.findActiveIndex(curPos, _trackOffsetMs.value).coerceAtLeast(0)
-
-        if (targetIdx in lyrics.lines.indices) {
-            val lineTime = lyrics.lines[targetIdx].timeMs
-            val newOffset = lineTime - curPos
-            _trackOffsetMs.value = newOffset
-            scope.launch {
-                preferencesRepository.setTrackOffset(track.key, newOffset)
-            }
-        }
+        pipeline.reAnchorTimelineToCurrentPosition(
+            targetLineIndex = targetLineIndex,
+            latestSnapshot = snapshot
+        )
     }
 
+    private fun safePackageName(controller: MediaController): String = try {
+        controller.packageName ?: ""
+    } catch (_: Exception) {
+        ""
+    }
+
+    private fun safePlaybackState(controller: MediaController): PlaybackState? = try {
+        controller.playbackState
+    } catch (_: Exception) {
+        null
+    }
 
     companion object {
         @Volatile

@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -80,6 +79,46 @@ import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
 
+internal object SettingsAccordionState {
+    const val SECTION_OVERLAY = "overlay"
+    const val SECTION_HUD_BACKDROP = "hud_backdrop"
+    const val SECTION_ANIMATION = "animation"
+    const val SECTION_SIZE_ALIGN = "size_align"
+    const val SECTION_POSITION = "position"
+    const val SECTION_THEME = "theme"
+    const val SECTION_TYPOGRAPHY = "typography"
+    const val SECTION_LYRICS_PROVIDER = "lyrics_provider"
+    const val SECTION_DATA = "data"
+    const val SECTION_ABOUT = "about"
+
+    val ALL_SECTION_KEYS: List<String> = listOf(
+        SECTION_OVERLAY,
+        SECTION_HUD_BACKDROP,
+        SECTION_ANIMATION,
+        SECTION_SIZE_ALIGN,
+        SECTION_POSITION,
+        SECTION_THEME,
+        SECTION_TYPOGRAPHY,
+        SECTION_LYRICS_PROVIDER,
+        SECTION_DATA,
+        SECTION_ABOUT
+    )
+
+    fun initialExpandedSections(): Set<String> = emptySet()
+
+    fun toggleSection(current: Set<String>, key: String): Set<String> {
+        return if (key in current) current - key else current + key
+    }
+
+    fun isAllExpanded(current: Set<String>): Boolean {
+        return current.size == ALL_SECTION_KEYS.size
+    }
+
+    fun toggleAllSections(current: Set<String>): Set<String> {
+        return if (isAllExpanded(current)) emptySet() else ALL_SECTION_KEYS.toSet()
+    }
+}
+
 @Composable
 fun SettingsScreen(
     playbackManager: MediaPlaybackManager,
@@ -95,16 +134,15 @@ fun SettingsScreen(
         .collectAsStateWithLifecycle(initialValue = userPreferences)
     val selectedProvider = livePreferences.lyricsProvider
     var showCacheClearedToast by remember { mutableStateOf(false) }
-    var isFontListExpanded by rememberSaveable { mutableStateOf(false) }
     val updateManager = remember { com.example.data.updater.UpdateManager.getInstance(context) }
     val cachedAvailableRelease by updateManager.cachedAvailableRelease.collectAsStateWithLifecycle()
-    var showUpdateDialog by rememberSaveable { mutableStateOf(false) }
+    var showUpdateDialog by remember { mutableStateOf(false) }
     var notificationsAllowed by remember {
         mutableStateOf(com.example.data.updater.UpdateNotifier(context).canPostNotifications())
     }
-    var showOrientationInfoDialog by rememberSaveable { mutableStateOf(false) }
+    var showOrientationInfoDialog by remember { mutableStateOf(false) }
     var selectedColorTarget by rememberSaveable { mutableStateOf(HudColorTarget.ACTIVE_LYRIC) }
-    var activeColorPickerTarget by rememberSaveable { mutableStateOf<HudColorTarget?>(null) }
+    var activeColorPickerTarget by remember { mutableStateOf<HudColorTarget?>(null) }
 
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, context) {
@@ -119,27 +157,21 @@ fun SettingsScreen(
         }
     }
 
-    val allSectionKeys = remember {
-        listOf("overlay", "animation", "size_align", "position", "theme", "typography", "lyrics_provider", "data", "about")
-    }
-    var expandedSections by rememberSaveable {
-        mutableStateOf(setOf("overlay", "theme", "lyrics_provider"))
+    val allSectionKeys = SettingsAccordionState.ALL_SECTION_KEYS
+    var expandedSections by remember {
+        mutableStateOf(SettingsAccordionState.initialExpandedSections())
     }
 
     LaunchedEffect(openUpdaterSignal) {
         if (openUpdaterSignal > 0) {
-            expandedSections = expandedSections + "about"
+            expandedSections = expandedSections + SettingsAccordionState.SECTION_ABOUT
             showUpdateDialog = true
             updateManager.openUpdaterFromNotification()
             onOpenUpdaterConsumed()
         }
     }
     val toggleSection: (String) -> Unit = { key ->
-        expandedSections = if (expandedSections.contains(key)) {
-            expandedSections - key
-        } else {
-            expandedSections + key
-        }
+        expandedSections = SettingsAccordionState.toggleSection(expandedSections, key)
     }
 
     val configuration = LocalConfiguration.current
@@ -194,20 +226,28 @@ fun SettingsScreen(
     }
 
     val sectionOverlay: @Composable () -> Unit = {
-        // SECTION 1: FLOATING OVERLAY & TIMELINE
-        val overlayStatusSummary = if (livePreferences.hudBackdropEnabled) {
-            "${livePreferences.hudBackdropStyle.title} backdrop"
-        } else {
-            "Text-only HUD"
-        }
+        // SECTION 1: FLOATING OVERLAY & TIMELINE (Behaviour, lyric colours & timeline sync)
+        val overlayBehaviorSummary = buildList {
+            add(
+                if (livePreferences.isDragRepositionMode) {
+                    "Drag mode on"
+                } else {
+                    "Hold ${HudHoldGestureController.HOLD_REPOSITION_SECONDS}s to move"
+                }
+            )
+            if (livePreferences.singleLineLyrics) {
+                add("Single-line")
+            }
+        }.joinToString(" • ")
         SettingsAccordionCard(
-                    title = "Floating Overlay & Timeline",
-                    subtitle = if (livePreferences.overlayEnabled) "Active • $overlayStatusSummary" else "Off • Floating overlay disabled",
-                    icon = Icons.Default.Layers,
-                    isExpanded = "overlay" in expandedSections,
-                    onToggle = { toggleSection("overlay") }
-                ) {
-                    Column(modifier = Modifier.padding(18.dp)) {
+            title = "Floating Overlay & Timeline",
+            subtitle = if (livePreferences.overlayEnabled) overlayBehaviorSummary else "Off • Floating overlay disabled",
+            icon = Icons.Default.Layers,
+            isExpanded = SettingsAccordionState.SECTION_OVERLAY in expandedSections,
+            onToggle = { toggleSection(SettingsAccordionState.SECTION_OVERLAY) },
+            modifier = Modifier.testTag("settings_overlay_section")
+        ) {
+            Column(modifier = Modifier.padding(18.dp)) {
                 // Toggle: 2D Drag & Reposition Mode
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -221,17 +261,17 @@ fun SettingsScreen(
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = if (userPreferences.isDragRepositionMode) {
+                            text = if (livePreferences.isDragRepositionMode) {
                                 "Touch enabled: drag & resize overlay anywhere on screen"
                             } else {
                                 "Hold HUD ${HudHoldGestureController.HOLD_REPOSITION_SECONDS}s to reposition; toggle ON for resize handles"
                             },
                             fontSize = 12.sp,
-                            color = if (userPreferences.isDragRepositionMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            color = if (livePreferences.isDragRepositionMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                     Switch(
-                        checked = userPreferences.isDragRepositionMode,
+                        checked = livePreferences.isDragRepositionMode,
                         onCheckedChange = { isDrag ->
                             coroutineScope.launch {
                                 playbackManager.preferencesRepository.setDragRepositionMode(isDrag)
@@ -262,7 +302,7 @@ fun SettingsScreen(
                         )
                     }
                     Switch(
-                        checked = userPreferences.textShadowEnabled,
+                        checked = livePreferences.textShadowEnabled,
                         onCheckedChange = { shadow ->
                             coroutineScope.launch {
                                 playbackManager.preferencesRepository.setTextShadowEnabled(shadow)
@@ -293,7 +333,7 @@ fun SettingsScreen(
                         )
                     }
                     Switch(
-                        checked = userPreferences.singleLineLyrics,
+                        checked = livePreferences.singleLineLyrics,
                         onCheckedChange = { enabled ->
                             coroutineScope.launch {
                                 playbackManager.preferencesRepository.setSingleLineLyrics(enabled)
@@ -303,7 +343,7 @@ fun SettingsScreen(
                     )
                 }
 
-                if (userPreferences.singleLineLyrics) {
+                if (livePreferences.singleLineLyrics) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -329,7 +369,7 @@ fun SettingsScreen(
                                 )
                             }
                             Switch(
-                                checked = userPreferences.adaptiveLyricScrolling,
+                                checked = livePreferences.adaptiveLyricScrolling,
                                 onCheckedChange = { enabled ->
                                     coroutineScope.launch {
                                         playbackManager.preferencesRepository.setAdaptiveLyricScrolling(enabled)
@@ -339,9 +379,9 @@ fun SettingsScreen(
                             )
                         }
 
-                        if (userPreferences.adaptiveLyricScrolling) {
+                        if (livePreferences.adaptiveLyricScrolling) {
                             Spacer(modifier = Modifier.height(10.dp))
-                            val speedMultiplier = userPreferences.lyricScrollSpeedMultiplier
+                            val speedMultiplier = livePreferences.lyricScrollSpeedMultiplier
                             val speedLabel = when {
                                 speedMultiplier >= 1.4f -> "Fast"
                                 speedMultiplier >= 1.15f -> "Brisk"
@@ -365,8 +405,8 @@ fun SettingsScreen(
                                 )
                             }
 
-                            var localScrollSpeed by remember(userPreferences.lyricScrollSpeedMultiplier) {
-                                mutableFloatStateOf(userPreferences.lyricScrollSpeedMultiplier)
+                            var localScrollSpeed by remember(livePreferences.lyricScrollSpeedMultiplier) {
+                                mutableFloatStateOf(livePreferences.lyricScrollSpeedMultiplier)
                             }
                             Slider(
                                 value = localScrollSpeed,
@@ -387,511 +427,6 @@ fun SettingsScreen(
                 }
 
                 HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-
-                // HUD APPEARANCE — HUD Backdrop & Live Preview
-                val isBackdropEnabled = livePreferences.hudBackdropEnabled
-                var localBackdropOpacity by remember(livePreferences.hudBackdropOpacity) {
-                    mutableFloatStateOf(livePreferences.hudBackdropOpacity)
-                }
-                var localCornerRadiusDp by remember(livePreferences.hudBackdropCornerRadiusDp) {
-                    mutableFloatStateOf(livePreferences.hudBackdropCornerRadiusDp.toFloat())
-                }
-                var localHorizontalPaddingDp by remember(livePreferences.hudBackdropHorizontalPaddingDp) {
-                    mutableFloatStateOf(livePreferences.hudBackdropHorizontalPaddingDp.toFloat())
-                }
-                var localVerticalPaddingDp by remember(livePreferences.hudBackdropVerticalPaddingDp) {
-                    mutableFloatStateOf(livePreferences.hudBackdropVerticalPaddingDp.toFloat())
-                }
-
-                Text(
-                    text = "HUD APPEARANCE",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.sp,
-                    color = MaterialTheme.colorScheme.primary
-                )
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                // Toggle: HUD Backdrop
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "HUD Backdrop",
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = "Add a customizable background behind floating lyrics for better readability.",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(
-                        checked = isBackdropEnabled,
-                        onCheckedChange = { enabled ->
-                            coroutineScope.launch {
-                                playbackManager.preferencesRepository.setHudBackdropEnabled(enabled)
-                            }
-                        },
-                        modifier = Modifier.testTag("settings_hud_backdrop_switch")
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Live Preview Box
-                Text(
-                    text = "Live Preview",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 82.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(
-                            brush = androidx.compose.ui.graphics.Brush.horizontalGradient(
-                                colors = listOf(
-                                    Color(0xFF1E242E),
-                                    Color(0xFF5D6573),
-                                    Color(0xFFD5DCE6)
-                                )
-                            )
-                        )
-                        .border(
-                            width = 1.dp,
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-                            shape = RoundedCornerShape(14.dp)
-                        )
-                        .padding(horizontal = 12.dp, vertical = 12.dp)
-                        .testTag("hud_backdrop_live_preview"),
-                    contentAlignment = Alignment.Center
-                ) {
-                    val cornerDp = localCornerRadiusDp.roundToInt().coerceIn(0, 32)
-                    val previewShape = RoundedCornerShape(cornerDp.dp)
-                    val clampedPreviewOpacity = localBackdropOpacity.coerceIn(0f, 1f)
-                    val appearance = remember(livePreferences.hudBackdropStyle, clampedPreviewOpacity) {
-                        MinimalOverlayView.computeBackdropAppearance(
-                            style = livePreferences.hudBackdropStyle.name,
-                            opacity = clampedPreviewOpacity
-                        )
-                    }
-                    val lyricColors = remember(
-                        livePreferences.hudActiveLyricColor,
-                        livePreferences.hudInactiveLyricColor,
-                        livePreferences.overlayTextOpacity
-                    ) {
-                        MinimalOverlayView.computeLyricColorHierarchy(
-                            activeColor = livePreferences.hudActiveLyricColor,
-                            inactiveColor = livePreferences.hudInactiveLyricColor,
-                            textOpacity = livePreferences.overlayTextOpacity
-                        )
-                    }
-                    val baseFillColor = Color(appearance.fillColor).copy(
-                        alpha = (appearance.fillAlpha / 255f).coerceIn(0f, 1f)
-                    )
-                    val isShowingBackdrop = isBackdropEnabled && clampedPreviewOpacity > 0f
-                    val previewOuterModifier = if (isShowingBackdrop) {
-                        Modifier
-                            .clip(previewShape)
-                            .background(baseFillColor, previewShape)
-                    } else {
-                        Modifier
-                    }
-
-                    val contentPaddingModifier = if (isShowingBackdrop) {
-                        Modifier.padding(
-                            horizontal = localHorizontalPaddingDp.roundToInt().coerceIn(0, 32).dp,
-                            vertical = localVerticalPaddingDp.roundToInt().coerceIn(0, 24).dp
-                        )
-                    } else {
-                        Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    }
-
-                    val activePreviewColor = Color(lyricColors.activeColor).copy(
-                        alpha = (lyricColors.activeAlpha / 255f).coerceIn(0f, 1f)
-                    )
-                    val inactivePreviewColor = Color(lyricColors.inactiveColor).copy(
-                        alpha = (lyricColors.inactiveAlpha / 255f).coerceIn(0f, 1f)
-                    )
-                    val activeShadow = if (livePreferences.textShadowEnabled) {
-                        if (HudColorSystem.isDarkColor(lyricColors.activeColor)) {
-                            androidx.compose.ui.graphics.Shadow(
-                                color = Color.White.copy(alpha = 0.25f),
-                                offset = androidx.compose.ui.geometry.Offset(0f, 1f),
-                                blurRadius = 2.5f
-                            )
-                        } else {
-                            androidx.compose.ui.graphics.Shadow(
-                                color = Color.Black.copy(
-                                    alpha = MinimalOverlayView.ACTIVE_SHADOW_ALPHA / 255f
-                                ),
-                                offset = androidx.compose.ui.geometry.Offset(0f, 1.5f),
-                                blurRadius = 5.5f
-                            )
-                        }
-                    } else {
-                        null
-                    }
-
-                    Box(
-                        modifier = previewOuterModifier,
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(
-                            modifier = contentPaddingModifier,
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(2.dp)
-                        ) {
-                            Text(
-                                text = buildAnnotatedString {
-                                    withStyle(
-                                        SpanStyle(
-                                            color = activePreviewColor,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    ) {
-                                        append("I thought I saw ")
-                                    }
-                                    withStyle(
-                                        SpanStyle(
-                                            color = inactivePreviewColor,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
-                                    ) {
-                                        append("your face today")
-                                    }
-                                },
-                                fontSize = 14.sp,
-                                textAlign = TextAlign.Center,
-                                style = LocalTextStyle.current.copy(shadow = activeShadow)
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                val controlsAlpha = if (isBackdropEnabled) 1f else 0.48f
-                var isBackdropAdvancedExpanded by rememberSaveable { mutableStateOf(false) }
-
-                Column(
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    // Compact Segmented Backdrop Style Selector: [ Solid | Grey ]
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Backdrop Style",
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 13.sp,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = controlsAlpha)
-                        )
-                        Text(
-                            text = livePreferences.hudBackdropStyle.title,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = controlsAlpha)
-                        )
-                    }
-                    Text(
-                        text = livePreferences.hudBackdropStyle.description,
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = controlsAlpha)
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.50f),
-                        border = BorderStroke(
-                            width = 1.dp,
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
-                        )
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(3.dp),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            HudBackdropStyle.entries.forEach { styleOption ->
-                                val isSelected = livePreferences.hudBackdropStyle == styleOption
-                                Surface(
-                                    onClick = {
-                                        coroutineScope.launch {
-                                            playbackManager.preferencesRepository.setHudBackdropStyle(styleOption)
-                                        }
-                                    },
-                                    enabled = isBackdropEnabled,
-                                    shape = RoundedCornerShape(9.dp),
-                                    color = if (isSelected) {
-                                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = controlsAlpha)
-                                    } else {
-                                        Color.Transparent
-                                    },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .heightIn(min = 44.dp)
-                                        .testTag("hud_backdrop_style_${styleOption.name.lowercase()}")
-                                ) {
-                                    Box(
-                                        contentAlignment = Alignment.Center,
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-                                    ) {
-                                        Text(
-                                            text = styleOption.title,
-                                            fontSize = 13.sp,
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                            color = (if (isSelected) {
-                                                MaterialTheme.colorScheme.onPrimaryContainer
-                                            } else {
-                                                MaterialTheme.colorScheme.onSurfaceVariant
-                                            }).copy(alpha = controlsAlpha)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // Primary Adjustment: Opacity Slider (0% - 100%, step 5%, default 65%)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Opacity",
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 13.sp,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = controlsAlpha)
-                        )
-                        Text(
-                            text = "${(localBackdropOpacity * 100).roundToInt()}%",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = controlsAlpha)
-                        )
-                    }
-                    Slider(
-                        value = localBackdropOpacity,
-                        onValueChange = { raw ->
-                            val snapped = ((raw * 20f).roundToInt() / 20f).coerceIn(0f, 1f)
-                            localBackdropOpacity = snapped
-                            coroutineScope.launch {
-                                playbackManager.preferencesRepository.setHudBackdropOpacity(snapped)
-                            }
-                        },
-                        enabled = isBackdropEnabled,
-                        valueRange = 0f..1f,
-                        steps = 19,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("hud_backdrop_opacity_slider")
-                    )
-
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    // Collapsed-by-default Advanced adjustments (Corner Radius, Horizontal Padding, Vertical Padding)
-                    val advancedChevronRotation = if (isBackdropAdvancedExpanded) 180f else 0f
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .animateContentSize(),
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-                        border = BorderStroke(
-                            width = 1.dp,
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
-                        )
-                    ) {
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .heightIn(min = 48.dp)
-                                    .clickable {
-                                        isBackdropAdvancedExpanded = !isBackdropAdvancedExpanded
-                                    }
-                                    .padding(horizontal = 12.dp, vertical = 10.dp)
-                                    .testTag("hud_backdrop_advanced_toggle"),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "Advanced adjustments",
-                                        fontWeight = FontWeight.SemiBold,
-                                        fontSize = 13.sp,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Text(
-                                        text = "${localCornerRadiusDp.roundToInt()}dp radius • ${localHorizontalPaddingDp.roundToInt()}×${localVerticalPaddingDp.roundToInt()}dp padding",
-                                        fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Icon(
-                                    imageVector = Icons.Default.ExpandMore,
-                                    contentDescription = if (isBackdropAdvancedExpanded) "Collapse advanced adjustments" else "Expand advanced adjustments",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier
-                                        .size(20.dp)
-                                        .rotate(advancedChevronRotation)
-                                )
-                            }
-
-                            AnimatedVisibility(visible = isBackdropAdvancedExpanded) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(start = 12.dp, end = 12.dp, bottom = 10.dp)
-                                ) {
-                                    HorizontalDivider(
-                                        modifier = Modifier.padding(bottom = 10.dp),
-                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
-                                    )
-
-                                    // Corner Radius Slider (0dp - 32dp, step 2dp, default 18dp)
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = "Corner Radius",
-                                            fontWeight = FontWeight.SemiBold,
-                                            fontSize = 13.sp,
-                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = controlsAlpha)
-                                        )
-                                        Text(
-                                            text = "${localCornerRadiusDp.roundToInt()}dp",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 12.sp,
-                                            color = MaterialTheme.colorScheme.primary.copy(alpha = controlsAlpha)
-                                        )
-                                    }
-                                    Slider(
-                                        value = localCornerRadiusDp,
-                                        onValueChange = { raw ->
-                                            val snapped = ((raw / 2f).roundToInt() * 2).coerceIn(0, 32)
-                                            localCornerRadiusDp = snapped.toFloat()
-                                            coroutineScope.launch {
-                                                playbackManager.preferencesRepository.setHudBackdropCornerRadiusDp(snapped)
-                                            }
-                                        },
-                                        enabled = isBackdropEnabled,
-                                        valueRange = 0f..32f,
-                                        steps = 15,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .testTag("hud_backdrop_corner_radius_slider")
-                                    )
-
-                                    Spacer(modifier = Modifier.height(6.dp))
-
-                                    // Horizontal Padding Slider (0dp - 32dp, step 2dp, default 16dp)
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = "Horizontal Padding",
-                                            fontWeight = FontWeight.SemiBold,
-                                            fontSize = 13.sp,
-                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = controlsAlpha)
-                                        )
-                                        Text(
-                                            text = "${localHorizontalPaddingDp.roundToInt()}dp",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 12.sp,
-                                            color = MaterialTheme.colorScheme.primary.copy(alpha = controlsAlpha)
-                                        )
-                                    }
-                                    Slider(
-                                        value = localHorizontalPaddingDp,
-                                        onValueChange = { raw ->
-                                            val snapped = ((raw / 2f).roundToInt() * 2).coerceIn(0, 32)
-                                            localHorizontalPaddingDp = snapped.toFloat()
-                                            coroutineScope.launch {
-                                                playbackManager.preferencesRepository.setHudBackdropHorizontalPaddingDp(snapped)
-                                            }
-                                        },
-                                        enabled = isBackdropEnabled,
-                                        valueRange = 0f..32f,
-                                        steps = 15,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .testTag("hud_backdrop_horizontal_padding_slider")
-                                    )
-
-                                    Spacer(modifier = Modifier.height(6.dp))
-
-                                    // Vertical Padding Slider (0dp - 24dp, step 2dp, default 10dp)
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = "Vertical Padding",
-                                            fontWeight = FontWeight.SemiBold,
-                                            fontSize = 13.sp,
-                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = controlsAlpha)
-                                        )
-                                        Text(
-                                            text = "${localVerticalPaddingDp.roundToInt()}dp",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 12.sp,
-                                            color = MaterialTheme.colorScheme.primary.copy(alpha = controlsAlpha)
-                                        )
-                                    }
-                                    Slider(
-                                        value = localVerticalPaddingDp,
-                                        onValueChange = { raw ->
-                                            val snapped = ((raw / 2f).roundToInt() * 2).coerceIn(0, 24)
-                                            localVerticalPaddingDp = snapped.toFloat()
-                                            coroutineScope.launch {
-                                                playbackManager.preferencesRepository.setHudBackdropVerticalPaddingDp(snapped)
-                                            }
-                                        },
-                                        enabled = isBackdropEnabled,
-                                        valueRange = 0f..24f,
-                                        steps = 11,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .testTag("hud_backdrop_vertical_padding_slider")
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
 
                 // HUD LYRIC COLOURS (Independent of backdrop toggle)
                 val currentTargetColor = when (selectedColorTarget) {
@@ -1235,16 +770,16 @@ fun SettingsScreen(
 
                 // Non-blocking contrast warning + optional 1-tap readable defaults
                 val contrastWarning = remember(
-                    isBackdropEnabled,
+                    livePreferences.hudBackdropEnabled,
                     livePreferences.hudBackdropStyle,
-                    localBackdropOpacity,
+                    livePreferences.hudBackdropOpacity,
                     livePreferences.hudActiveLyricColor,
                     livePreferences.hudInactiveLyricColor
                 ) {
                     HudColorSystem.evaluateReadability(
-                        backdropEnabled = isBackdropEnabled,
+                        backdropEnabled = livePreferences.hudBackdropEnabled,
                         backdropStyle = livePreferences.hudBackdropStyle,
-                        backdropOpacity = localBackdropOpacity,
+                        backdropOpacity = livePreferences.hudBackdropOpacity,
                         activeColor = livePreferences.hudActiveLyricColor,
                         inactiveColor = livePreferences.hudInactiveLyricColor
                     )
@@ -1365,6 +900,437 @@ fun SettingsScreen(
                         Text("Resync", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
+            }
+        }
+    }
+
+    val sectionHudBackdrop: @Composable () -> Unit = {
+        // SECTION 2: HUD BACKDROP
+        val isBackdropEnabled = livePreferences.hudBackdropEnabled
+        val backdropSubtitle = if (isBackdropEnabled) {
+            "${livePreferences.hudBackdropStyle.title} • ${(livePreferences.hudBackdropOpacity * 100).roundToInt()}% opacity"
+        } else {
+            "Off • Transparent text-only HUD"
+        }
+
+        SettingsAccordionCard(
+            title = "HUD Backdrop",
+            subtitle = backdropSubtitle,
+            icon = Icons.Default.RoundedCorner,
+            isExpanded = SettingsAccordionState.SECTION_HUD_BACKDROP in expandedSections,
+            onToggle = { toggleSection(SettingsAccordionState.SECTION_HUD_BACKDROP) },
+            modifier = Modifier.testTag("settings_hud_backdrop_section")
+        ) {
+            var localBackdropOpacity by remember(livePreferences.hudBackdropOpacity) {
+                mutableFloatStateOf(livePreferences.hudBackdropOpacity)
+            }
+            var localCornerRadiusDp by remember(livePreferences.hudBackdropCornerRadiusDp) {
+                mutableFloatStateOf(livePreferences.hudBackdropCornerRadiusDp.toFloat())
+            }
+            var localHorizontalPaddingDp by remember(livePreferences.hudBackdropHorizontalPaddingDp) {
+                mutableFloatStateOf(livePreferences.hudBackdropHorizontalPaddingDp.toFloat())
+            }
+            var localVerticalPaddingDp by remember(livePreferences.hudBackdropVerticalPaddingDp) {
+                mutableFloatStateOf(livePreferences.hudBackdropVerticalPaddingDp.toFloat())
+            }
+            val controlsAlpha = if (isBackdropEnabled) 1f else 0.48f
+
+            Column(modifier = Modifier.padding(18.dp)) {
+                // Toggle: Enable HUD Backdrop
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 12.dp)
+                    ) {
+                        Text(
+                            text = "Enable Backdrop",
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Add a clean background surface behind floating lyrics for better readability.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = isBackdropEnabled,
+                        onCheckedChange = { enabled ->
+                            coroutineScope.launch {
+                                playbackManager.preferencesRepository.setHudBackdropEnabled(enabled)
+                            }
+                        },
+                        modifier = Modifier.testTag("settings_hud_backdrop_switch")
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Live Preview Box
+                Text(
+                    text = "Live Preview",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 82.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(
+                            brush = androidx.compose.ui.graphics.Brush.horizontalGradient(
+                                colors = listOf(
+                                    Color(0xFF1E242E),
+                                    Color(0xFF5D6573),
+                                    Color(0xFFD5DCE6)
+                                )
+                            )
+                        )
+                        .border(
+                            width = 1.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                            shape = RoundedCornerShape(14.dp)
+                        )
+                        .padding(horizontal = 12.dp, vertical = 12.dp)
+                        .testTag("hud_backdrop_live_preview"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    val cornerDp = localCornerRadiusDp.roundToInt().coerceIn(0, 32)
+                    val previewShape = RoundedCornerShape(cornerDp.dp)
+                    val clampedPreviewOpacity = localBackdropOpacity.coerceIn(0f, 1f)
+                    val appearance = remember(livePreferences.hudBackdropStyle, clampedPreviewOpacity) {
+                        MinimalOverlayView.computeBackdropAppearance(
+                            style = livePreferences.hudBackdropStyle.name,
+                            opacity = clampedPreviewOpacity
+                        )
+                    }
+                    val lyricColors = remember(
+                        livePreferences.hudActiveLyricColor,
+                        livePreferences.hudInactiveLyricColor,
+                        livePreferences.overlayTextOpacity
+                    ) {
+                        MinimalOverlayView.computeLyricColorHierarchy(
+                            activeColor = livePreferences.hudActiveLyricColor,
+                            inactiveColor = livePreferences.hudInactiveLyricColor,
+                            textOpacity = livePreferences.overlayTextOpacity
+                        )
+                    }
+                    val baseFillColor = Color(appearance.fillColor).copy(
+                        alpha = (appearance.fillAlpha / 255f).coerceIn(0f, 1f)
+                    )
+                    val isShowingBackdrop = isBackdropEnabled && clampedPreviewOpacity > 0f
+                    val previewOuterModifier = if (isShowingBackdrop) {
+                        Modifier
+                            .clip(previewShape)
+                            .background(baseFillColor, previewShape)
+                    } else {
+                        Modifier
+                    }
+
+                    val contentPaddingModifier = if (isShowingBackdrop) {
+                        Modifier.padding(
+                            horizontal = localHorizontalPaddingDp.roundToInt().coerceIn(0, 32).dp,
+                            vertical = localVerticalPaddingDp.roundToInt().coerceIn(0, 24).dp
+                        )
+                    } else {
+                        Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    }
+
+                    val activePreviewColor = Color(lyricColors.activeColor).copy(
+                        alpha = (lyricColors.activeAlpha / 255f).coerceIn(0f, 1f)
+                    )
+                    val inactivePreviewColor = Color(lyricColors.inactiveColor).copy(
+                        alpha = (lyricColors.inactiveAlpha / 255f).coerceIn(0f, 1f)
+                    )
+                    val activeShadow = if (livePreferences.textShadowEnabled) {
+                        if (HudColorSystem.isDarkColor(lyricColors.activeColor)) {
+                            androidx.compose.ui.graphics.Shadow(
+                                color = Color.White.copy(alpha = 0.25f),
+                                offset = androidx.compose.ui.geometry.Offset(0f, 1f),
+                                blurRadius = 2.5f
+                            )
+                        } else {
+                            androidx.compose.ui.graphics.Shadow(
+                                color = Color.Black.copy(
+                                    alpha = MinimalOverlayView.ACTIVE_SHADOW_ALPHA / 255f
+                                ),
+                                offset = androidx.compose.ui.geometry.Offset(0f, 1.5f),
+                                blurRadius = 5.5f
+                            )
+                        }
+                    } else {
+                        null
+                    }
+
+                    Box(
+                        modifier = previewOuterModifier,
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            modifier = contentPaddingModifier,
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Text(
+                                text = buildAnnotatedString {
+                                    withStyle(
+                                        SpanStyle(
+                                            color = activePreviewColor,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    ) {
+                                        append("I thought I saw ")
+                                    }
+                                    withStyle(
+                                        SpanStyle(
+                                            color = inactivePreviewColor,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    ) {
+                                        append("your face today")
+                                    }
+                                },
+                                fontSize = 14.sp,
+                                textAlign = TextAlign.Center,
+                                style = LocalTextStyle.current.copy(shadow = activeShadow)
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Segmented Backdrop Style Selector: [ Black | Grey ]
+                Text(
+                    text = "Backdrop Style",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = controlsAlpha)
+                )
+                Text(
+                    text = livePreferences.hudBackdropStyle.description,
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = controlsAlpha)
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.50f),
+                    border = BorderStroke(
+                        width = 1.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(3.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        HudBackdropStyle.entries.forEach { styleOption ->
+                            val isSelected = livePreferences.hudBackdropStyle == styleOption
+                            Surface(
+                                onClick = {
+                                    coroutineScope.launch {
+                                        playbackManager.preferencesRepository.setHudBackdropStyle(styleOption)
+                                    }
+                                },
+                                enabled = isBackdropEnabled,
+                                shape = RoundedCornerShape(9.dp),
+                                color = if (isSelected) {
+                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = controlsAlpha)
+                                } else {
+                                    Color.Transparent
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 48.dp)
+                                    .testTag("hud_backdrop_style_${styleOption.name.lowercase()}")
+                            ) {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                                ) {
+                                    Text(
+                                        text = styleOption.title,
+                                        fontSize = 13.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        color = (if (isSelected) {
+                                            MaterialTheme.colorScheme.onPrimaryContainer
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        }).copy(alpha = controlsAlpha)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Opacity Slider (0% - 100%, step 5%, default 65%)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Opacity",
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = controlsAlpha)
+                    )
+                    Text(
+                        text = "${(localBackdropOpacity * 100).roundToInt()}%",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = controlsAlpha)
+                    )
+                }
+                Slider(
+                    value = localBackdropOpacity,
+                    onValueChange = { raw ->
+                        val snapped = ((raw * 20f).roundToInt() / 20f).coerceIn(0f, 1f)
+                        localBackdropOpacity = snapped
+                        coroutineScope.launch {
+                            playbackManager.preferencesRepository.setHudBackdropOpacity(snapped)
+                        }
+                    },
+                    enabled = isBackdropEnabled,
+                    valueRange = 0f..1f,
+                    steps = 19,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("hud_backdrop_opacity_slider")
+                )
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
+                // Corner Radius Slider (0dp - 32dp, step 2dp, default 18dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Corner Radius",
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = controlsAlpha)
+                    )
+                    Text(
+                        text = "${localCornerRadiusDp.roundToInt()}dp",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = controlsAlpha)
+                    )
+                }
+                Slider(
+                    value = localCornerRadiusDp,
+                    onValueChange = { raw ->
+                        val snapped = ((raw / 2f).roundToInt() * 2).coerceIn(0, 32)
+                        localCornerRadiusDp = snapped.toFloat()
+                        coroutineScope.launch {
+                            playbackManager.preferencesRepository.setHudBackdropCornerRadiusDp(snapped)
+                        }
+                    },
+                    enabled = isBackdropEnabled,
+                    valueRange = 0f..32f,
+                    steps = 15,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("hud_backdrop_corner_radius_slider")
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // Horizontal Padding Slider (0dp - 32dp, step 2dp, default 16dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Horizontal Padding",
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = controlsAlpha)
+                    )
+                    Text(
+                        text = "${localHorizontalPaddingDp.roundToInt()}dp",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = controlsAlpha)
+                    )
+                }
+                Slider(
+                    value = localHorizontalPaddingDp,
+                    onValueChange = { raw ->
+                        val snapped = ((raw / 2f).roundToInt() * 2).coerceIn(0, 32)
+                        localHorizontalPaddingDp = snapped.toFloat()
+                        coroutineScope.launch {
+                            playbackManager.preferencesRepository.setHudBackdropHorizontalPaddingDp(snapped)
+                        }
+                    },
+                    enabled = isBackdropEnabled,
+                    valueRange = 0f..32f,
+                    steps = 15,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("hud_backdrop_horizontal_padding_slider")
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // Vertical Padding Slider (0dp - 24dp, step 2dp, default 10dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Vertical Padding",
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = controlsAlpha)
+                    )
+                    Text(
+                        text = "${localVerticalPaddingDp.roundToInt()}dp",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = controlsAlpha)
+                    )
+                }
+                Slider(
+                    value = localVerticalPaddingDp,
+                    onValueChange = { raw ->
+                        val snapped = ((raw / 2f).roundToInt() * 2).coerceIn(0, 24)
+                        localVerticalPaddingDp = snapped.toFloat()
+                        coroutineScope.launch {
+                            playbackManager.preferencesRepository.setHudBackdropVerticalPaddingDp(snapped)
+                        }
+                    },
+                    enabled = isBackdropEnabled,
+                    valueRange = 0f..24f,
+                    steps = 11,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("hud_backdrop_vertical_padding_slider")
+                )
             }
         }
     }
@@ -2607,9 +2573,10 @@ fun SettingsScreen(
             title = "Typography",
             subtitle = "${userPreferences.selectedFont.title} • ${userPreferences.overlayTextSizeSp.toInt()} sp",
             icon = Icons.Default.FontDownload,
-            isExpanded = "typography" in expandedSections,
-            onToggle = { toggleSection("typography") }
+            isExpanded = SettingsAccordionState.SECTION_TYPOGRAPHY in expandedSections,
+            onToggle = { toggleSection(SettingsAccordionState.SECTION_TYPOGRAPHY) }
         ) {
+            var isFontListExpanded by remember { mutableStateOf(false) }
             Column(modifier = Modifier.padding(18.dp)) {
                 Text(
                     text = "Overlay Typography Scale (${userPreferences.overlayTextSizeSp.toInt()} sp)",
@@ -3362,15 +3329,11 @@ fun SettingsScreen(
 
                         TextButton(
                             onClick = {
-                                expandedSections = if (expandedSections.size == allSectionKeys.size) {
-                                    emptySet()
-                                } else {
-                                    allSectionKeys.toSet()
-                                }
+                                expandedSections = SettingsAccordionState.toggleAllSections(expandedSections)
                             }
                         ) {
                             Text(
-                                text = if (expandedSections.size == allSectionKeys.size) "Collapse All" else "Expand All",
+                                text = if (SettingsAccordionState.isAllExpanded(expandedSections)) "Collapse All" else "Expand All",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -3404,6 +3367,7 @@ fun SettingsScreen(
                             verticalArrangement = Arrangement.spacedBy(14.dp)
                         ) {
                             sectionOverlay()
+                            sectionHudBackdrop()
                             sectionAnimation()
                             sectionSizeAlign()
                             sectionPosition()
@@ -3427,6 +3391,7 @@ fun SettingsScreen(
                         verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
                         sectionOverlay()
+                        sectionHudBackdrop()
                         sectionAnimation()
                         sectionSizeAlign()
                         sectionPosition()

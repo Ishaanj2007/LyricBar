@@ -51,7 +51,9 @@ class CompositeLyricsRepository internal constructor(
         val lookupKey = track.lookupKey
         val baseKey = track.baseIdentityKey
 
-        if (identityKey.isBlank()) return@withContext Result.failure(IllegalArgumentException("Invalid track metadata"))
+        if (identityKey.isBlank() || !track.isValidTrack) {
+            return@withContext Result.failure(IllegalArgumentException("Invalid track metadata"))
+        }
 
         // Check Room local cache unless force network re-fetch is requested
         if (!forceNetwork) {
@@ -122,9 +124,12 @@ class CompositeLyricsRepository internal constructor(
             }
         }
 
-        // If network fetching is disabled, do not perform remote provider queries
+        // If network fetching is disabled or track lacks real artist/title attribution, do not perform remote queries
         if (!allowNetwork) {
             return@withContext Result.failure(Exception("Automatic lyric fetching is disabled"))
+        }
+        if (!track.hasRealMusicAttribution) {
+            return@withContext Result.failure(IllegalArgumentException("Track lacks real artist/title attribution for remote lyrics lookup"))
         }
 
         // Clean title & artist for web queries (strip (Official Video), [Remastered], etc.)
@@ -337,7 +342,13 @@ class CompositeLyricsRepository internal constructor(
         val title = track.title.trim()
         val artist = track.artist.trim()
         val identityKey = track.identityKey
-        if (title.isBlank() || identityKey.isBlank() || identityKey.startsWith("unknown artist - unknown title")) {
+        if (title.isBlank() ||
+            artist.isBlank() ||
+            identityKey.isBlank() ||
+            !track.isValidTrack ||
+            !track.hasRealMusicAttribution ||
+            identityKey.startsWith("unknown artist - unknown title")
+        ) {
             return@withContext
         }
         try {
@@ -345,7 +356,7 @@ class CompositeLyricsRepository internal constructor(
                 SongHistoryEntity(
                     key = identityKey,
                     title = title,
-                    artist = if (artist.isBlank()) "Unknown Artist" else artist,
+                    artist = artist,
                     albumArtUri = track.albumArtUri?.trim()?.takeIf { it.isNotBlank() },
                     status = status,
                     playedAt = System.currentTimeMillis()

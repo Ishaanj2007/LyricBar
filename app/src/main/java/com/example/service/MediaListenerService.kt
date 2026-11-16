@@ -2,10 +2,8 @@ package com.example.service
 
 import android.content.ComponentName
 import android.content.Context
-import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
-import android.media.session.PlaybackState
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
@@ -73,101 +71,37 @@ class MediaListenerService : NotificationListenerService() {
             return
         }
 
-        // 1. Prefer actively playing session
-        val playingController = controllers.firstOrNull { controller ->
-            try {
-                controller.playbackState?.state == PlaybackState.STATE_PLAYING
+        val pm = packageManager
+        val candidates = controllers.map { controller ->
+            val token = try {
+                controller.sessionToken
             } catch (_: Exception) {
-                false
+                null
             }
+            val snapshot = MediaSessionEligibilityEvaluator.fromMediaController(controller, pm)
+            MediaControllerCandidate(
+                token = token,
+                snapshot = snapshot,
+                ref = controller
+            )
         }
 
-        if (playingController != null) {
-            playbackManager.attachMediaController(playingController)
-            return
-        }
-
-        // 2. Preserve currently attached session if it's still present in the list and not stopped/error
-        val current = playbackManager.activeController
-        if (current != null) {
-            val stillPresent = controllers.firstOrNull {
-                it.sessionToken == current.sessionToken
-            }
-            if (stillPresent != null) {
-                val state = try {
-                    stillPresent.playbackState?.state
-                } catch (_: Exception) {
-                    null
-                }
-                val isStoppedOrError = state == PlaybackState.STATE_STOPPED ||
-                    state == PlaybackState.STATE_NONE ||
-                    state == PlaybackState.STATE_ERROR
-                if (!isStoppedOrError) {
-                    playbackManager.attachMediaController(stillPresent)
-                    return
-                }
-            }
-        }
-
-        // 3. Search for a valid paused / buffering session (preferring one with title/artist metadata)
-        val pausedWithMetadata = controllers.firstOrNull { controller ->
-            try {
-                val state = controller.playbackState?.state
-                (state == PlaybackState.STATE_PAUSED || state == PlaybackState.STATE_BUFFERING) &&
-                    hasValidMetadata(controller)
-            } catch (_: Exception) {
-                false
-            }
-        }
-
-        if (pausedWithMetadata != null) {
-            playbackManager.attachMediaController(pausedWithMetadata)
-            return
-        }
-
-        val anyPaused = controllers.firstOrNull { controller ->
-            try {
-                val state = controller.playbackState?.state
-                state == PlaybackState.STATE_PAUSED || state == PlaybackState.STATE_BUFFERING
-            } catch (_: Exception) {
-                false
-            }
-        }
-
-        if (anyPaused != null) {
-            playbackManager.attachMediaController(anyPaused)
-            return
-        }
-
-        // 4. Any controller with valid metadata that is not stopped/none/error
-        val anyActiveWithMetadata = controllers.firstOrNull { controller ->
-            try {
-                val state = controller.playbackState?.state
-                state != PlaybackState.STATE_STOPPED &&
-                    state != PlaybackState.STATE_NONE &&
-                    state != PlaybackState.STATE_ERROR &&
-                    hasValidMetadata(controller)
-            } catch (_: Exception) {
-                false
-            }
-        }
-
-        if (anyActiveWithMetadata != null) {
-            playbackManager.attachMediaController(anyActiveWithMetadata)
-        } else {
-            // No valid active or paused session exists
-            playbackManager.handleNoActiveSessions()
-        }
-    }
-
-    private fun hasValidMetadata(controller: MediaController): Boolean {
-        return try {
-            val metadata = controller.metadata ?: return false
-            val title = metadata.getString(MediaMetadata.METADATA_KEY_TITLE)
-                ?: metadata.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE)
-            !title.isNullOrBlank()
+        val currentToken = try {
+            playbackManager.activeController?.sessionToken
         } catch (_: Exception) {
-            false
+            null
+        }
+
+        val selection = MediaSessionSelector.selectBestController(
+            candidates = candidates,
+            currentToken = currentToken
+        )
+
+        val chosen = selection.selected?.ref
+        if (chosen != null) {
+            playbackManager.attachMediaController(chosen)
+        } else {
+            playbackManager.handleNoActiveSessions()
         }
     }
 
