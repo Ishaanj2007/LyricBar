@@ -3188,7 +3188,7 @@ fun SettingsScreen(
         // SECTION 9: ABOUT & DEVELOPER
         SettingsAccordionCard(
             title = "About & Developer",
-            subtitle = "Version ${com.example.BuildConfig.VERSION_NAME} • By ${DeveloperConfig.DEVELOPER_NAME}",
+            subtitle = "Version ${com.example.BuildConfig.VERSION_NAME} (Code ${com.example.BuildConfig.VERSION_CODE})",
             icon = Icons.Default.Info,
             isExpanded = "about" in expandedSections,
             onToggle = { toggleSection("about") }

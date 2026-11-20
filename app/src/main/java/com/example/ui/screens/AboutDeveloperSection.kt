@@ -134,8 +134,9 @@ fun AboutDeveloperContent(
         // 1. DEVELOPER IDENTITY (Primary visual focus)
         // =====================================================================
         DeveloperIdentityHeader(
-            developerName = DeveloperConfig.DEVELOPER_NAME,
-            versionName = BuildConfig.VERSION_NAME
+            developerName = stringResource(R.string.app_name),
+            versionName = BuildConfig.VERSION_NAME,
+            versionCode = BuildConfig.VERSION_CODE
         )
 
         Spacer(modifier = Modifier.height(22.dp))
@@ -372,15 +373,9 @@ fun AboutDeveloperContent(
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Text(
-                text = "${stringResource(R.string.app_name)} v${BuildConfig.VERSION_NAME}  •  ${stringResource(R.string.license_notice)}",
+                text = "${stringResource(R.string.app_name)} v${BuildConfig.VERSION_NAME} (Code ${BuildConfig.VERSION_CODE})  •  ${stringResource(R.string.license_notice)}",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f),
-                textAlign = TextAlign.Center
-            )
-            Text(
-                text = stringResource(R.string.developer_footer_credit, DeveloperConfig.DEVELOPER_NAME),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.56f),
                 textAlign = TextAlign.Center
             )
         }
@@ -391,6 +386,7 @@ fun AboutDeveloperContent(
 private fun DeveloperIdentityHeader(
     developerName: String,
     versionName: String,
+    versionCode: Int,
     modifier: Modifier = Modifier
 ) {
     val primaryColor = MaterialTheme.colorScheme.primary
@@ -449,33 +445,21 @@ private fun DeveloperIdentityHeader(
 
         Spacer(modifier = Modifier.height(6.dp))
 
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.85f),
+            border = BorderStroke(
+                width = 0.75.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.32f)
+            )
         ) {
             Text(
-                text = stringResource(R.string.developer_role_subtitle),
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.92f),
-                fontWeight = FontWeight.Medium
+                text = "v$versionName (Code $versionCode)",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
             )
-
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.85f),
-                border = BorderStroke(
-                    width = 0.75.dp,
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.32f)
-                )
-            ) {
-                Text(
-                    text = "v$versionName",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
-                )
-            }
         }
     }
 }
