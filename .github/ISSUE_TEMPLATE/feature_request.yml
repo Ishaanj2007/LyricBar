@@ -1,0 +1,53 @@
+
+name: Feature request
+description: Suggest a new feature or improvement for LyricBar
+title: "[Feature]: "
+labels: [enhancement]
+
+body:
+  - type: dropdown
+    id: category
+    attributes:
+      label: Which area does this feature relate to?
+      options:
+        - Live Lyrics
+        - Floating HUD / Overlay
+        - Lyrics Synchronization
+        - Lyrics Search / Providers
+        - Now Playing
+        - UI / Customization
+        - Backup & Restore
+        - Performance
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What would you like LyricBar to do?
+      description: Describe the feature or improvement you want.
+      placeholder: "Add an option to..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why would this feature be useful?
+      description: Explain what you're trying to achieve and how you currently handle it.
+      placeholder: "This would help me..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reference
+    attributes:
+      label: References or examples
+      description: Screenshots, designs, or examples from other apps are welcome.
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional information
+      description: Any other ideas or details you'd like to share.

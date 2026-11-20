@@ -1,0 +1,118 @@
+
+name: Bug report
+description: Report something that isn't working correctly in LyricBar
+title: "[Bug]: "
+labels: [bug]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a LyricBar bug!
+
+        Before submitting, please check whether someone has already reported the same issue.
+        Please report one bug per issue.
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: "I searched existing open and closed issues and this bug hasn't been reported."
+          required: true
+        - label: "This issue describes one specific bug."
+          required: true
+
+  - type: input
+    id: app-version
+    attributes:
+      label: LyricBar version
+      description: Find your version in Settings → About.
+      placeholder: "2.6.0"
+    validations:
+      required: true
+
+  - type: input
+    id: device
+    attributes:
+      label: Device and Android version
+      placeholder: "Pixel 9a, Android 17, crDroid 13"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: affected-feature
+    attributes:
+      label: Which feature is affected?
+      options:
+        - Live Lyrics
+        - Floating HUD / Overlay
+        - Lyrics Synchronization
+        - Lyrics Search / Providers
+        - Now Playing
+        - Music Detection / Playback
+        - Settings / Customization
+        - Backup & Restore
+        - App UI / Navigation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: Describe the bug
+      description: Explain what you did, what you expected, and what actually happened.
+      placeholder: |
+        Steps to reproduce:
+        1. Open LyricBar
+        2. Start playing a song
+        3. Open the floating HUD
+
+        Expected behavior:
+        The lyrics should stay synchronized.
+
+        Actual behavior:
+        The lyrics freeze after a few seconds.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproducibility
+    attributes:
+      label: Does this happen consistently?
+      description: Mention whether the bug happens every time or only occasionally.
+      placeholder: "Every time / Sometimes / Happened once"
+
+  - type: input
+    id: song
+    attributes:
+      label: Song or music source
+      description: If the issue is related to a particular song or music app.
+      placeholder: "Song name, artist, Spotify / YouTube Music, etc."
+
+  - type: textarea
+    id: log
+    attributes:
+      label: Diagnostic log
+      description: |
+        Attach a diagnostic log exported from LyricBar here.
+
+        The in-app diagnostic log export feature is planned for a future update.
+        Until then, you can optionally attach relevant Logcat output.
+
+        Review logs before uploading. Remove personal or sensitive information.
+      placeholder: "Attach your diagnostic log file or paste relevant Logcat output here."
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots or screen recording
+      description: Visual evidence can help us understand the issue.
+      placeholder: "Drag and drop screenshots or recordings here."
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional information
+      description: Anything else that might help us investigate.
