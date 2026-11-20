@@ -894,4 +894,306 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
     suspend fun setHasRequestedUpdateNotificationPermission(requested: Boolean) {
         dataStore.edit { it[PreferencesKeys.HAS_REQUESTED_UPDATE_NOTIFICATION_PERMISSION] = requested }
     }
+
+    /**
+     * Reads only user-configurable App Settings keys (excluding HUD layout/appearance,
+     * transient runtime state, internal migration flags, and updater caches).
+     */
+    suspend fun readBackupAppSettings(): com.example.data.backup.BackupAppSettingsData {
+        val raw = readPreferencesSnapshotOnce()
+        return extractBackupAppSettings(raw)
+    }
+
+    /**
+     * Reads only persistent Floating HUD configuration keys (excluding transient drag mode
+     * and all unrelated App Settings or updater runtime keys).
+     */
+    suspend fun readBackupHudConfig(): com.example.data.backup.BackupHudConfigData {
+        val raw = readPreferencesSnapshotOnce()
+        return extractBackupHudConfig(raw)
+    }
+
+    /**
+     * Atomically applies ONLY the non-null backup categories to DataStore.
+     * Keys belonging to unselected categories and all excluded internal/runtime keys
+     * are strictly untouched.
+     */
+    suspend fun applyBackupPreferences(
+        appSettings: com.example.data.backup.BackupAppSettingsData? = null,
+        hudConfig: com.example.data.backup.BackupHudConfigData? = null
+    ) {
+        if (appSettings == null && hudConfig == null) return
+        dataStore.edit { prefs ->
+            if (appSettings != null) {
+                val safeThemeMode = try {
+                    ThemeMode.valueOf(appSettings.themeMode.trim())
+                } catch (_: Exception) {
+                    ThemeMode.FOLLOW_SYSTEM
+                }
+                val safeThemePreset = try {
+                    when (ThemePreset.valueOf(appSettings.themePreset.trim())) {
+                        ThemePreset.ROSE_QUARTZ, ThemePreset.OBSIDIAN_MINT -> ThemePreset.ROSE_QUARTZ
+                        ThemePreset.LAVENDER_MIST, ThemePreset.MIDNIGHT_AZURE -> ThemePreset.LAVENDER_MIST
+                        ThemePreset.PEACH_EMBER, ThemePreset.SUNSET_AMBER -> ThemePreset.PEACH_EMBER
+                        ThemePreset.SAGE_SERENITY, ThemePreset.CYBER_VIOLET -> ThemePreset.SAGE_SERENITY
+                    }
+                } catch (_: Exception) {
+                    ThemePreset.ROSE_QUARTZ
+                }
+                val safeFont = try {
+                    FontOption.valueOf(appSettings.selectedFont.trim())
+                } catch (_: Exception) {
+                    FontOption.POPPINS
+                }
+                val safeProvider = LyricsProviderPreference.fromPersistedValue(appSettings.lyricsProvider)
+                val safeAnimStyle = when (appSettings.animationStyle.trim()) {
+                    "APPLE_MUSIC", "KARAOKE" -> OverlayAnimationStyle.KARAOKE.name
+                    "SMOOTH_SLIDE_UP", "SOFT_FADE", "SCALE_POP", "SMOOTH_SLIDE" -> OverlayAnimationStyle.SMOOTH_SLIDE.name
+                    "FADE", "FADE_IN_OUT" -> OverlayAnimationStyle.FADE.name
+                    "BLUR_REVEAL", "BLUR" -> OverlayAnimationStyle.BLUR_REVEAL.name
+                    "TYPEWRITER" -> OverlayAnimationStyle.TYPEWRITER.name
+                    "MINIMAL_STATIC", "INSTANT" -> OverlayAnimationStyle.INSTANT.name
+                    else -> OverlayAnimationStyle.KARAOKE.name
+                }
+                val safeKaraoke = appSettings.karaokeGlowSpeed.coerceIn(0.5f, 1.5f)
+
+                prefs[PreferencesKeys.THEME_MODE] = safeThemeMode.name
+                prefs[PreferencesKeys.THEME_PRESET] = safeThemePreset.name
+                prefs[PreferencesKeys.USE_WALLPAPER_DYNAMIC_COLOR] = appSettings.useWallpaperDynamicColor
+                prefs[PreferencesKeys.SELECTED_FONT] = safeFont.name
+                prefs[PreferencesKeys.LYRICS_PROVIDER] = safeProvider.name
+                prefs[PreferencesKeys.AUTO_SHOW_ON_PLAYBACK] = appSettings.autoShowOnPlayback
+                prefs[PreferencesKeys.AUTO_FETCH_LYRICS] = appSettings.autoFetchLyrics
+                prefs[PreferencesKeys.AUTO_UPDATE_CHECKS_ENABLED] = appSettings.autoUpdateChecksEnabled
+                prefs[PreferencesKeys.ANIMATION_STYLE] = safeAnimStyle
+                prefs[PreferencesKeys.UPWARD_ANIMATION] = appSettings.upwardAnimationEnabled
+                prefs[PreferencesKeys.APPLE_MUSIC_STYLE] = appSettings.appleMusicStyle
+                prefs[PreferencesKeys.SINGLE_LINE_LYRICS] = appSettings.singleLineLyrics
+                prefs[PreferencesKeys.ADAPTIVE_LYRIC_SCROLLING] = appSettings.adaptiveLyricScrolling
+                prefs[PreferencesKeys.LYRIC_SCROLL_SPEED_MULTIPLIER] = appSettings.lyricScrollSpeedMultiplier.coerceIn(1.0f, 1.5f)
+                prefs[PreferencesKeys.TYPEWRITER_SPEED] = appSettings.typewriterSpeed.coerceIn(0.3f, 3.0f)
+                prefs[PreferencesKeys.SMOOTH_TRANSITION_SPEED] = appSettings.smoothTransitionSpeed.coerceIn(0.3f, 3.0f)
+                prefs[PreferencesKeys.FADE_SPEED] = appSettings.fadeSpeed.coerceIn(0.3f, 3.0f)
+                prefs[PreferencesKeys.BLUR_REVEAL_SPEED] = appSettings.blurRevealSpeed.coerceIn(0.3f, 3.0f)
+                prefs[PreferencesKeys.KARAOKE_SPEED] = safeKaraoke
+                prefs[PreferencesKeys.KARAOKE_GLOW_SPEED] = safeKaraoke
+                prefs[PreferencesKeys.GLOBAL_OFFSET_MS] = appSettings.globalOffsetMs.coerceIn(-60_000L, 60_000L)
+
+                // Restore per-track timing offsets safely (bounded and prefixed with "offset_")
+                for ((rawKey, offsetMs) in appSettings.trackOffsets) {
+                    if (rawKey.startsWith("offset_") && rawKey.length <= 32) {
+                        prefs[longPreferencesKey(rawKey)] = offsetMs.coerceIn(-60_000L, 60_000L)
+                    }
+                }
+            }
+
+            if (hudConfig != null) {
+                val safeAlign = when (hudConfig.overlayTextAlign.trim().uppercase(java.util.Locale.US)) {
+                    "LEFT" -> "LEFT"
+                    "RIGHT" -> "RIGHT"
+                    else -> "CENTER"
+                }
+                val safeBackdropStyle = HudBackdropStyle.fromName(hudConfig.hudBackdropStyle)
+                val safeActiveColor = HudColorSystem.sanitizeOpaqueColor(
+                    hudConfig.hudActiveLyricColor,
+                    HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR
+                )
+                val safeInactiveColor = HudColorSystem.sanitizeOpaqueColor(
+                    hudConfig.hudInactiveLyricColor,
+                    HudColorSystem.DEFAULT_INACTIVE_LYRIC_COLOR
+                )
+                val safeCustomColors = hudConfig.hudCustomColors
+                    .map { HudColorSystem.sanitizeOpaqueColor(it, HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR) }
+                    .distinct()
+                val safePortraitX = hudConfig.hudPortraitX.coerceIn(MIN_STORED_X_PX, MAX_STORED_POS_PX)
+                val safePortraitY = hudConfig.hudPortraitY.coerceIn(0, MAX_STORED_POS_PX)
+                val safePortraitW = hudConfig.hudPortraitWidth.coerceIn(MIN_STORED_WIDTH_PX, MAX_STORED_POS_PX)
+                val safePortraitH = hudConfig.hudPortraitHeight.coerceIn(MIN_STORED_HEIGHT_PX, MAX_STORED_HEIGHT_PX)
+
+                prefs[PreferencesKeys.OVERLAY_ENABLED] = hudConfig.overlayEnabled
+                prefs[PreferencesKeys.OVERLAY_TEXT_SIZE] = hudConfig.overlayTextSizeSp.coerceIn(8f, 48f)
+                prefs[PreferencesKeys.OVERLAY_TEXT_OPACITY] = hudConfig.overlayTextOpacity.coerceIn(0.15f, 1.0f)
+                prefs[PreferencesKeys.OVERLAY_TEXT_SHADOW] = hudConfig.textShadowEnabled
+                prefs[PreferencesKeys.OVERLAY_TEXT_ALIGN] = safeAlign
+                prefs[PreferencesKeys.CLICK_THROUGH_OVERLAY] = hudConfig.clickThroughOverlay
+                prefs[PreferencesKeys.HUD_BACKDROP_ENABLED] = hudConfig.hudBackdropEnabled
+                prefs[PreferencesKeys.HUD_BACKDROP_STYLE] = safeBackdropStyle.name
+                prefs[PreferencesKeys.HUD_BACKDROP_OPACITY] = hudConfig.hudBackdropOpacity.coerceIn(0.0f, 1.0f)
+                prefs[PreferencesKeys.HUD_BACKDROP_CORNER_RADIUS_DP] = hudConfig.hudBackdropCornerRadiusDp.coerceIn(0, 32)
+                prefs[PreferencesKeys.HUD_BACKDROP_HORIZONTAL_PADDING_DP] = hudConfig.hudBackdropHorizontalPaddingDp.coerceIn(0, 32)
+                prefs[PreferencesKeys.HUD_BACKDROP_VERTICAL_PADDING_DP] = hudConfig.hudBackdropVerticalPaddingDp.coerceIn(0, 24)
+                prefs[PreferencesKeys.HUD_ACTIVE_LYRIC_COLOR] = safeActiveColor
+                prefs[PreferencesKeys.HUD_INACTIVE_LYRIC_COLOR] = safeInactiveColor
+                prefs[PreferencesKeys.HUD_CUSTOM_COLORS] = HudColorSystem.serializeCustomColors(safeCustomColors)
+
+                // Portrait profile + legacy portrait mirror keys
+                prefs[PreferencesKeys.HUD_PORTRAIT_X] = safePortraitX
+                prefs[PreferencesKeys.HUD_PORTRAIT_Y] = safePortraitY
+                prefs[PreferencesKeys.HUD_PORTRAIT_WIDTH] = safePortraitW
+                prefs[PreferencesKeys.HUD_PORTRAIT_HEIGHT] = safePortraitH
+                prefs[PreferencesKeys.OVERLAY_X_POS] = safePortraitX
+                prefs[PreferencesKeys.OVERLAY_Y_POS] = safePortraitY
+                prefs[PreferencesKeys.OVERLAY_WIDTH] = safePortraitW
+                prefs[PreferencesKeys.OVERLAY_HEIGHT] = safePortraitH
+
+                // Landscape profile (only set when all four dimensions are present in backup)
+                val lx = hudConfig.hudLandscapeX
+                val ly = hudConfig.hudLandscapeY
+                val lw = hudConfig.hudLandscapeWidth
+                val lh = hudConfig.hudLandscapeHeight
+                if (lx != null && ly != null && lw != null && lh != null) {
+                    prefs[PreferencesKeys.HUD_LANDSCAPE_X] = lx.coerceIn(MIN_STORED_X_PX, MAX_STORED_POS_PX)
+                    prefs[PreferencesKeys.HUD_LANDSCAPE_Y] = ly.coerceIn(0, MAX_STORED_POS_PX)
+                    prefs[PreferencesKeys.HUD_LANDSCAPE_WIDTH] = lw.coerceIn(MIN_STORED_WIDTH_PX, MAX_STORED_POS_PX)
+                    prefs[PreferencesKeys.HUD_LANDSCAPE_HEIGHT] = lh.coerceIn(MIN_STORED_HEIGHT_PX, MAX_STORED_HEIGHT_PX)
+                } else {
+                    prefs.remove(PreferencesKeys.HUD_LANDSCAPE_X)
+                    prefs.remove(PreferencesKeys.HUD_LANDSCAPE_Y)
+                    prefs.remove(PreferencesKeys.HUD_LANDSCAPE_WIDTH)
+                    prefs.remove(PreferencesKeys.HUD_LANDSCAPE_HEIGHT)
+                }
+            }
+        }
+    }
+
+    private suspend fun readPreferencesSnapshotOnce(): Preferences {
+        var latest: Preferences = emptyPreferences()
+        try {
+            dataStore.data
+                .catch { e ->
+                    if (e is IOException) emit(emptyPreferences()) else throw e
+                }
+                .collect {
+                    latest = it
+                    throw StopAfterFirstException()
+                }
+        } catch (_: StopAfterFirstException) {
+            // Expected single-emission short-circuit
+        }
+        return latest
+    }
+
+    private fun extractBackupAppSettings(raw: Preferences): com.example.data.backup.BackupAppSettingsData {
+        val offsets = linkedMapOf<String, Long>()
+        for ((key, value) in raw.asMap()) {
+            if (key.name.startsWith("offset_") && value is Long && value != 0L) {
+                offsets[key.name] = value
+            }
+        }
+        val themeMode = try {
+            ThemeMode.valueOf(raw[PreferencesKeys.THEME_MODE] ?: ThemeMode.FOLLOW_SYSTEM.name)
+        } catch (_: Exception) {
+            ThemeMode.FOLLOW_SYSTEM
+        }
+        val preset = try {
+            when (ThemePreset.valueOf(raw[PreferencesKeys.THEME_PRESET] ?: ThemePreset.ROSE_QUARTZ.name)) {
+                ThemePreset.ROSE_QUARTZ, ThemePreset.OBSIDIAN_MINT -> ThemePreset.ROSE_QUARTZ
+                ThemePreset.LAVENDER_MIST, ThemePreset.MIDNIGHT_AZURE -> ThemePreset.LAVENDER_MIST
+                ThemePreset.PEACH_EMBER, ThemePreset.SUNSET_AMBER -> ThemePreset.PEACH_EMBER
+                ThemePreset.SAGE_SERENITY, ThemePreset.CYBER_VIOLET -> ThemePreset.SAGE_SERENITY
+            }
+        } catch (_: Exception) {
+            ThemePreset.ROSE_QUARTZ
+        }
+        val font = try {
+            FontOption.valueOf(raw[PreferencesKeys.SELECTED_FONT] ?: FontOption.POPPINS.name)
+        } catch (_: Exception) {
+            FontOption.POPPINS
+        }
+        val provider = LyricsProviderPreference.fromPersistedValue(raw[PreferencesKeys.LYRICS_PROVIDER])
+        val rawStyle = raw[PreferencesKeys.ANIMATION_STYLE] ?: OverlayAnimationStyle.KARAOKE.name
+        val animStyle = when (rawStyle) {
+            "APPLE_MUSIC", "KARAOKE" -> OverlayAnimationStyle.KARAOKE.name
+            "SMOOTH_SLIDE_UP", "SOFT_FADE", "SCALE_POP", "SMOOTH_SLIDE" -> OverlayAnimationStyle.SMOOTH_SLIDE.name
+            "FADE", "FADE_IN_OUT" -> OverlayAnimationStyle.FADE.name
+            "BLUR_REVEAL", "BLUR" -> OverlayAnimationStyle.BLUR_REVEAL.name
+            "TYPEWRITER" -> OverlayAnimationStyle.TYPEWRITER.name
+            "MINIMAL_STATIC", "INSTANT" -> OverlayAnimationStyle.INSTANT.name
+            else -> OverlayAnimationStyle.KARAOKE.name
+        }
+        val karaoke = (raw[PreferencesKeys.KARAOKE_GLOW_SPEED] ?: raw[PreferencesKeys.KARAOKE_SPEED] ?: 1.0f).coerceIn(0.5f, 1.5f)
+        return com.example.data.backup.BackupAppSettingsData(
+            schemaVersion = 1,
+            themeMode = themeMode.name,
+            themePreset = preset.name,
+            useWallpaperDynamicColor = raw[PreferencesKeys.USE_WALLPAPER_DYNAMIC_COLOR] ?: false,
+            selectedFont = font.name,
+            lyricsProvider = provider.name,
+            autoShowOnPlayback = raw[PreferencesKeys.AUTO_SHOW_ON_PLAYBACK] ?: true,
+            autoFetchLyrics = raw[PreferencesKeys.AUTO_FETCH_LYRICS] ?: true,
+            autoUpdateChecksEnabled = raw[PreferencesKeys.AUTO_UPDATE_CHECKS_ENABLED] ?: true,
+            animationStyle = animStyle,
+            upwardAnimationEnabled = raw[PreferencesKeys.UPWARD_ANIMATION] ?: true,
+            appleMusicStyle = raw[PreferencesKeys.APPLE_MUSIC_STYLE] ?: true,
+            singleLineLyrics = raw[PreferencesKeys.SINGLE_LINE_LYRICS] ?: false,
+            adaptiveLyricScrolling = raw[PreferencesKeys.ADAPTIVE_LYRIC_SCROLLING] ?: true,
+            lyricScrollSpeedMultiplier = (raw[PreferencesKeys.LYRIC_SCROLL_SPEED_MULTIPLIER] ?: 1.0f).coerceIn(1.0f, 1.5f),
+            typewriterSpeed = (raw[PreferencesKeys.TYPEWRITER_SPEED] ?: 1.0f).coerceIn(0.3f, 3.0f),
+            smoothTransitionSpeed = (raw[PreferencesKeys.SMOOTH_TRANSITION_SPEED] ?: 1.0f).coerceIn(0.3f, 3.0f),
+            fadeSpeed = (raw[PreferencesKeys.FADE_SPEED] ?: 1.0f).coerceIn(0.3f, 3.0f),
+            blurRevealSpeed = (raw[PreferencesKeys.BLUR_REVEAL_SPEED] ?: 1.0f).coerceIn(0.3f, 3.0f),
+            karaokeSpeed = karaoke,
+            karaokeGlowSpeed = karaoke,
+            globalOffsetMs = raw[PreferencesKeys.GLOBAL_OFFSET_MS] ?: 0L,
+            trackOffsets = offsets
+        )
+    }
+
+    private fun extractBackupHudConfig(raw: Preferences): com.example.data.backup.BackupHudConfigData {
+        val portraitY = (raw[PreferencesKeys.HUD_PORTRAIT_Y]
+            ?: raw[PreferencesKeys.OVERLAY_Y_POS]
+            ?: HudPositioningEngine.DEFAULT_PORTRAIT_Y).coerceIn(0, MAX_STORED_POS_PX)
+        val portraitX = (raw[PreferencesKeys.HUD_PORTRAIT_X]
+            ?: raw[PreferencesKeys.OVERLAY_X_POS]
+            ?: HudPositioningEngine.DEFAULT_PORTRAIT_X).coerceIn(MIN_STORED_X_PX, MAX_STORED_POS_PX)
+        val portraitWidth = (raw[PreferencesKeys.HUD_PORTRAIT_WIDTH]
+            ?: raw[PreferencesKeys.OVERLAY_WIDTH]
+            ?: HudPositioningEngine.DEFAULT_PORTRAIT_WIDTH_PX).coerceIn(MIN_STORED_WIDTH_PX, MAX_STORED_POS_PX)
+        val portraitHeight = (raw[PreferencesKeys.HUD_PORTRAIT_HEIGHT]
+            ?: raw[PreferencesKeys.OVERLAY_HEIGHT]
+            ?: HudPositioningEngine.DEFAULT_PORTRAIT_HEIGHT_PX).coerceIn(MIN_STORED_HEIGHT_PX, MAX_STORED_HEIGHT_PX)
+
+        val lx = raw[PreferencesKeys.HUD_LANDSCAPE_X]?.coerceIn(MIN_STORED_X_PX, MAX_STORED_POS_PX)
+        val ly = raw[PreferencesKeys.HUD_LANDSCAPE_Y]?.coerceIn(0, MAX_STORED_POS_PX)
+        val lw = raw[PreferencesKeys.HUD_LANDSCAPE_WIDTH]?.coerceIn(MIN_STORED_WIDTH_PX, MAX_STORED_POS_PX)
+        val lh = raw[PreferencesKeys.HUD_LANDSCAPE_HEIGHT]?.coerceIn(MIN_STORED_HEIGHT_PX, MAX_STORED_HEIGHT_PX)
+        val hasLandscape = lx != null && ly != null && lw != null && lh != null
+
+        return com.example.data.backup.BackupHudConfigData(
+            schemaVersion = 1,
+            overlayEnabled = raw[PreferencesKeys.OVERLAY_ENABLED] ?: true,
+            overlayTextSizeSp = raw[PreferencesKeys.OVERLAY_TEXT_SIZE] ?: 14f,
+            overlayTextOpacity = (raw[PreferencesKeys.OVERLAY_TEXT_OPACITY] ?: 1.0f).coerceIn(0.15f, 1.0f),
+            textShadowEnabled = raw[PreferencesKeys.OVERLAY_TEXT_SHADOW] ?: true,
+            overlayTextAlign = raw[PreferencesKeys.OVERLAY_TEXT_ALIGN] ?: "CENTER",
+            clickThroughOverlay = raw[PreferencesKeys.CLICK_THROUGH_OVERLAY] ?: false,
+            hudBackdropEnabled = raw[PreferencesKeys.HUD_BACKDROP_ENABLED] ?: false,
+            hudBackdropStyle = HudBackdropStyle.fromName(raw[PreferencesKeys.HUD_BACKDROP_STYLE]).name,
+            hudBackdropOpacity = (raw[PreferencesKeys.HUD_BACKDROP_OPACITY] ?: 0.65f).coerceIn(0.0f, 1.0f),
+            hudBackdropCornerRadiusDp = (raw[PreferencesKeys.HUD_BACKDROP_CORNER_RADIUS_DP] ?: 18).coerceIn(0, 32),
+            hudBackdropHorizontalPaddingDp = (raw[PreferencesKeys.HUD_BACKDROP_HORIZONTAL_PADDING_DP] ?: 16).coerceIn(0, 32),
+            hudBackdropVerticalPaddingDp = (raw[PreferencesKeys.HUD_BACKDROP_VERTICAL_PADDING_DP] ?: 10).coerceIn(0, 24),
+            hudActiveLyricColor = HudColorSystem.sanitizeOpaqueColor(
+                raw[PreferencesKeys.HUD_ACTIVE_LYRIC_COLOR],
+                HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR
+            ),
+            hudInactiveLyricColor = HudColorSystem.sanitizeOpaqueColor(
+                raw[PreferencesKeys.HUD_INACTIVE_LYRIC_COLOR],
+                HudColorSystem.DEFAULT_INACTIVE_LYRIC_COLOR
+            ),
+            hudCustomColors = HudColorSystem.deserializeCustomColors(
+                raw[PreferencesKeys.HUD_CUSTOM_COLORS]
+            ),
+            hudPortraitX = portraitX,
+            hudPortraitY = portraitY,
+            hudPortraitWidth = portraitWidth,
+            hudPortraitHeight = portraitHeight,
+            hudLandscapeX = if (hasLandscape) lx else null,
+            hudLandscapeY = if (hasLandscape) ly else null,
+            hudLandscapeWidth = if (hasLandscape) lw else null,
+            hudLandscapeHeight = if (hasLandscape) lh else null
+        )
+    }
+
+    private class StopAfterFirstException : Exception()
 }

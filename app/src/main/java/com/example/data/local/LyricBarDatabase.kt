@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import com.example.data.local.dao.BackupDao
 import com.example.data.local.dao.LyricsDao
 import com.example.data.local.dao.SongHistoryDao
 import com.example.data.local.entity.LyricsEntity
@@ -21,6 +22,7 @@ abstract class LyricBarDatabase : RoomDatabase() {
 
     abstract fun lyricsDao(): LyricsDao
     abstract fun songHistoryDao(): SongHistoryDao
+    abstract fun backupDao(): BackupDao
 
     companion object {
         @Volatile

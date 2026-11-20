@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">LyricBar</string>
-    <string name="app_version">2.6.0</string>
+    <string name="app_version">2.6.1</string>
     <string name="app_description">Synchronized floating lyrics overlay for Android music apps.</string>
     
     <!-- Navigation -->
@@ -34,6 +34,21 @@
     <string name="developer_credits">Developed with Kotlin &amp; Jetpack Compose</string>
     <string name="github_repository">GitHub Repository</string>
     <string name="license_notice">Released under the MIT License</string>
+    <string name="developer_role_subtitle">Creator of LyricBar</string>
+    <string name="developer_section_about">About</string>
+    <string name="developer_section_links">Links</string>
+    <string name="developer_section_project_updates">Project &amp; Updates</string>
+    <string name="developer_more_projects_hint">Visit GitHub to explore more open-source projects.</string>
+    <string name="developer_profile_title">Developer</string>
+    <string name="developer_source_code_title">Source Code</string>
+    <string name="developer_auto_update_title">Automatic update checks</string>
+    <string name="developer_auto_update_description">Checks GitHub for new stable releases every 48 hours and notifies when available</string>
+    <string name="developer_last_checked">Last checked: %1$s</string>
+    <string name="developer_not_checked_yet">Not checked yet</string>
+    <string name="developer_notifications_off_hint">System notifications are off; available updates still appear here.</string>
+    <string name="developer_pending_release">New stable release detected: v%1$s</string>
+    <string name="developer_check_updates">Check for Updates</string>
+    <string name="developer_footer_credit">Made by %1$s</string>
 
     <!-- Notification & Overlay Strings -->
     <string name="lyrics_channel_name">Floating Lyrics Service</string>
@@ -47,4 +62,18 @@
     <string name="update_channel_description">Notifications when a new stable LyricBar release is available</string>
     <string name="update_notification_title">LyricBar update available</string>
     <string name="update_notification_message">LyricBar v%1$s is now available. Tap to see what\'s new.</string>
+
+    <!-- Backup & Restore -->
+    <string name="backup_restore_title">Backup &amp; Restore</string>
+    <string name="backup_restore_subtitle">Export or selectively restore your LyricBar data</string>
+    <string name="create_backup_title">Create Backup</string>
+    <string name="create_backup_subtitle">Choose what you want to include in your backup.</string>
+    <string name="restore_backup_title">Restore Backup</string>
+    <string name="restore_backup_subtitle">Select the data you want to restore.</string>
+    <string name="backup_select_all">Select All</string>
+    <string name="backup_deselect_all">Deselect All</string>
+    <string name="backup_select_file">Select Backup File</string>
+    <string name="backup_choose_different_file">Choose Different File</string>
+    <string name="backup_confirm_restore_title">Confirm Restore</string>
+    <string name="backup_confirm_restore_action">Restore Now</string>
 </resources>

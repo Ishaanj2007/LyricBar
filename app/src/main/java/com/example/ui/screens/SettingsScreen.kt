@@ -143,6 +143,7 @@ fun SettingsScreen(
     var showOrientationInfoDialog by remember { mutableStateOf(false) }
     var selectedColorTarget by rememberSaveable { mutableStateOf(HudColorTarget.ACTIVE_LYRIC) }
     var activeColorPickerTarget by remember { mutableStateOf<HudColorTarget?>(null) }
+    var activeBackupSubScreen by rememberSaveable { mutableStateOf<BackupSubScreen?>(null) }
 
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, context) {
@@ -164,6 +165,7 @@ fun SettingsScreen(
 
     LaunchedEffect(openUpdaterSignal) {
         if (openUpdaterSignal > 0) {
+            activeBackupSubScreen = null
             expandedSections = expandedSections + SettingsAccordionState.SECTION_ABOUT
             showUpdateDialog = true
             updateManager.openUpdaterFromNotification()
@@ -3175,6 +3177,13 @@ fun SettingsScreen(
         }
     }
 
+    val sectionBackupRestore: @Composable () -> Unit = {
+        BackupRestoreSettingsCard(
+            onOpenCreateBackup = { activeBackupSubScreen = BackupSubScreen.CREATE },
+            onOpenRestoreBackup = { activeBackupSubScreen = BackupSubScreen.RESTORE }
+        )
+    }
+
     val sectionAbout: @Composable () -> Unit = {
         // SECTION 9: ABOUT & DEVELOPER
         SettingsAccordionCard(
@@ -3184,171 +3193,48 @@ fun SettingsScreen(
             isExpanded = "about" in expandedSections,
             onToggle = { toggleSection("about") }
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(18.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Image(
-                    painter = painterResource(id = R.drawable.lyricbarlogo),
-                    contentDescription = "LyricBar Logo",
-                    modifier = Modifier.size(56.dp).clip(RoundedCornerShape(12.dp))
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "LyricBar",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    text = "Version ${com.example.BuildConfig.VERSION_NAME}",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "Made with ❤️ by ${DeveloperConfig.DEVELOPER_NAME}",
-                    fontWeight = FontWeight.Medium,
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Text(
-                    text = "Visit Github For More Projects",
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(DeveloperConfig.GITHUB_PROFILE_URL))
-                            context.startActivity(intent)
-                        },
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(10.dp)
-                    ) {
-                        Text("Developer", fontSize = 12.sp, maxLines = 1)
-                    }
-
-                    Button(
-                        onClick = {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(DeveloperConfig.SOURCE_CODE_URL))
-                            context.startActivity(intent)
-                        },
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(10.dp)
-                    ) {
-                        Text("Source Code", fontSize = 12.sp, maxLines = 1)
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-                HorizontalDivider()
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(end = 12.dp)
-                    ) {
-                        Text(
-                            text = "Automatic update checks",
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurface
+            AboutDeveloperContent(
+                autoUpdateChecksEnabled = livePreferences.autoUpdateChecksEnabled,
+                lastUpdateCheckTimestampMs = livePreferences.lastUpdateCheckTimestampMs,
+                notificationsAllowed = notificationsAllowed,
+                pendingReleaseVersionName = cachedAvailableRelease?.cleanVersionName,
+                onAutoUpdateChecksChanged = { enabled ->
+                    coroutineScope.launch {
+                        playbackManager.preferencesRepository.setAutoUpdateChecksEnabled(enabled)
+                        com.example.data.updater.UpdateCheckScheduler.syncPeriodicSchedule(
+                            context = context,
+                            enabled = enabled
                         )
-                        Text(
-                            text = "Checks GitHub for new stable releases every 48 hours and notifies when available",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        val lastCheckedLabel = remember(livePreferences.lastUpdateCheckTimestampMs) {
-                            if (livePreferences.lastUpdateCheckTimestampMs > 0L) {
-                                DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
-                                    .format(Date(livePreferences.lastUpdateCheckTimestampMs))
-                            } else {
-                                "Not checked yet"
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "Last checked: $lastCheckedLabel",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f)
-                        )
-                        if (
-                            livePreferences.autoUpdateChecksEnabled &&
-                            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                            !notificationsAllowed
-                        ) {
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "System notifications are off; available updates still appear here.",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f)
-                            )
-                        }
                     }
-                    Switch(
-                        checked = livePreferences.autoUpdateChecksEnabled,
-                        onCheckedChange = { enabled ->
-                            coroutineScope.launch {
-                                playbackManager.preferencesRepository.setAutoUpdateChecksEnabled(enabled)
-                                com.example.data.updater.UpdateCheckScheduler.syncPeriodicSchedule(
-                                    context = context,
-                                    enabled = enabled
-                                )
-                            }
-                        },
-                        modifier = Modifier.testTag("settings_auto_update_checks_switch")
-                    )
+                },
+                onCheckForUpdatesClick = {
+                    showUpdateDialog = true
+                    updateManager.checkForUpdates(isUserInitiated = true)
                 }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                val pendingUpdate = cachedAvailableRelease
-                if (pendingUpdate != null) {
-                    Text(
-                        text = "New stable release detected: v${pendingUpdate.cleanVersionName}",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.primary,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 8.dp)
-                    )
-                }
-
-                OutlinedButton(
-                    onClick = {
-                        showUpdateDialog = true
-                        updateManager.checkForUpdates(isUserInitiated = true)
-                    },
-                    modifier = Modifier.fillMaxWidth().testTag("check_for_updates_button"),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.SystemUpdate,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Check for Updates", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
-                }
-            }
+            )
         }
+    }
+
+    when (activeBackupSubScreen) {
+        BackupSubScreen.CREATE -> {
+            CreateBackupScreen(
+                preferencesRepository = playbackManager.preferencesRepository,
+                hasBottomNavPill = hasBottomNavPill,
+                onNavigateBack = { activeBackupSubScreen = null },
+                modifier = modifier
+            )
+            return
+        }
+        BackupSubScreen.RESTORE -> {
+            RestoreBackupScreen(
+                preferencesRepository = playbackManager.preferencesRepository,
+                hasBottomNavPill = hasBottomNavPill,
+                onNavigateBack = { activeBackupSubScreen = null },
+                modifier = modifier
+            )
+            return
+        }
+        null -> Unit
     }
 
     BoxWithConstraints(
@@ -3469,6 +3355,7 @@ fun SettingsScreen(
                             sectionTheme()
                             sectionTypography()
                             sectionData()
+                            sectionBackupRestore()
                             sectionAbout()
                         }
                     }
@@ -3487,6 +3374,7 @@ fun SettingsScreen(
                         sectionTypography()
                         sectionLyricsProvider()
                         sectionData()
+                        sectionBackupRestore()
                         sectionAbout()
                     }
                 }
