@@ -833,7 +833,10 @@ fun rememberArtworkGlowBitmap(
 ): Bitmap? {
     val trackKey = track?.key ?: ""
     val paletteHash = glowPalette?.let { "${it.topColor.hashCode()}_${it.bottomColor.hashCode()}" } ?: ""
-    val artworkIdentity = remember(artworkBitmap, trackKey) {
+    // BUG-005: Key only on trackKey, not artworkBitmap. Each MediaSession callback may deliver
+    // a new Bitmap allocation with identical pixels; using the Bitmap reference as a remember key
+    // causes getArtworkIdentity to see a fresh reference → new revision → glow recomputed needlessly.
+    val artworkIdentity = remember(trackKey) {
         ArtworkCanonicalizer.getArtworkIdentity(trackKey, artworkBitmap)
     }
     val glowCacheKey = remember(artworkIdentity, paletteHash) {
@@ -847,8 +850,10 @@ fun rememberArtworkGlowBitmap(
     return produceState<Bitmap?>(
         initialValue = cached,
         key1 = glowCacheKey,
-        key2 = artworkBitmap,
-        key3 = glowPalette
+        // BUG-005: Removed key2 = artworkBitmap. glowCacheKey already encodes artwork identity;
+        // using artworkBitmap as an additional key restarts the coroutine on every new Bitmap
+        // allocation with identical pixels, even when glowCacheKey (the stable cache key) is unchanged.
+        key2 = glowPalette
     ) {
         val expectedKey = glowCacheKey
         if (artworkBitmap == null || artworkBitmap.isRecycled || expectedKey.isBlank()) {
@@ -911,7 +916,10 @@ fun CinematicArtworkBackground(
 ) {
     val backgroundColor = MaterialTheme.colorScheme.background
 
-    val artworkIdentity = remember(artworkBitmap, trackKey) {
+    // BUG-005: Key only on trackKey, not artworkBitmap. Identical-pixel Bitmap re-allocations
+    // from MediaSession must not restart the blur pipeline. trackKey changes only on genuine
+    // track switches, which is the correct trigger for new blur generation.
+    val artworkIdentity = remember(trackKey) {
         ArtworkCanonicalizer.getArtworkIdentity(trackKey, artworkBitmap)
     }
 

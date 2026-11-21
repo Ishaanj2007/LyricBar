@@ -534,11 +534,18 @@ fun NowPlayingScreen(
 
     // Shared lifecycle-safe artwork decoding
     val rawArtworkBitmap = rememberArtworkBitmap(track)
-    val artworkIdentity = remember(rawArtworkBitmap, track?.key) {
+    // BUG-005: Key only on track?.key, not rawArtworkBitmap. MediaSession may deliver a new
+    // Bitmap allocation with identical pixels on every callback; using it as a remember key
+    // causes spurious identity changes → unnecessary Crossfade + blur/glow restarts.
+    // getArtworkIdentity is called once per track switch; subsequent identical-pixel deliveries
+    // keep the same identity string, suppressing unnecessary recomposition.
+    val artworkIdentity = remember(track?.key) {
         ArtworkCanonicalizer.getArtworkIdentity(track?.key ?: "", rawArtworkBitmap)
     }
 
-    val artworkImageBitmap = remember(rawArtworkBitmap) {
+    // BUG-005: Key on artworkIdentity (stable string) rather than rawArtworkBitmap reference.
+    // The ImageBitmap only needs to be recreated when the artwork content genuinely changes.
+    val artworkImageBitmap = remember(artworkIdentity) {
         try {
             rawArtworkBitmap?.takeIf { !it.isRecycled }?.asImageBitmap()
         } catch (_: Throwable) {
@@ -547,7 +554,9 @@ fun NowPlayingScreen(
     }
 
     val primaryColor = MaterialTheme.colorScheme.primary
-    val glowPalette = remember(rawArtworkBitmap, track?.key, primaryColor) {
+    // BUG-005: Key on artworkIdentity instead of rawArtworkBitmap to prevent palette
+    // re-extraction on each new Bitmap allocation with identical pixels.
+    val glowPalette = remember(artworkIdentity, primaryColor) {
         if (rawArtworkBitmap != null && !rawArtworkBitmap.isRecycled) {
             extractArtworkGlowPalette(rawArtworkBitmap, primaryColor)
         } else {
