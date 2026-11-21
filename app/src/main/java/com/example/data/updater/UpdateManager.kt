@@ -58,7 +58,7 @@ class UpdateManager private constructor(
 ) {
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    private val preferencesRepository = UserPreferencesRepository(context.applicationContext)
+    private val preferencesRepository = UserPreferencesRepository.getInstance(context)
     private val notifier = UpdateNotifier(context.applicationContext)
     private val checkEngine = UpdateCheckEngine(
         repository = repository,

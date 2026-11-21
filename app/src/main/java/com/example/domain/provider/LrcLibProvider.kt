@@ -1,5 +1,6 @@
 package com.example.domain.provider
 
+import com.example.BuildConfig
 import com.example.data.model.ParsedLyrics
 import com.example.domain.parser.LrcParser
 import kotlinx.coroutines.Dispatchers
@@ -19,6 +20,11 @@ class LrcLibProvider(
 
     override val name: String = "LRCLIB"
 
+    companion object {
+        // MIN-04: Dynamically format User-Agent using BuildConfig.VERSION_NAME rather than stale hardcoded version
+        private val USER_AGENT: String = "LyricBar/${try { BuildConfig.VERSION_NAME } catch (_: Throwable) { "2.6.1" }} (Android)"
+    }
+
     override suspend fun fetchLyrics(
         title: String,
         artist: String,
@@ -36,7 +42,7 @@ class LrcLibProvider(
 
             val request = Request.Builder()
                 .url(urlBuilder.build())
-                .header("User-Agent", "LyricBar/1.0.6 (Android)")
+                .header("User-Agent", USER_AGENT)
                 .get()
                 .build()
 
@@ -86,7 +92,7 @@ class LrcLibProvider(
                 if (searchUrl != null) {
                     val searchRequest = Request.Builder()
                         .url(searchUrl)
-                        .header("User-Agent", "LyricBar/1.0.6 (Android)")
+                        .header("User-Agent", USER_AGENT)
                         .get()
                         .build()
 

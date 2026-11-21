@@ -789,6 +789,19 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
     }
 
     companion object {
+        @Volatile
+        private var INSTANCE: UserPreferencesRepository? = null
+
+        /**
+         * MIN-02: Singleton accessor to ensure a single shared instance of UserPreferencesRepository
+         * and DataStore flow collector across MediaPlaybackManager, UpdateManager, and workers.
+         */
+        fun getInstance(context: Context): UserPreferencesRepository {
+            return INSTANCE ?: synchronized(this) {
+                INSTANCE ?: UserPreferencesRepository(context.applicationContext).also { INSTANCE = it }
+            }
+        }
+
         private const val CURRENT_HUD_STYLE_MIGRATION_VERSION = 1
         private const val MIN_STORED_X_PX = -4000
         private const val MAX_STORED_POS_PX = 8000
@@ -1027,6 +1040,8 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
                 prefs[PreferencesKeys.HUD_CUSTOM_COLORS] = HudColorSystem.serializeCustomColors(safeCustomColors)
 
                 // Portrait profile + legacy portrait mirror keys
+                // MIN-05: Maintain dual-write to legacy OVERLAY_* keys explicitly for backwards compatibility
+                // with older app components and widgets while preserving HUD_PORTRAIT_* as primary.
                 prefs[PreferencesKeys.HUD_PORTRAIT_X] = safePortraitX
                 prefs[PreferencesKeys.HUD_PORTRAIT_Y] = safePortraitY
                 prefs[PreferencesKeys.HUD_PORTRAIT_WIDTH] = safePortraitW

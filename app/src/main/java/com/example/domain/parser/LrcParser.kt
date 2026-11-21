@@ -45,7 +45,9 @@ object LrcParser {
         }
 
         if (isTtml(cleanContent)) {
-            throw IllegalArgumentException("Unsupported format: TTML is not supported. Please use LRC.")
+            // MIN-01: Throw LrcImportException.UnsupportedFormat (subclass of IllegalArgumentException)
+            // to allow callers to specifically handle TTML format rejections.
+            throw LrcImportException.UnsupportedFormat("Unsupported format: TTML is not supported. Please use LRC.")
         }
         val lines = cleanContent.lines()
         val parsedLines = mutableListOf<LyricLine>()

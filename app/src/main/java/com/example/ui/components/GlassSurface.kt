@@ -1086,6 +1086,8 @@ object ArtworkMemoryCache {
     private val maxMemory = Runtime.getRuntime().maxMemory()
     // Allocate 1/8th of available runtime heap, bounded between 16MB and 32MB
     private val cacheSizeBytes = (maxMemory / 8L).coerceIn(16L * 1024 * 1024, 32L * 1024 * 1024)
+    // MIN-03: Cap maximum entries to prevent unbounded growth during long playlist sessions
+    private const val MAX_ENTRIES = 32
 
     private var currentSizeBytes: Long = 0L
     private val map = LinkedHashMap<String, Bitmap>(32, 0.75f, true)
@@ -1135,7 +1137,7 @@ object ArtworkMemoryCache {
 
     private fun trimToSize() {
         val iterator = map.entries.iterator()
-        while (currentSizeBytes > cacheSizeBytes && iterator.hasNext()) {
+        while ((currentSizeBytes > cacheSizeBytes || map.size > MAX_ENTRIES) && iterator.hasNext()) {
             val entry = iterator.next()
             val bytes = try { entry.value.byteCount.toLong().coerceAtLeast(1L) } catch (_: Throwable) { 1L }
             currentSizeBytes = (currentSizeBytes - bytes).coerceAtLeast(0L)
