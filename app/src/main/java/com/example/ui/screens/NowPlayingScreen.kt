@@ -69,6 +69,7 @@ import com.example.data.model.TrackMetadata
 import com.example.data.preferences.UserPreferences
 import com.example.service.MediaPlaybackManager
 import com.example.service.OverlayService
+import com.example.ui.components.ArtworkCanonicalizer
 import com.example.ui.components.ArtworkGlowPalette
 import com.example.ui.components.CinematicArtworkBackground
 import com.example.ui.components.FrostedCard
@@ -81,6 +82,47 @@ import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+
+// Immutable Crossfade state containers for artwork transitions
+private class ForegroundArtworkState(
+    val identity: String,
+    val artwork: androidx.compose.ui.graphics.ImageBitmap?,
+    val title: String,
+    val hasSession: Boolean
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is ForegroundArtworkState) return false
+        return identity == other.identity &&
+            hasSession == other.hasSession &&
+            (artwork != null) == (other.artwork != null)
+    }
+
+    override fun hashCode(): Int {
+        var result = identity.hashCode()
+        result = 31 * result + hasSession.hashCode()
+        result = 31 * result + (if (artwork != null) 1 else 0)
+        return result
+    }
+}
+
+private class AmbientGlowState(
+    val identity: String,
+    val glowBitmap: Bitmap?
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is AmbientGlowState) return false
+        return identity == other.identity &&
+            (glowBitmap != null) == (other.glowBitmap != null)
+    }
+
+    override fun hashCode(): Int {
+        var result = identity.hashCode()
+        result = 31 * result + (if (glowBitmap != null) 1 else 0)
+        return result
+    }
+}
 
 /**
  * Semantic presentation model for the Now Playing Live Lyrics Card.
@@ -492,6 +534,9 @@ fun NowPlayingScreen(
 
     // Shared lifecycle-safe artwork decoding
     val rawArtworkBitmap = rememberArtworkBitmap(track)
+    val artworkIdentity = remember(rawArtworkBitmap, track?.key) {
+        ArtworkCanonicalizer.getArtworkIdentity(track?.key ?: "", rawArtworkBitmap)
+    }
 
     val artworkImageBitmap = remember(rawArtworkBitmap) {
         try {
@@ -750,7 +795,8 @@ fun NowPlayingScreen(
                                             artworkImageBitmap = artworkImageBitmap,
                                             artworkGlowBitmap = artworkGlowBitmap,
                                             hasSession = hasSession,
-                                            primaryColor = primaryColor
+                                            primaryColor = primaryColor,
+                                            artworkIdentity = artworkIdentity
                                         )
                                         NowPlayingSongInfoSection(
                                             track = track,
@@ -771,7 +817,8 @@ fun NowPlayingScreen(
                                         artworkImageBitmap = artworkImageBitmap,
                                         artworkGlowBitmap = artworkGlowBitmap,
                                         hasSession = hasSession,
-                                        primaryColor = primaryColor
+                                        primaryColor = primaryColor,
+                                        artworkIdentity = artworkIdentity
                                     )
 
                                     Spacer(modifier = Modifier.height(if (isTightArtworkGap) 8.dp else 12.dp))
@@ -899,7 +946,8 @@ fun NowPlayingScreen(
                             artworkImageBitmap = artworkImageBitmap,
                             artworkGlowBitmap = artworkGlowBitmap,
                             hasSession = hasSession,
-                            primaryColor = primaryColor
+                            primaryColor = primaryColor,
+                            artworkIdentity = artworkIdentity
                         )
 
                         Spacer(modifier = Modifier.height(metrics.artworkToInfoPaddingDp.dp))
@@ -1016,7 +1064,8 @@ fun NowPlayingScreen(
                             artworkImageBitmap = artworkImageBitmap,
                             artworkGlowBitmap = artworkGlowBitmap,
                             hasSession = hasSession,
-                            primaryColor = primaryColor
+                            primaryColor = primaryColor,
+                            artworkIdentity = artworkIdentity
                         )
 
                         Spacer(modifier = Modifier.height(metrics.artworkToInfoPaddingDp.dp))
@@ -1204,7 +1253,8 @@ private fun NowPlayingArtworkHero(
     artworkImageBitmap: androidx.compose.ui.graphics.ImageBitmap?,
     artworkGlowBitmap: Bitmap?,
     hasSession: Boolean,
-    primaryColor: Color
+    primaryColor: Color,
+    artworkIdentity: String = ""
 ) {
     val artworkShape = RoundedCornerShape(24.dp)
     Box(
@@ -1213,25 +1263,44 @@ private fun NowPlayingArtworkHero(
             .aspectRatio(1f),
         contentAlignment = Alignment.Center
     ) {
+        // Immutable state for foreground artwork crossfade
+        val foregroundState = remember(artworkIdentity, artworkImageBitmap, hasSession) {
+            ForegroundArtworkState(
+                identity = artworkIdentity,
+                artwork = artworkImageBitmap,
+                title = track?.title ?: "",
+                hasSession = hasSession
+            )
+        }
+
+        // Immutable state for ambient glow crossfade
+        val ambientState = remember(artworkIdentity, artworkGlowBitmap) {
+            AmbientGlowState(
+                identity = artworkIdentity,
+                glowBitmap = artworkGlowBitmap?.takeIf { !it.isRecycled }
+            )
+        }
+
         // 1. Organic Artwork Ambient Glow Layer: Radiates softly around the rounded square silhouette
-        if (artworkGlowBitmap != null && !artworkGlowBitmap.isRecycled) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        scaleX = 1.38f
-                        scaleY = 1.38f
-                        clip = false
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                Crossfade(
-                    targetState = track?.key ?: "",
-                    animationSpec = tween(durationMillis = 260),
-                    label = "artwork_glow_crossfade"
-                ) { _ ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    scaleX = 1.38f
+                    scaleY = 1.38f
+                    clip = false
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            Crossfade(
+                targetState = ambientState,
+                animationSpec = tween(durationMillis = 260),
+                label = "artwork_glow_crossfade"
+            ) { state ->
+                val bmp = state.glowBitmap
+                if (bmp != null && !bmp.isRecycled) {
                     Image(
-                        bitmap = artworkGlowBitmap.asImageBitmap(),
+                        bitmap = bmp.asImageBitmap(),
                         contentDescription = null,
                         contentScale = ContentScale.FillBounds,
                         alpha = 0.85f,
@@ -1254,14 +1323,14 @@ private fun NowPlayingArtworkHero(
             contentAlignment = Alignment.Center
         ) {
             Crossfade(
-                targetState = track?.key ?: "",
+                targetState = foregroundState,
                 animationSpec = tween(durationMillis = 220),
                 label = "artwork_crossfade"
-            ) { _ ->
-                if (artworkImageBitmap != null) {
+            ) { state ->
+                if (state.artwork != null) {
                     Image(
-                        bitmap = artworkImageBitmap,
-                        contentDescription = "Album art for ${track?.title ?: "current track"}",
+                        bitmap = state.artwork,
+                        contentDescription = "Album art for ${state.title.ifBlank { "current track" }}",
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
                             .fillMaxSize()
@@ -1291,7 +1360,7 @@ private fun NowPlayingArtworkHero(
                         }
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = if (hasSession) "No Artwork" else "Ready to Sync",
+                            text = if (state.hasSession) "No Artwork" else "Ready to Sync",
                             style = MaterialTheme.typography.labelSmall,
                             color = Color.White.copy(alpha = 0.70f)
                         )
