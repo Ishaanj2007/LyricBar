@@ -382,6 +382,7 @@ fun LyricsScreen(
                                 delayChevronRotation = delayChevronRotation,
                                 themePrimary = themePrimary,
                                 hazeState = hazeState,
+                                isLoadingProvider = isLoading && currentLyrics != null,
                                 onToggleProviderMenu = { isProviderMenuExpanded = !isProviderMenuExpanded },
                                 onToggleDelay = { isDelayExpanded = !isDelayExpanded },
                                 onSelectorPositioned = { pos, size ->
@@ -507,6 +508,7 @@ fun LyricsScreen(
                             themePrimary = themePrimary,
                             hazeState = hazeState,
                             compact = true,
+                            isLoadingProvider = isLoading && currentLyrics != null,
                             onToggleProviderMenu = { isProviderMenuExpanded = !isProviderMenuExpanded },
                             onToggleDelay = { isDelayExpanded = !isDelayExpanded },
                             onSelectorPositioned = { pos, size ->
@@ -622,6 +624,7 @@ fun LyricsScreen(
                                 themePrimary = themePrimary,
                                 hazeState = hazeState,
                                 compact = false,
+                                isLoadingProvider = isLoading && currentLyrics != null,
                                 onToggleProviderMenu = { isProviderMenuExpanded = !isProviderMenuExpanded },
                                 onToggleDelay = { isDelayExpanded = !isDelayExpanded },
                                 onSelectorPositioned = { pos, size ->
@@ -980,6 +983,7 @@ private fun LyricsProviderAndDelayCard(
     themePrimary: Color,
     hazeState: HazeState?,
     compact: Boolean = false,
+    isLoadingProvider: Boolean = false,
     onToggleProviderMenu: () -> Unit,
     onToggleDelay: () -> Unit,
     onSelectorPositioned: (Offset, IntSize) -> Unit
@@ -1039,14 +1043,24 @@ private fun LyricsProviderAndDelayCard(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                    Icon(
-                        imageVector = Icons.Default.KeyboardArrowDown,
-                        contentDescription = "Expand provider menu",
-                        tint = Color.White.copy(alpha = 0.75f),
-                        modifier = Modifier
-                            .size(18.dp)
-                            .graphicsLayer { rotationZ = providerChevronRotation }
-                    )
+                    if (isLoadingProvider) {
+                        CircularProgressIndicator(
+                            modifier = Modifier
+                                .size(16.dp)
+                                .testTag("lyrics_provider_loading_spinner"),
+                            strokeWidth = 2.dp,
+                            color = themePrimary
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.KeyboardArrowDown,
+                            contentDescription = "Expand provider menu",
+                            tint = Color.White.copy(alpha = 0.75f),
+                            modifier = Modifier
+                                .size(18.dp)
+                                .graphicsLayer { rotationZ = providerChevronRotation }
+                        )
+                    }
                 }
 
                 HorizontalDivider(
@@ -1146,14 +1160,24 @@ private fun LyricsProviderAndDelayCard(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                    Icon(
-                        imageVector = Icons.Default.KeyboardArrowDown,
-                        contentDescription = "Expand provider menu",
-                        tint = Color.White.copy(alpha = 0.75f),
-                        modifier = Modifier
-                            .size(18.dp)
-                            .graphicsLayer { rotationZ = providerChevronRotation }
-                    )
+                    if (isLoadingProvider) {
+                        CircularProgressIndicator(
+                            modifier = Modifier
+                                .size(16.dp)
+                                .testTag("lyrics_provider_loading_spinner"),
+                            strokeWidth = 2.dp,
+                            color = themePrimary
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.KeyboardArrowDown,
+                            contentDescription = "Expand provider menu",
+                            tint = Color.White.copy(alpha = 0.75f),
+                            modifier = Modifier
+                                .size(18.dp)
+                                .graphicsLayer { rotationZ = providerChevronRotation }
+                        )
+                    }
                 }
 
                 Box(
@@ -1372,19 +1396,35 @@ private fun LyricsEmptyOrLoadingState(
                     modifier = Modifier.size(if (compact) 48.dp else 68.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Default.MusicNote,
-                            contentDescription = "No lyrics icon",
-                            tint = themePrimary,
-                            modifier = Modifier.size(if (compact) 24.dp else 34.dp)
-                        )
+                        if (isLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier
+                                    .size(if (compact) 24.dp else 34.dp)
+                                    .testTag("lyrics_empty_state_loading_spinner"),
+                                strokeWidth = if (compact) 2.5.dp else 3.dp,
+                                color = themePrimary
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.MusicNote,
+                                contentDescription = "No lyrics icon",
+                                tint = themePrimary,
+                                modifier = Modifier.size(if (compact) 24.dp else 34.dp)
+                            )
+                        }
                     }
                 }
 
                 Spacer(modifier = Modifier.height(if (compact) 10.dp else 16.dp))
 
                 Text(
-                    text = if (hasTrack) "No lyrics found for this track" else "No track currently playing",
+                    text = if (isLoading) {
+                        "Searching for lyrics…"
+                    } else if (hasTrack) {
+                        "No lyrics found for this track"
+                    } else {
+                        "No track currently playing"
+                    },
                     style = MaterialTheme.typography.titleMedium.copy(fontSize = if (compact) 15.5.sp else 17.sp),
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
@@ -1394,90 +1434,77 @@ private fun LyricsEmptyOrLoadingState(
                 Spacer(modifier = Modifier.height(4.dp))
 
                 Text(
-                    text = "Search for matching lyrics online or select an LRC file manually",
+                    text = if (isLoading) {
+                        "Checking online providers for synchronized lyrics…"
+                    } else {
+                        "Search for matching lyrics online or select an LRC file manually"
+                    },
                     style = MaterialTheme.typography.bodyMedium.copy(fontSize = if (compact) 12.sp else 13.sp),
                     color = Color.White.copy(alpha = 0.72f),
                     textAlign = TextAlign.Center,
                     lineHeight = if (compact) 16.sp else 18.sp
                 )
 
-                if (isLoading) {
-                    Spacer(modifier = Modifier.height(if (compact) 10.dp else 14.dp))
+                if (!isLoading) {
+                    Spacer(modifier = Modifier.height(if (compact) 14.dp else 20.dp))
+
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp,
-                            color = themePrimary
-                        )
-                        Text(
-                            text = "Searching online providers…",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color.White.copy(alpha = 0.80f)
-                        )
-                    }
-                }
+                        Button(
+                            onClick = onSearch,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = themePrimary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = if (compact) 14.dp else 18.dp, vertical = 10.dp),
+                            modifier = Modifier
+                                .defaultMinSize(minHeight = 44.dp)
+                                .testTag("empty_state_search_button")
+                        ) {
+                            Icon(
+                                Icons.Default.Search,
+                                contentDescription = "Search for matching lyrics",
+                                tint = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                "Search Lyrics",
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
 
-                Spacer(modifier = Modifier.height(if (compact) 14.dp else 20.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Button(
-                        onClick = onSearch,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = themePrimary,
-                            contentColor = MaterialTheme.colorScheme.onPrimary
-                        ),
-                        shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = if (compact) 14.dp else 18.dp, vertical = 10.dp),
-                        modifier = Modifier
-                            .defaultMinSize(minHeight = 44.dp)
-                            .testTag("empty_state_search_button")
-                    ) {
-                        Icon(
-                            Icons.Default.Search,
-                            contentDescription = "Search for matching lyrics",
-                            tint = MaterialTheme.colorScheme.onPrimary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            "Search Lyrics",
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-
-                    OutlinedButton(
-                        onClick = onImport,
-                        shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = if (compact) 14.dp else 18.dp, vertical = 10.dp),
-                        border = BorderStroke(1.dp, themeSecondary.copy(alpha = 0.50f)),
-                        modifier = Modifier
-                            .defaultMinSize(minHeight = 44.dp)
-                            .testTag("empty_state_import_button")
-                    ) {
-                        Icon(
-                            Icons.Default.UploadFile,
-                            contentDescription = "Select an LRC file manually",
-                            tint = themeSecondary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            "Import Lyrics",
-                            color = themeSecondary,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        OutlinedButton(
+                            onClick = onImport,
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = if (compact) 14.dp else 18.dp, vertical = 10.dp),
+                            border = BorderStroke(1.dp, themeSecondary.copy(alpha = 0.50f)),
+                            modifier = Modifier
+                                .defaultMinSize(minHeight = 44.dp)
+                                .testTag("empty_state_import_button")
+                        ) {
+                            Icon(
+                                Icons.Default.UploadFile,
+                                contentDescription = "Select an LRC file manually",
+                                tint = themeSecondary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                "Import Lyrics",
+                                color = themeSecondary,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 }
             }
