@@ -4,14 +4,21 @@ import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 import java.io.IOException
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import kotlin.math.abs
 
 data class BiniHit(
@@ -121,20 +128,17 @@ class BiniLyricsApi(
             .get()
             .build()
 
-        return try {
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return emptyList()
-                val body = response.body?.string()
-                if (body.isNullOrBlank()) return emptyList()
-                parseSearchResponse(body)
-            }
-        } catch (cancellation: CancellationException) {
-            throw cancellation
-        } catch (_: IOException) {
-            emptyList()
-        } catch (_: Exception) {
-            emptyList()
+        val resp = client.newCall(request).awaitBiniResponse()
+        if (resp.code == 429) {
+            throw IOException("BiniLyricsApi rate limit exceeded (HTTP 429)")
         }
+        if (resp.code in 500..599) {
+            throw IOException("BiniLyricsApi returned HTTP ${resp.code}")
+        }
+        if (resp.code !in 200..299 || resp.body.isBlank()) {
+            return emptyList()
+        }
+        return parseSearchResponse(resp.body)
     }
 
     internal fun parseSearchResponse(jsonBody: String): List<BiniHit> {
@@ -274,4 +278,40 @@ private fun JsonObject.optIntOrNull(key: String): Int? {
     } catch (_: Exception) {
         null
     }
+}
+
+private data class BiniHttpResult(
+    val code: Int,
+    val body: String
+)
+
+private suspend fun Call.awaitBiniResponse(): BiniHttpResult = suspendCancellableCoroutine { cont ->
+    val isResumed = AtomicBoolean(false)
+    cont.invokeOnCancellation {
+        try {
+            cancel()
+        } catch (_: Throwable) {}
+    }
+    enqueue(object : Callback {
+        override fun onFailure(call: Call, e: IOException) {
+            if (isResumed.compareAndSet(false, true) && cont.isActive) {
+                cont.resumeWithException(e)
+            }
+        }
+
+        override fun onResponse(call: Call, response: Response) {
+            response.use { resp ->
+                try {
+                    val body = resp.body?.string().orEmpty()
+                    if (isResumed.compareAndSet(false, true) && cont.isActive) {
+                        cont.resume(BiniHttpResult(resp.code, body))
+                    }
+                } catch (e: Throwable) {
+                    if (isResumed.compareAndSet(false, true) && cont.isActive) {
+                        cont.resumeWithException(e)
+                    }
+                }
+            }
+        }
+    })
 }

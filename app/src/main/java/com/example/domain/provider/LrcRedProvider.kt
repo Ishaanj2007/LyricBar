@@ -6,11 +6,18 @@ import com.example.data.model.TrackMetadata
 import com.example.domain.parser.LrcParser
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 /**
  * Provider 2: lrc.red — ISRC-based synchronized LRC fallback provider.
@@ -123,13 +130,17 @@ class LrcRedProvider(
             .build()
 
         try {
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    return@withContext Result.failure(IOException("lrc.red returned HTTP ${response.code}"))
-                }
-                val body = response.body?.string()
-                parseLrcResponse(body, title, artist, durationSec)
+            val httpResult = client.newCall(request).awaitLrcRedResponse()
+            if (httpResult.code == 404) {
+                return@withContext Result.failure(NoSuchElementException("Lyrics not found on lrc.red (HTTP 404)"))
             }
+            if (httpResult.code == 429) {
+                return@withContext Result.failure(IOException("lrc.red rate limit exceeded (HTTP 429)"))
+            }
+            if (httpResult.code !in 200..299) {
+                return@withContext Result.failure(IOException("lrc.red returned HTTP ${httpResult.code}"))
+            }
+            parseLrcResponse(httpResult.body, title, artist, durationSec)
         } catch (ce: CancellationException) {
             throw ce
         } catch (e: Exception) {
@@ -215,4 +226,40 @@ class LrcRedProvider(
             .readTimeout(6, TimeUnit.SECONDS)
             .build()
     }
+}
+
+private data class LrcRedHttpResult(
+    val code: Int,
+    val body: String
+)
+
+private suspend fun Call.awaitLrcRedResponse(): LrcRedHttpResult = suspendCancellableCoroutine { cont ->
+    val isResumed = AtomicBoolean(false)
+    cont.invokeOnCancellation {
+        try {
+            cancel()
+        } catch (_: Throwable) {}
+    }
+    enqueue(object : Callback {
+        override fun onFailure(call: Call, e: IOException) {
+            if (isResumed.compareAndSet(false, true) && cont.isActive) {
+                cont.resumeWithException(e)
+            }
+        }
+
+        override fun onResponse(call: Call, response: Response) {
+            response.use { resp ->
+                try {
+                    val body = resp.body?.string().orEmpty()
+                    if (isResumed.compareAndSet(false, true) && cont.isActive) {
+                        cont.resume(LrcRedHttpResult(resp.code, body))
+                    }
+                } catch (e: Throwable) {
+                    if (isResumed.compareAndSet(false, true) && cont.isActive) {
+                        cont.resumeWithException(e)
+                    }
+                }
+            }
+        }
+    })
 }

@@ -20,9 +20,12 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import java.io.IOException
+import java.util.Locale
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 /**
  * Provider 4: LyricsPlus — Final synchronized lyrics fallback provider.
@@ -114,6 +117,7 @@ class LyricsPlusProvider(
         }
 
         try {
+            val mirrorFailures = mutableListOf<Throwable>()
             val winner: ParsedLyrics? = coroutineScope {
                 val pending = hosts.map { host ->
                     host to async(Dispatchers.IO) {
@@ -130,15 +134,17 @@ class LyricsPlusProvider(
 
                 try {
                     while (pending.isNotEmpty()) {
-                        val (host, parsedResult) = select<Pair<String, ParsedLyrics?>> {
+                        val (host, mirrorResult) = select<Pair<String, Result<ParsedLyrics>>> {
                             pending.forEach { (candidateHost, deferred) ->
                                 deferred.onAwait { candidateHost to it }
                             }
                         }
                         pending.removeAll { it.first == host }
-                        if (parsedResult != null) {
+                        if (mirrorResult.isSuccess) {
                             lastGood.set(host)
-                            return@coroutineScope parsedResult
+                            return@coroutineScope mirrorResult.getOrNull()
+                        } else {
+                            mirrorResult.exceptionOrNull()?.let { mirrorFailures.add(it) }
                         }
                     }
                     null
@@ -150,7 +156,23 @@ class LyricsPlusProvider(
             if (winner != null) {
                 Result.success(winner)
             } else {
-                Result.failure(NoSuchElementException("Lyrics not found on any LyricsPlus mirror"))
+                // If any mirror hit rate limiting (HTTP 429), server error (HTTP 5xx), or network failure, propagate it
+                val transientOrServerError = mirrorFailures.firstOrNull { err ->
+                    val msg = err.message?.lowercase(Locale.US).orEmpty()
+                    msg.contains("http 429") ||
+                        msg.contains("http 502") ||
+                        msg.contains("http 503") ||
+                        msg.contains("http 504") ||
+                        msg.contains("rate limit") ||
+                        err is java.net.SocketTimeoutException ||
+                        err is java.net.ConnectException ||
+                        err is java.net.UnknownHostException
+                }
+                if (transientOrServerError != null) {
+                    Result.failure(transientOrServerError)
+                } else {
+                    Result.failure(NoSuchElementException("Lyrics not found on any LyricsPlus mirror"))
+                }
             }
         } catch (ce: CancellationException) {
             throw ce
@@ -166,9 +188,10 @@ class LyricsPlusProvider(
         durationSec: Int?,
         album: String?,
         isrc: String?
-    ): ParsedLyrics? {
+    ): Result<ParsedLyrics> {
         val base = host.trim().trimEnd('/')
-        val builder = "$base/v2/lyrics/get".toHttpUrlOrNull()?.newBuilder() ?: return null
+        val builder = "$base/v2/lyrics/get".toHttpUrlOrNull()?.newBuilder()
+            ?: return Result.failure(IllegalArgumentException("Invalid URL for host $host"))
         builder.addQueryParameter("title", title)
         builder.addQueryParameter("artist", artist)
         val validDuration = durationSec?.takeIf { it > 0 }
@@ -191,17 +214,26 @@ class LyricsPlusProvider(
             .build()
 
         return try {
-            val body = client.newCall(request).awaitBodyOrNull() ?: return null
+            val httpResult = client.newCall(request).awaitLyricsPlusResponse()
+            if (httpResult.code == 429) {
+                return Result.failure(IOException("LyricsPlus rate limit exceeded (HTTP 429)"))
+            }
+            if (httpResult.code in 500..599) {
+                return Result.failure(IOException("LyricsPlus returned HTTP ${httpResult.code}"))
+            }
+            if (httpResult.code !in 200..299 || httpResult.body.isBlank()) {
+                return Result.failure(NoSuchElementException("Lyrics not found on mirror $host (HTTP ${httpResult.code})"))
+            }
             parseResponse(
-                jsonBody = body,
+                jsonBody = httpResult.body,
                 title = title,
                 artist = artist,
                 durationSec = durationSec
-            ).getOrNull()
+            )
         } catch (ce: CancellationException) {
             throw ce
-        } catch (_: Exception) {
-            null
+        } catch (e: Exception) {
+            Result.failure(e)
         }
     }
 
@@ -375,7 +407,13 @@ class LyricsPlusProvider(
     }
 }
 
-private suspend fun Call.awaitBodyOrNull(): String? = suspendCancellableCoroutine { cont ->
+private data class LyricsPlusHttpResult(
+    val code: Int,
+    val body: String
+)
+
+private suspend fun Call.awaitLyricsPlusResponse(): LyricsPlusHttpResult = suspendCancellableCoroutine { cont ->
+    val isResumed = AtomicBoolean(false)
     cont.invokeOnCancellation {
         try {
             cancel()
@@ -383,21 +421,23 @@ private suspend fun Call.awaitBodyOrNull(): String? = suspendCancellableCoroutin
     }
     enqueue(object : Callback {
         override fun onFailure(call: Call, e: IOException) {
-            if (cont.isActive) cont.resume(null)
+            if (isResumed.compareAndSet(false, true) && cont.isActive) {
+                cont.resumeWithException(e)
+            }
         }
 
         override fun onResponse(call: Call, response: Response) {
             response.use { resp ->
-                val body = if (resp.isSuccessful) {
-                    try {
-                        resp.body?.string()
-                    } catch (_: Exception) {
-                        null
+                try {
+                    val body = resp.body?.string().orEmpty()
+                    if (isResumed.compareAndSet(false, true) && cont.isActive) {
+                        cont.resume(LyricsPlusHttpResult(resp.code, body))
                     }
-                } else {
-                    null
+                } catch (e: Throwable) {
+                    if (isResumed.compareAndSet(false, true) && cont.isActive) {
+                        cont.resumeWithException(e)
+                    }
                 }
-                if (cont.isActive) cont.resume(body)
             }
         }
     })

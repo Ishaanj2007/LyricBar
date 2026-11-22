@@ -20,10 +20,22 @@ import com.example.domain.provider.LyricsProvider
 import com.example.domain.provider.UnisonProvider
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import okhttp3.OkHttpClient
+import java.net.ConnectException
+import java.net.NoRouteToHostException
+import java.net.PortUnreachableException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
+import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import javax.net.ssl.SSLException
 
 class CompositeLyricsRepository internal constructor(
     private val lyricsDao: com.example.data.local.dao.LyricsDao,
@@ -39,6 +51,54 @@ class CompositeLyricsRepository internal constructor(
         historyDao = database.songHistoryDao(),
         providers = providers
     )
+
+    // TD-05: In-memory cooldown tracking for transient network failures (SocketTimeout, ConnectException, 5xx)
+    private val providerCooldowns = ConcurrentHashMap<String, Long>()
+
+    internal var cooldownDurationMs: Long = DEFAULT_COOLDOWN_DURATION_MS
+    internal var providerTimeoutMs: Long = DEFAULT_PROVIDER_TIMEOUT_MS
+
+    internal fun isProviderInCooldown(
+        providerName: String,
+        currentTimeMs: Long = System.currentTimeMillis()
+    ): Boolean {
+        val normalized = providerName.trim().lowercase(Locale.US)
+        val until = providerCooldowns[normalized] ?: return false
+        if (currentTimeMs >= until) {
+            providerCooldowns.remove(normalized)
+            return false
+        }
+        return true
+    }
+
+    internal fun recordProviderFailure(
+        providerName: String,
+        isTransient: Boolean,
+        currentTimeMs: Long = System.currentTimeMillis()
+    ) {
+        if (isTransient) {
+            val normalized = providerName.trim().lowercase(Locale.US)
+            providerCooldowns[normalized] = currentTimeMs + cooldownDurationMs
+        }
+    }
+
+    internal fun recordProviderSuccess(providerName: String) {
+        val normalized = providerName.trim().lowercase(Locale.US)
+        providerCooldowns.remove(normalized)
+    }
+
+    internal fun clearCooldowns() {
+        providerCooldowns.clear()
+    }
+
+    internal fun getProvidersInCooldown(
+        currentTimeMs: Long = System.currentTimeMillis()
+    ): Set<String> {
+        return providerCooldowns.entries
+            .filter { it.value > currentTimeMs }
+            .map { it.key }
+            .toSet()
+    }
 
     val songHistory: Flow<List<SongHistoryEntity>> = historyDao.getRecentHistory()
 
@@ -148,12 +208,25 @@ class CompositeLyricsRepository internal constructor(
         }
 
         for (provider in candidateProviders) {
+            currentCoroutineContext().ensureActive()
+
+            // TD-05: In AUTO mode, skip providers currently in cooldown to avoid blocking on temporarily dead hosts
+            if (!forceNetwork && isProviderInCooldown(provider.name)) {
+                continue
+            }
+
             try {
-                val result = provider.fetchLyrics(
-                    track = track,
-                    cleanTitle = cleanTitle,
-                    cleanArtist = cleanArtist
-                )
+                // TD-05: Bound individual provider execution so slow multi-step calls don't stall the waterfall
+                val result = withTimeout(providerTimeoutMs) {
+                    provider.fetchLyrics(
+                        track = track,
+                        cleanTitle = cleanTitle,
+                        cleanArtist = cleanArtist
+                    )
+                }
+
+                currentCoroutineContext().ensureActive()
+
                 if (result.isSuccess) {
                     val rawLyrics = result.getOrThrow()
                     // Reject unsupported TTML content or invalid lyrics if returned by any provider
@@ -230,6 +303,12 @@ class CompositeLyricsRepository internal constructor(
                         )
                     }
 
+                    // TD-05: Successful validated fetch clears any active cooldown for this provider
+                    recordProviderSuccess(provider.name)
+
+                    // TD-05: Responsive cancellation check before Room persistence
+                    currentCoroutineContext().ensureActive()
+
                     val rawToCache = if (validatedLyrics.rawContent.isNotBlank()) {
                         validatedLyrics.rawContent
                     } else {
@@ -262,10 +341,23 @@ class CompositeLyricsRepository internal constructor(
                     }
 
                     return@withContext Result.success(validatedLyrics)
+                } else {
+                    // TD-05: Check if failure was transient network problem to activate in-memory cooldown
+                    val error = result.exceptionOrNull()
+                    if (isTransientNetworkFailure(error)) {
+                        recordProviderFailure(provider.name, isTransient = true)
+                    }
                 }
+            } catch (tce: TimeoutCancellationException) {
+                // TD-05: Per-provider timeout occurred: record cooldown and fall through to next provider
+                recordProviderFailure(provider.name, isTransient = true)
+                continue
             } catch (ce: CancellationException) {
                 throw ce
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                if (isTransientNetworkFailure(e)) {
+                    recordProviderFailure(provider.name, isTransient = true)
+                }
                 // In AUTO mode, continue to next provider; in manual mode, candidateProviders has size 1
             }
         }
@@ -375,6 +467,78 @@ class CompositeLyricsRepository internal constructor(
     }
 
     companion object {
+        const val DEFAULT_COOLDOWN_DURATION_MS = 30_000L
+        const val DEFAULT_PROVIDER_TIMEOUT_MS = 8_000L
+
+        private fun isCertificateOrSecurityFailure(throwable: Throwable): Boolean {
+            if (throwable is javax.net.ssl.SSLPeerUnverifiedException) return true
+            if (throwable is java.security.cert.CertificateException) return true
+            val className = throwable.javaClass.name.lowercase(Locale.US)
+            if (className.contains("sslpeerunverified") ||
+                className.contains("certificate") ||
+                className.contains("certpath")
+            ) {
+                return true
+            }
+            val msg = throwable.message?.lowercase(Locale.US).orEmpty()
+            return msg.contains("peer not verified") ||
+                msg.contains("certificate") ||
+                msg.contains("certpath") ||
+                msg.contains("trust anchor") ||
+                msg.contains("pinning") ||
+                msg.contains("hostname")
+        }
+
+        internal fun isTransientNetworkFailure(throwable: Throwable?): Boolean {
+            var current: Throwable? = throwable ?: return false
+            val visited = mutableSetOf<Throwable>()
+            while (current != null && visited.add(current)) {
+                // SSL certificate, hostname mismatch, and PKI security failures are permanent configuration issues
+                if (isCertificateOrSecurityFailure(current)) {
+                    return false
+                }
+
+                if (current is SocketTimeoutException ||
+                    current is ConnectException ||
+                    current is UnknownHostException ||
+                    current is NoRouteToHostException ||
+                    current is PortUnreachableException ||
+                    current is TimeoutCancellationException
+                ) {
+                    return true
+                }
+                val className = current.javaClass.name.lowercase(Locale.US)
+                if (className.contains("sockettimeoutexception") ||
+                    className.contains("connectexception") ||
+                    className.contains("unknownhostexception")
+                ) {
+                    return true
+                }
+                val msg = current.message?.lowercase(Locale.US).orEmpty()
+                if (msg.contains("timeout") ||
+                    msg.contains("timed out") ||
+                    msg.contains("failed to connect") ||
+                    msg.contains("connection refused") ||
+                    msg.contains("connection reset") ||
+                    msg.contains("unable to resolve host") ||
+                    msg.contains("network is unreachable") ||
+                    msg.contains("no route to host") ||
+                    msg.contains("software caused connection abort") ||
+                    msg.contains("http 502") ||
+                    msg.contains("http 503") ||
+                    msg.contains("http 504") ||
+                    msg.contains("http 429") ||
+                    msg.contains("502 bad gateway") ||
+                    msg.contains("503 service unavailable") ||
+                    msg.contains("504 gateway timeout") ||
+                    msg.contains("429 too many requests")
+                ) {
+                    return true
+                }
+                current = current.cause
+            }
+            return false
+        }
         internal fun isSafeLegacyMatch(track: TrackMetadata, legacy: LyricsEntity): Boolean {
             val trackArtist = TrackMetadata.cleanForLookup(track.artist)
             val legacyArtist = TrackMetadata.cleanForLookup(legacy.artist)
