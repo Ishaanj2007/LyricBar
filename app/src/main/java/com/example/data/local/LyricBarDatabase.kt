@@ -16,7 +16,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 @Database(
     entities = [LyricsEntity::class, SongHistoryEntity::class],
     version = 2,
-    exportSchema = false
+    exportSchema = true
 )
 abstract class LyricBarDatabase : RoomDatabase() {
 
