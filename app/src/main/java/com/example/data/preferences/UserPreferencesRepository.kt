@@ -14,8 +14,14 @@ import com.example.ui.components.HudColorSystem
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import java.io.IOException
+import java.security.MessageDigest
 
 val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "lyricbar_prefs")
 
@@ -201,7 +207,8 @@ data class UserPreferences(
     val hudLandscapeY: Int? = null,
     val hudLandscapeWidth: Int? = null,
     val hudLandscapeHeight: Int? = null,
-    val overlayTextAlign: String = "CENTER", // "LEFT", "CENTER", "RIGHT"
+    val overlayTextAlign: String = "CENTER", // "LEFT", "CENTER", "RIGHT" (Dedicated to HUD Overlay)
+    val lyricsScreenAlignment: LyricsAlignment = LyricsAlignment.CENTER, // Dedicated to Lyrics Screen
     val upwardAnimationEnabled: Boolean = true,
     val animationStyle: String = OverlayAnimationStyle.KARAOKE.name,
     val isDragRepositionMode: Boolean = false,
@@ -232,6 +239,9 @@ data class UserPreferences(
             hudLandscapeHeight != null
 
     val lyricsAlignment: LyricsAlignment
+        get() = lyricsScreenAlignment
+
+    val hudLyricsAlignment: LyricsAlignment
         get() = LyricsAlignment.fromCode(overlayTextAlign)
 
     fun portraitProfile(): HudOverlayProfile = HudOverlayProfile(
@@ -271,6 +281,8 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
 
     constructor(context: Context) : this(context.dataStore)
 
+    private val repositoryScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
     private object PreferencesKeys {
         val OVERLAY_ENABLED = booleanPreferencesKey("overlay_enabled")
         val OVERLAY_TEXT_SIZE = floatPreferencesKey("overlay_text_size")
@@ -306,6 +318,7 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
         val HUD_LANDSCAPE_WIDTH = intPreferencesKey("hud_landscape_width")
         val HUD_LANDSCAPE_HEIGHT = intPreferencesKey("hud_landscape_height")
         val OVERLAY_TEXT_ALIGN = stringPreferencesKey("overlay_text_align")
+        val LYRICS_SCREEN_ALIGNMENT = stringPreferencesKey("lyrics_screen_alignment")
         val UPWARD_ANIMATION = booleanPreferencesKey("upward_animation_enabled")
         val ANIMATION_STYLE = stringPreferencesKey("animation_style")
         val APPLE_MUSIC_MESH_BLUR = booleanPreferencesKey("apple_music_mesh_blur")
@@ -451,6 +464,7 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
                 hudLandscapeWidth = landscapeWidth,
                 hudLandscapeHeight = landscapeHeight,
                 overlayTextAlign = preferences[PreferencesKeys.OVERLAY_TEXT_ALIGN] ?: "CENTER",
+                lyricsScreenAlignment = LyricsAlignment.fromCode(preferences[PreferencesKeys.LYRICS_SCREEN_ALIGNMENT]),
                 upwardAnimationEnabled = preferences[PreferencesKeys.UPWARD_ANIMATION] ?: true,
                 animationStyle = animStyle,
                 isDragRepositionMode = preferences[PreferencesKeys.IS_DRAG_MODE] ?: false,
@@ -841,23 +855,47 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
         private const val MIN_STORED_WIDTH_PX = 120
         private const val MIN_STORED_HEIGHT_PX = 40
         private const val MAX_STORED_HEIGHT_PX = 4000
+
+        const val TRACK_OFFSET_PREFIX_SHA256 = "offset_sha256_"
+        const val TRACK_OFFSET_PREFIX_LEGACY = "offset_"
+
+        fun computeTrackOffsetKey(trackKey: String): String {
+            val digest = MessageDigest.getInstance("SHA-256")
+            val bytes = digest.digest(trackKey.toByteArray(Charsets.UTF_8))
+            val sb = java.lang.StringBuilder(TRACK_OFFSET_PREFIX_SHA256.length + bytes.size * 2)
+            sb.append(TRACK_OFFSET_PREFIX_SHA256)
+            for (b in bytes) {
+                val octet = b.toInt() and 0xFF
+                if (octet < 16) sb.append('0')
+                sb.append(java.lang.Integer.toHexString(octet))
+            }
+            return sb.toString()
+        }
+
+        fun computeLegacyTrackOffsetKey(trackKey: String): String {
+            return "$TRACK_OFFSET_PREFIX_LEGACY${trackKey.hashCode()}"
+        }
     }
 
-    suspend fun cycleLyricsAlignment(): LyricsAlignment {
+    suspend fun cycleLyricsScreenAlignment(): LyricsAlignment {
         var nextAlignment: LyricsAlignment = LyricsAlignment.CENTER
         dataStore.edit { prefs ->
-            val currentCode = prefs[PreferencesKeys.OVERLAY_TEXT_ALIGN] ?: "CENTER"
+            val currentCode = prefs[PreferencesKeys.LYRICS_SCREEN_ALIGNMENT] ?: "CENTER"
             val current = LyricsAlignment.fromCode(currentCode)
             val next = current.next()
-            prefs[PreferencesKeys.OVERLAY_TEXT_ALIGN] = next.code
+            prefs[PreferencesKeys.LYRICS_SCREEN_ALIGNMENT] = next.code
             nextAlignment = next
         }
         return nextAlignment
     }
 
-    suspend fun setLyricsAlignment(alignment: LyricsAlignment) {
-        setOverlayTextAlign(alignment.code)
+    suspend fun setLyricsScreenAlignment(alignment: LyricsAlignment) {
+        dataStore.edit { it[PreferencesKeys.LYRICS_SCREEN_ALIGNMENT] = alignment.code }
     }
+
+    suspend fun cycleLyricsAlignment(): LyricsAlignment = cycleLyricsScreenAlignment()
+
+    suspend fun setLyricsAlignment(alignment: LyricsAlignment) = setLyricsScreenAlignment(alignment)
 
     suspend fun setOverlayTextAlign(align: String) {
         val normalized = LyricsAlignment.fromCode(align).code
@@ -901,16 +939,71 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
     }
 
     suspend fun setTrackOffset(trackKey: String, offsetMs: Long) {
-        val key = longPreferencesKey("offset_${trackKey.hashCode()}")
+        if (trackKey.isBlank()) return
+        val key = longPreferencesKey(computeTrackOffsetKey(trackKey))
         dataStore.edit { it[key] = offsetMs }
     }
 
     fun getTrackOffsetFlow(trackKey: String, fallbackKey: String? = null): Flow<Long> {
-        val primaryKey = longPreferencesKey("offset_${trackKey.hashCode()}")
-        val altKey = fallbackKey?.takeIf { it.isNotBlank() && it != trackKey }?.let { longPreferencesKey("offset_${it.hashCode()}") }
+        if (trackKey.isBlank()) return flowOf(0L)
+        val newPrimaryKey = longPreferencesKey(computeTrackOffsetKey(trackKey))
+        val legacyPrimaryKey = longPreferencesKey(computeLegacyTrackOffsetKey(trackKey))
+        val newAltKey = fallbackKey?.takeIf { it.isNotBlank() && it != trackKey }
+            ?.let { longPreferencesKey(computeTrackOffsetKey(it)) }
+        val legacyAltKey = fallbackKey?.takeIf { it.isNotBlank() && it != trackKey }
+            ?.let { longPreferencesKey(computeLegacyTrackOffsetKey(it)) }
+
         return dataStore.data.map { preferences ->
-            preferences[primaryKey] ?: (if (altKey != null) preferences[altKey] else null) ?: 0L
+            val newPrimaryVal = preferences[newPrimaryKey]
+            val legacyPrimaryVal = preferences[legacyPrimaryKey]
+            val newAltVal = newAltKey?.let { preferences[it] }
+            val legacyAltVal = legacyAltKey?.let { preferences[it] }
+
+            when {
+                newPrimaryVal != null -> newPrimaryVal
+                legacyPrimaryVal != null -> {
+                    triggerOffsetMigration(newPrimaryKey, legacyPrimaryVal)
+                    legacyPrimaryVal
+                }
+                newAltVal != null -> newAltVal
+                legacyAltVal != null -> {
+                    if (newAltKey != null) {
+                        triggerOffsetMigration(newAltKey, legacyAltVal)
+                    }
+                    legacyAltVal
+                }
+                else -> 0L
+            }
+        }.distinctUntilChanged()
+    }
+
+    private fun triggerOffsetMigration(newKey: Preferences.Key<Long>, legacyValue: Long) {
+        repositoryScope.launch {
+            try {
+                dataStore.edit { prefs ->
+                    if (!prefs.contains(newKey)) {
+                        prefs[newKey] = legacyValue
+                    }
+                }
+            } catch (_: Exception) {
+                // Non-critical background migration; in-memory fallback will continue serving legacy value
+            }
         }
+    }
+
+    suspend fun migrateTrackOffset(trackKey: String): Boolean {
+        if (trackKey.isBlank()) return false
+        val newKey = longPreferencesKey(computeTrackOffsetKey(trackKey))
+        val legacyKey = longPreferencesKey(computeLegacyTrackOffsetKey(trackKey))
+        var migrated = false
+        dataStore.edit { prefs ->
+            val legacyVal = prefs[legacyKey]
+            if (legacyVal != null && !prefs.contains(newKey)) {
+                prefs[newKey] = legacyVal
+                migrated = true
+            }
+        }
+        return migrated
     }
 
     suspend fun setAutoUpdateChecksEnabled(enabled: Boolean) {
@@ -1039,7 +1132,7 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
 
                 // Restore per-track timing offsets safely (bounded and prefixed with "offset_")
                 for ((rawKey, offsetMs) in appSettings.trackOffsets) {
-                    if (rawKey.startsWith("offset_") && rawKey.length <= 32) {
+                    if (rawKey.startsWith("offset_") && rawKey.length <= 128) {
                         prefs[longPreferencesKey(rawKey)] = offsetMs.coerceIn(-60_000L, 60_000L)
                     }
                 }

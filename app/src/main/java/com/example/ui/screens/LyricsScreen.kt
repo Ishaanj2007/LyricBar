@@ -112,7 +112,7 @@ fun LyricsScreen(
         .collectAsStateWithLifecycle(initialValue = userPreferences)
     val selectedProvider = livePreferences.lyricsProvider
 
-    val currentLyricsAlignment = livePreferences.lyricsAlignment
+    val currentLyricsAlignment = livePreferences.lyricsScreenAlignment
     val currentLyricsTextAlign = when (currentLyricsAlignment) {
         LyricsAlignment.LEFT -> TextAlign.Start
         LyricsAlignment.RIGHT -> TextAlign.End
@@ -120,7 +120,7 @@ fun LyricsScreen(
     }
     val onCycleAlignment: () -> Unit = {
         coroutineScope.launch {
-            playbackManager.preferencesRepository.cycleLyricsAlignment()
+            playbackManager.preferencesRepository.cycleLyricsScreenAlignment()
         }
     }
 

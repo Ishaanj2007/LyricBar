@@ -2260,15 +2260,15 @@ fun SettingsScreen(
 
                 HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
 
-                // Lyrics Alignment inside the container
+                // HUD Lyrics Alignment inside the container
                 Text(
-                    text = "Lyrics Alignment",
+                    text = "HUD Lyrics Alignment",
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "Aligns text inside the invisible overlay container (independent of screen placement)",
+                    text = "Aligns text inside the floating HUD overlay container (independent of screen placement)",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
