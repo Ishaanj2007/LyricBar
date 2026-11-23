@@ -103,6 +103,7 @@ dependencies {
 
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.androidx.palette)
     implementation(libs.haze)
 
     testImplementation(libs.junit)

@@ -569,6 +569,42 @@ fun SettingsScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Toggle: Dynamic Accent Colour
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 12.dp)
+                    ) {
+                        Text(
+                            text = "Dynamic Accent Colour",
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Automatically adapt HUD accent colours to the currently playing album artwork.",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = livePreferences.hudDynamicAccentEnabled,
+                        onCheckedChange = { enabled ->
+                            coroutineScope.launch {
+                                playbackManager.preferencesRepository.setHudDynamicAccentEnabled(enabled)
+                            }
+                        },
+                        modifier = Modifier.testTag("settings_dynamic_accent_switch")
+                    )
+                }
+
                 Spacer(modifier = Modifier.height(8.dp))
 
                 // 2-target segmented selector: [ Active Lyric | Inactive Lyric ]

@@ -159,6 +159,7 @@ data class BackupHudConfigData(
     val hudBackdropCornerRadiusDp: Int = 18,
     val hudBackdropHorizontalPaddingDp: Int = 16,
     val hudBackdropVerticalPaddingDp: Int = 10,
+    val hudDynamicAccentEnabled: Boolean = false,
     val hudActiveLyricColor: Int = HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR,
     val hudInactiveLyricColor: Int = HudColorSystem.DEFAULT_INACTIVE_LYRIC_COLOR,
     val hudCustomColors: List<Int> = emptyList(),

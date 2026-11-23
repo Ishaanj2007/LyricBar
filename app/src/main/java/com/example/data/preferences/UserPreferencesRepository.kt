@@ -162,6 +162,7 @@ data class UserPreferences(
     val hudBackdropCornerRadiusDp: Int = 18, // 0 to 32 dp (default 18dp)
     val hudBackdropHorizontalPaddingDp: Int = 16, // 0 to 32 dp (default 16dp)
     val hudBackdropVerticalPaddingDp: Int = 10, // 0 to 24 dp (default 10dp)
+    val hudDynamicAccentEnabled: Boolean = false,
     val hudActiveLyricColor: Int = HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR,
     val hudInactiveLyricColor: Int = HudColorSystem.DEFAULT_INACTIVE_LYRIC_COLOR,
     val hudCustomColors: List<Int> = emptyList(),
@@ -261,6 +262,7 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
         val HUD_BACKDROP_CORNER_RADIUS_DP = intPreferencesKey("hud_backdrop_corner_radius_dp")
         val HUD_BACKDROP_HORIZONTAL_PADDING_DP = intPreferencesKey("hud_backdrop_horizontal_padding_dp")
         val HUD_BACKDROP_VERTICAL_PADDING_DP = intPreferencesKey("hud_backdrop_vertical_padding_dp")
+        val HUD_DYNAMIC_ACCENT_ENABLED = booleanPreferencesKey("hud_dynamic_accent_enabled")
         val HUD_ACTIVE_LYRIC_COLOR = intPreferencesKey("hud_active_lyric_color")
         val HUD_INACTIVE_LYRIC_COLOR = intPreferencesKey("hud_inactive_lyric_color")
         val HUD_CUSTOM_COLORS = stringPreferencesKey("hud_custom_colors")
@@ -398,6 +400,7 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
                 hudBackdropCornerRadiusDp = (preferences[PreferencesKeys.HUD_BACKDROP_CORNER_RADIUS_DP] ?: 18).coerceIn(0, 32),
                 hudBackdropHorizontalPaddingDp = (preferences[PreferencesKeys.HUD_BACKDROP_HORIZONTAL_PADDING_DP] ?: 16).coerceIn(0, 32),
                 hudBackdropVerticalPaddingDp = (preferences[PreferencesKeys.HUD_BACKDROP_VERTICAL_PADDING_DP] ?: 10).coerceIn(0, 24),
+                hudDynamicAccentEnabled = preferences[PreferencesKeys.HUD_DYNAMIC_ACCENT_ENABLED] ?: false,
                 hudActiveLyricColor = HudColorSystem.sanitizeOpaqueColor(
                     preferences[PreferencesKeys.HUD_ACTIVE_LYRIC_COLOR],
                     HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR
@@ -556,6 +559,10 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
     suspend fun setHudBackdropVerticalPaddingDp(verticalPaddingDp: Int) {
         val bounded = verticalPaddingDp.coerceIn(0, 24)
         dataStore.edit { it[PreferencesKeys.HUD_BACKDROP_VERTICAL_PADDING_DP] = bounded }
+    }
+
+    suspend fun setHudDynamicAccentEnabled(enabled: Boolean) {
+        dataStore.edit { it[PreferencesKeys.HUD_DYNAMIC_ACCENT_ENABLED] = enabled }
     }
 
     suspend fun setHudActiveLyricColor(colorArgb: Int) {
@@ -1035,6 +1042,7 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
                 prefs[PreferencesKeys.HUD_BACKDROP_CORNER_RADIUS_DP] = hudConfig.hudBackdropCornerRadiusDp.coerceIn(0, 32)
                 prefs[PreferencesKeys.HUD_BACKDROP_HORIZONTAL_PADDING_DP] = hudConfig.hudBackdropHorizontalPaddingDp.coerceIn(0, 32)
                 prefs[PreferencesKeys.HUD_BACKDROP_VERTICAL_PADDING_DP] = hudConfig.hudBackdropVerticalPaddingDp.coerceIn(0, 24)
+                prefs[PreferencesKeys.HUD_DYNAMIC_ACCENT_ENABLED] = hudConfig.hudDynamicAccentEnabled
                 prefs[PreferencesKeys.HUD_ACTIVE_LYRIC_COLOR] = safeActiveColor
                 prefs[PreferencesKeys.HUD_INACTIVE_LYRIC_COLOR] = safeInactiveColor
                 prefs[PreferencesKeys.HUD_CUSTOM_COLORS] = HudColorSystem.serializeCustomColors(safeCustomColors)
@@ -1188,6 +1196,7 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
             hudBackdropCornerRadiusDp = (raw[PreferencesKeys.HUD_BACKDROP_CORNER_RADIUS_DP] ?: 18).coerceIn(0, 32),
             hudBackdropHorizontalPaddingDp = (raw[PreferencesKeys.HUD_BACKDROP_HORIZONTAL_PADDING_DP] ?: 16).coerceIn(0, 32),
             hudBackdropVerticalPaddingDp = (raw[PreferencesKeys.HUD_BACKDROP_VERTICAL_PADDING_DP] ?: 10).coerceIn(0, 24),
+            hudDynamicAccentEnabled = raw[PreferencesKeys.HUD_DYNAMIC_ACCENT_ENABLED] ?: false,
             hudActiveLyricColor = HudColorSystem.sanitizeOpaqueColor(
                 raw[PreferencesKeys.HUD_ACTIVE_LYRIC_COLOR],
                 HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR
