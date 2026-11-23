@@ -31,6 +31,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Feedback
 import androidx.compose.material.icons.filled.NewReleases
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.SystemUpdate
@@ -91,6 +92,7 @@ fun AboutDeveloperContent(
     pendingReleaseVersionName: String?,
     onAutoUpdateChecksChanged: (Boolean) -> Unit,
     onCheckForUpdatesClick: () -> Unit,
+    onOpenFeedbackClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -215,6 +217,21 @@ fun AboutDeveloperContent(
                     onClick = { openExternalUrl(context, DeveloperConfig.SOURCE_CODE_URL) },
                     modifier = Modifier.testTag("developer_source_code_link")
                 )
+
+                if (onOpenFeedbackClick != null) {
+                    HorizontalDivider(
+                        modifier = Modifier.padding(start = 66.dp, end = 16.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.26f)
+                    )
+
+                    DeveloperLinkRow(
+                        title = stringResource(R.string.feedback_centre_title),
+                        subtitle = stringResource(R.string.feedback_centre_subtitle),
+                        icon = Icons.Default.Feedback,
+                        onClick = onOpenFeedbackClick,
+                        modifier = Modifier.testTag("developer_feedback_centre_link")
+                    )
+                }
             }
         }
 

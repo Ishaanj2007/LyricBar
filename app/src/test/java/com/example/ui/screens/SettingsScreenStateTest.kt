@@ -46,10 +46,12 @@ class SettingsScreenStateTest {
     @Test
     fun `hud backdrop is registered as a dedicated settings section key`() {
         val keys = SettingsAccordionState.ALL_SECTION_KEYS
-        assertEquals(10, keys.size)
+        assertEquals(12, keys.size)
         assertEquals(keys.size, keys.distinct().size)
         assertTrue(SettingsAccordionState.SECTION_OVERLAY in keys)
         assertTrue(SettingsAccordionState.SECTION_HUD_BACKDROP in keys)
+        assertTrue(SettingsAccordionState.SECTION_BACKUP_RESTORE in keys)
+        assertTrue(SettingsAccordionState.SECTION_FEEDBACK in keys)
         assertEquals(
             "HUD Backdrop section should sit right after Floating Overlay & Timeline",
             keys.indexOf(SettingsAccordionState.SECTION_OVERLAY) + 1,

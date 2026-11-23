@@ -76,4 +76,10 @@
     <string name="backup_choose_different_file">Choose Different File</string>
     <string name="backup_confirm_restore_title">Confirm Restore</string>
     <string name="backup_confirm_restore_action">Restore Now</string>
+
+    <!-- Feedback Centre -->
+    <string name="feedback_centre_title">Feedback Centre</string>
+    <string name="feedback_centre_subtitle">Report bugs or request new features on GitHub</string>
+    <string name="feedback_report_bug">Report a Bug</string>
+    <string name="feedback_request_feature">Request Feature</string>
 </resources>
