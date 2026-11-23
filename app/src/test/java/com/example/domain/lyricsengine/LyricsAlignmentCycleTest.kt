@@ -223,8 +223,10 @@ class LyricsAlignmentCycleTest {
 
     @Test
     fun `settings screen code defines HUD Lyrics Alignment label`() {
-        val settingsFile = java.io.File("app/src/main/java/com/example/ui/screens/SettingsScreen.kt")
-        org.junit.Assert.assertTrue("SettingsScreen.kt must exist", settingsFile.exists())
+        val f1 = java.io.File("src/main/java/com/example/ui/screens/SettingsScreen.kt")
+        val f2 = java.io.File("app/src/main/java/com/example/ui/screens/SettingsScreen.kt")
+        val settingsFile = if (f1.exists()) f1 else f2
+        org.junit.Assert.assertTrue("SettingsScreen.kt must exist at ${settingsFile.absolutePath}", settingsFile.exists())
         val content = settingsFile.readText()
         org.junit.Assert.assertTrue(
             "Settings label must display 'HUD Lyrics Alignment'",

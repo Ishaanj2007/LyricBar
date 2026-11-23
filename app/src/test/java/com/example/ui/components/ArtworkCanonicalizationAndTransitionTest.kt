@@ -224,4 +224,50 @@ class ArtworkCanonicalizationAndTransitionTest {
         assertNull("Old glow entries must be evicted on new revision", ArtworkMemoryCache.get("glow_${id1}_palette123"))
         assertNotEquals(id1, id2)
     }
+
+    @Test
+    fun `rapid track switching maintains separate blur identities and isolates missing artwork`() {
+        val bmpA = createSolidBitmap(0x111111)
+        val bmpB = createSolidBitmap(0x222222)
+
+        val (_, idA) = ArtworkCanonicalizer.canonicalize("trackA", "", bmpA)
+        val (_, idB) = ArtworkCanonicalizer.canonicalize("trackB", "", bmpB)
+
+        val blurA = createSolidBitmap(0x333333, 32, 32)
+        val blurB = createSolidBitmap(0x444444, 32, 32)
+
+        ArtworkMemoryCache.put("blur_$idA", blurA)
+        ArtworkMemoryCache.put("blur_$idB", blurB)
+
+        assertSame("Track A blur must match its own cached bitmap", blurA, ArtworkMemoryCache.get("blur_$idA"))
+        assertSame("Track B blur must match its own cached bitmap", blurB, ArtworkMemoryCache.get("blur_$idB"))
+        assertNotEquals("Blur cache keys must never collide across distinct tracks", "blur_$idA", "blur_$idB")
+
+        // Track C has no artwork: identity must be trackC::none and not match any cached blur
+        val idC = ArtworkCanonicalizer.getArtworkIdentity("trackC", null)
+        assertEquals("trackC::none", idC)
+        assertNull("Track with no artwork must have null blur cache entry", ArtworkMemoryCache.get("blur_$idC"))
+
+        // Blank track key returns idle_sunset
+        val idIdle = ArtworkCanonicalizer.getArtworkIdentity("", null)
+        assertEquals("idle_sunset", idIdle)
+    }
+
+    @Test
+    fun `artwork identity updates correctly when artwork bitmap arrives after metadata`() {
+        // Initial track arrival without artwork
+        val identityNoArt = ArtworkCanonicalizer.getArtworkIdentity("trackDelayed", null)
+        assertEquals("trackDelayed::none", identityNoArt)
+
+        // Asynchronous artwork arrival
+        val bmpDelayed = createSolidBitmap(0x555555)
+        val identityWithArt = ArtworkCanonicalizer.getArtworkIdentity("trackDelayed", bmpDelayed)
+
+        assertTrue("Artwork identity must transition from none to revisioned identity", identityWithArt.startsWith("trackDelayed::r"))
+        assertNotEquals(identityNoArt, identityWithArt)
+
+        // Same bitmap delivered again must preserve stable revision identity
+        val identityRepeat = ArtworkCanonicalizer.getArtworkIdentity("trackDelayed", bmpDelayed)
+        assertEquals("Subsequent deliveries of the identical bitmap must retain stable identity", identityWithArt, identityRepeat)
+    }
 }

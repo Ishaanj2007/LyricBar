@@ -916,10 +916,9 @@ fun CinematicArtworkBackground(
 ) {
     val backgroundColor = MaterialTheme.colorScheme.background
 
-    // BUG-005: Key only on trackKey, not artworkBitmap. Identical-pixel Bitmap re-allocations
-    // from MediaSession must not restart the blur pipeline. trackKey changes only on genuine
-    // track switches, which is the correct trigger for new blur generation.
-    val artworkIdentity = remember(trackKey) {
+    // BUG-005: Key on trackKey and whether artworkBitmap is present. Identical-pixel Bitmap re-allocations
+    // from MediaSession must not restart the blur pipeline, but artwork arriving after metadata must update.
+    val artworkIdentity = remember(trackKey, artworkBitmap != null) {
         ArtworkCanonicalizer.getArtworkIdentity(trackKey, artworkBitmap)
     }
 
@@ -979,24 +978,28 @@ fun CinematicArtworkBackground(
     }
 
     LaunchedEffect(artworkIdentity, currentBlurred) {
-        if (trackKey.isNotBlank() && currentBlurred != null && !currentBlurred.isRecycled) {
-            val targetIdentity = "art_$artworkIdentity"
+        val targetIdentity = if (trackKey.isNotBlank() && !artworkIdentity.endsWith("::none") && artworkIdentity != "idle_sunset") {
+            "art_$artworkIdentity"
+        } else {
+            "idle_sunset"
+        }
+
+        if (currentBlurred != null && !currentBlurred.isRecycled && targetIdentity != "idle_sunset") {
             if (bgTargetState.identity != targetIdentity || bgTargetState.bitmap !== currentBlurred) {
                 bgTargetState = CinematicBackgroundState(targetIdentity, currentBlurred)
             }
-        } else if (trackKey.isBlank() || artworkIdentity == "idle_sunset") {
+        } else if (targetIdentity == "idle_sunset") {
+            // Track has no artwork or idle -> immediately switch to idle_sunset (prevent previous track's blur lingering)
             if (bgTargetState.identity != "idle_sunset") {
                 bgTargetState = CinematicBackgroundState("idle_sunset", null)
             }
         } else {
-            // Track is active, but blurred bitmap is still being generated or decoded.
-            // Keep previous blurred background visible and wait 120ms to allow asynchronous decode/blur.
-            delay(120L)
-            // Inspect latest state holders (not stale values captured when LaunchedEffect started)
-            if (latestTrackKey == trackKey && latestArtworkBitmap == null && latestBlurredBitmap == null) {
-                if (bgTargetState.identity != "idle_sunset") {
-                    bgTargetState = CinematicBackgroundState("idle_sunset", null)
-                }
+            // MED-02: Track is active and has artwork, but its blurred bitmap is still being generated.
+            // If the current background belongs to a different track, clear it to idle_sunset immediately
+            // to prevent the previous track's blur from appearing over the new track during rapid switching.
+            val cleanKey = trackKey.trim()
+            if (bgTargetState.identity != "idle_sunset" && !bgTargetState.identity.startsWith("art_$cleanKey::")) {
+                bgTargetState = CinematicBackgroundState("idle_sunset", null)
             }
         }
     }

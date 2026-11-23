@@ -645,11 +645,7 @@ class MinimalOverlayView(
             if (field != value) {
                 field = value
                 val tf = if (value != null) {
-                    try {
-                        ResourcesCompat.getFont(context, value)
-                    } catch (_: Exception) {
-                        null
-                    }
+                    getCachedTypeface(context, value)
                 } else null
                 val typeface = tf ?: android.graphics.Typeface.DEFAULT_BOLD
                 wordActivePaint.typeface = typeface
@@ -2497,6 +2493,38 @@ class MinimalOverlayView(
     }
 
     companion object {
+        private val typefaceCache = java.util.concurrent.ConcurrentHashMap<Int, android.graphics.Typeface>()
+
+        /**
+         * MED-03: Caches parsed font Typeface instances at process scope to prevent repeated
+         * asset parsing and allocation on every overlay recreation/reattachment.
+         * Uses context.applicationContext to guarantee no short-lived context leakage.
+         */
+        fun getCachedTypeface(context: Context, @androidx.annotation.FontRes fontResId: Int): android.graphics.Typeface {
+            return typefaceCache.getOrPut(fontResId) {
+                try {
+                    ResourcesCompat.getFont(context.applicationContext, fontResId)
+                        ?: android.graphics.Typeface.DEFAULT_BOLD
+                } catch (_: Exception) {
+                    android.graphics.Typeface.DEFAULT_BOLD
+                }
+            }
+        }
+
+        fun clearTypefaceCache() {
+            typefaceCache.clear()
+        }
+
+        fun isTypefaceCached(@androidx.annotation.FontRes fontResId: Int): Boolean {
+            return typefaceCache.containsKey(fontResId)
+        }
+
+        fun putCachedTypefaceForTesting(@androidx.annotation.FontRes fontResId: Int, typeface: android.graphics.Typeface) {
+            typefaceCache[fontResId] = typeface
+        }
+
+        fun cachedTypefaceCount(): Int = typefaceCache.size
+
         const val BLACK_BACKDROP_COLOR: Int = HudColorSystem.BLACK_BACKDROP_COLOR
         const val GREY_BACKDROP_COLOR: Int = HudColorSystem.GREY_BACKDROP_COLOR
 
