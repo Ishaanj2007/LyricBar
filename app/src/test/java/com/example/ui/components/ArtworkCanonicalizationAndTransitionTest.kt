@@ -17,7 +17,7 @@ import org.junit.Before
 import org.junit.Test
 class ArtworkCanonicalizationAndTransitionTest {
 
-    private val bitmapTags = java.util.IdentityHashMap<Bitmap, Int>()
+    private val bitmapTags: MutableMap<Bitmap, Int> = java.util.Collections.synchronizedMap(java.util.IdentityHashMap<Bitmap, Int>())
 
     @Before
     fun setUp() {
@@ -54,6 +54,7 @@ class ArtworkCanonicalizationAndTransitionTest {
     }
     private var unsafeInstance: Any? = null
 
+    @Synchronized
     private fun createSolidBitmap(color: Int = 0, width: Int = 100, height: Int = 100): Bitmap {
         val method = allocateInstanceMethod
         val instance = unsafeInstance
