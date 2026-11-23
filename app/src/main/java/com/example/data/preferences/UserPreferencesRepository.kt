@@ -145,6 +145,29 @@ enum class HudBackdropStyle(val title: String, val description: String) {
     }
 }
 
+enum class LyricsAlignment(val code: String, val displayName: String) {
+    LEFT("LEFT", "Left"),
+    CENTER("CENTER", "Center"),
+    RIGHT("RIGHT", "Right");
+
+    fun next(): LyricsAlignment = when (this) {
+        LEFT -> CENTER
+        CENTER -> RIGHT
+        RIGHT -> LEFT
+    }
+
+    companion object {
+        fun fromCode(code: String?): LyricsAlignment {
+            if (code.isNullOrBlank()) return CENTER
+            return when (code.trim().uppercase(java.util.Locale.US)) {
+                "LEFT" -> LEFT
+                "RIGHT" -> RIGHT
+                else -> CENTER
+            }
+        }
+    }
+}
+
 data class UserPreferences(
     val overlayEnabled: Boolean = true,
     val overlayTextSizeSp: Float = 14f,
@@ -207,6 +230,9 @@ data class UserPreferences(
             hudLandscapeY != null &&
             hudLandscapeWidth != null &&
             hudLandscapeHeight != null
+
+    val lyricsAlignment: LyricsAlignment
+        get() = LyricsAlignment.fromCode(overlayTextAlign)
 
     fun portraitProfile(): HudOverlayProfile = HudOverlayProfile(
         x = hudPortraitX,
@@ -817,12 +843,24 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
         private const val MAX_STORED_HEIGHT_PX = 4000
     }
 
-    suspend fun setOverlayTextAlign(align: String) {
-        val normalized = when (align.trim().uppercase()) {
-            "LEFT" -> "LEFT"
-            "RIGHT" -> "RIGHT"
-            else -> "CENTER"
+    suspend fun cycleLyricsAlignment(): LyricsAlignment {
+        var nextAlignment: LyricsAlignment = LyricsAlignment.CENTER
+        dataStore.edit { prefs ->
+            val currentCode = prefs[PreferencesKeys.OVERLAY_TEXT_ALIGN] ?: "CENTER"
+            val current = LyricsAlignment.fromCode(currentCode)
+            val next = current.next()
+            prefs[PreferencesKeys.OVERLAY_TEXT_ALIGN] = next.code
+            nextAlignment = next
         }
+        return nextAlignment
+    }
+
+    suspend fun setLyricsAlignment(alignment: LyricsAlignment) {
+        setOverlayTextAlign(alignment.code)
+    }
+
+    suspend fun setOverlayTextAlign(align: String) {
+        val normalized = LyricsAlignment.fromCode(align).code
         dataStore.edit { it[PreferencesKeys.OVERLAY_TEXT_ALIGN] = normalized }
     }
 

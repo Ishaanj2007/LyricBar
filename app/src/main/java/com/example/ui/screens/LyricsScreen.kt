@@ -65,6 +65,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import com.example.data.preferences.LyricsAlignment
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -107,6 +111,18 @@ fun LyricsScreen(
     val livePreferences by playbackManager.preferencesRepository.userPreferencesFlow
         .collectAsStateWithLifecycle(initialValue = userPreferences)
     val selectedProvider = livePreferences.lyricsProvider
+
+    val currentLyricsAlignment = livePreferences.lyricsAlignment
+    val currentLyricsTextAlign = when (currentLyricsAlignment) {
+        LyricsAlignment.LEFT -> TextAlign.Start
+        LyricsAlignment.RIGHT -> TextAlign.End
+        LyricsAlignment.CENTER -> TextAlign.Center
+    }
+    val onCycleAlignment: () -> Unit = {
+        coroutineScope.launch {
+            playbackManager.preferencesRepository.cycleLyricsAlignment()
+        }
+    }
 
     val listState = rememberLazyListState()
     var showManualSearchDialog by remember { mutableStateOf(false) }
@@ -366,6 +382,8 @@ fun LyricsScreen(
                                     ) {
                                         LyricsActionButtonsRow(
                                             themePrimary = themePrimary,
+                                            alignment = currentLyricsAlignment,
+                                            onCycleAlignment = onCycleAlignment,
                                             onResync = onResyncClick,
                                             onSearch = onSearchClick,
                                             onImport = onImportClick
@@ -435,9 +453,9 @@ fun LyricsScreen(
                                         activeIndex = activeIndex,
                                         playbackState = playbackState,
                                         trackOffset = trackOffset,
-                                        userPreferences = userPreferences,
+                                        userPreferences = livePreferences,
                                         themePrimary = themePrimary,
-                                        textAlign = TextAlign.Start,
+                                        textAlign = currentLyricsTextAlign,
                                         contentPadding = PaddingValues(top = 4.dp, bottom = 14.dp),
                                         onLineClick = { timeMs ->
                                             userScrolledAway = false
@@ -493,6 +511,8 @@ fun LyricsScreen(
                             titleText = trackTitleText,
                             artistText = trackArtistText,
                             themePrimary = themePrimary,
+                            alignment = currentLyricsAlignment,
+                            onCycleAlignment = onCycleAlignment,
                             compact = true,
                             onResync = onResyncClick,
                             onSearch = onSearchClick,
@@ -554,9 +574,9 @@ fun LyricsScreen(
                                     activeIndex = activeIndex,
                                     playbackState = playbackState,
                                     trackOffset = trackOffset,
-                                    userPreferences = userPreferences,
+                                    userPreferences = livePreferences,
                                     themePrimary = themePrimary,
-                                    textAlign = TextAlign.End,
+                                    textAlign = currentLyricsTextAlign,
                                     contentPadding = PaddingValues(top = 4.dp, bottom = 12.dp),
                                     onLineClick = { timeMs ->
                                         userScrolledAway = false
@@ -609,6 +629,8 @@ fun LyricsScreen(
                                 titleText = playbackState.track?.title ?: currentLyrics?.title?.takeIf { it.isNotBlank() } ?: "Someone To Spend Time With",
                                 artistText = playbackState.track?.artist ?: currentLyrics?.artist?.takeIf { it.isNotBlank() } ?: "Los Retros",
                                 themePrimary = themePrimary,
+                                alignment = currentLyricsAlignment,
+                                onCycleAlignment = onCycleAlignment,
                                 compact = false,
                                 onResync = onResyncClick,
                                 onSearch = onSearchClick,
@@ -670,9 +692,9 @@ fun LyricsScreen(
                                         activeIndex = activeIndex,
                                         playbackState = playbackState,
                                         trackOffset = trackOffset,
-                                        userPreferences = userPreferences,
+                                        userPreferences = livePreferences,
                                         themePrimary = themePrimary,
-                                        textAlign = TextAlign.End,
+                                        textAlign = currentLyricsTextAlign,
                                         contentPadding = PaddingValues(
                                             top = 6.dp,
                                             bottom = if (hasBottomNavPill) 240.dp else 104.dp
@@ -828,8 +850,69 @@ private fun LyricsArtworkThumbnail(
 }
 
 @Composable
+fun LyricsAlignmentIcon(
+    alignment: LyricsAlignment,
+    tint: Color,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier.size(16.dp)) {
+        val strokeWidthPx = 1.75.dp.toPx()
+        val cap = StrokeCap.Round
+        val fullWidth = 14.dp.toPx()
+        val midWidth = 8.5.dp.toPx()
+        val botWidth = 11.5.dp.toPx()
+        val startX = 1.dp.toPx()
+        val endX = startX + fullWidth
+        val midX = (startX + endX) / 2f
+
+        val y1 = 3.5.dp.toPx()
+        val y2 = 8.0.dp.toPx()
+        val y3 = 12.5.dp.toPx()
+
+        // Top line (full width)
+        drawLine(
+            color = tint,
+            start = Offset(startX, y1),
+            end = Offset(endX, y1),
+            strokeWidth = strokeWidthPx,
+            cap = cap
+        )
+
+        // Middle line (alignment-dependent positioning)
+        val (mStart, mEnd) = when (alignment) {
+            LyricsAlignment.LEFT -> startX to (startX + midWidth)
+            LyricsAlignment.CENTER -> (midX - midWidth / 2f) to (midX + midWidth / 2f)
+            LyricsAlignment.RIGHT -> (endX - midWidth) to endX
+        }
+        drawLine(
+            color = tint,
+            start = Offset(mStart, y2),
+            end = Offset(mEnd, y2),
+            strokeWidth = strokeWidthPx,
+            cap = cap
+        )
+
+        // Bottom line (alignment-dependent positioning)
+        val (bStart, bEnd) = when (alignment) {
+            LyricsAlignment.LEFT -> startX to (startX + botWidth)
+            LyricsAlignment.CENTER -> (midX - botWidth / 2f) to (midX + botWidth / 2f)
+            LyricsAlignment.RIGHT -> (endX - botWidth) to endX
+        }
+        drawLine(
+            color = tint,
+            start = Offset(bStart, y3),
+            end = Offset(bEnd, y3),
+            strokeWidth = strokeWidthPx,
+            cap = cap
+        )
+    }
+}
+
+@Composable
 private fun LyricsActionButtonsRow(
     themePrimary: Color,
+    alignment: LyricsAlignment,
+    onCycleAlignment: () -> Unit,
     onResync: () -> Unit,
     onSearch: () -> Unit,
     onImport: () -> Unit
@@ -894,6 +977,30 @@ private fun LyricsActionButtonsRow(
                 )
             }
         }
+
+        Surface(
+            onClick = onCycleAlignment,
+            shape = CircleShape,
+            color = Color.White.copy(alpha = 0.10f),
+            border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.15f)),
+            modifier = Modifier
+                .size(32.dp)
+                .testTag("lyrics_alignment_toggle_button")
+        ) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier.semantics {
+                    contentDescription = "Lyrics alignment: ${alignment.displayName}"
+                    role = Role.Button
+                }
+            ) {
+                LyricsAlignmentIcon(
+                    alignment = alignment,
+                    tint = Color.White.copy(alpha = 0.90f),
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        }
     }
 }
 
@@ -903,6 +1010,8 @@ private fun LyricsPortraitTopHeader(
     titleText: String,
     artistText: String,
     themePrimary: Color,
+    alignment: LyricsAlignment,
+    onCycleAlignment: () -> Unit,
     compact: Boolean,
     onResync: () -> Unit,
     onSearch: () -> Unit,
@@ -964,6 +1073,8 @@ private fun LyricsPortraitTopHeader(
 
                 LyricsActionButtonsRow(
                     themePrimary = themePrimary,
+                    alignment = alignment,
+                    onCycleAlignment = onCycleAlignment,
                     onResync = onResync,
                     onSearch = onSearch,
                     onImport = onImport
@@ -1525,8 +1636,16 @@ private fun LyricsLinesLazyColumn(
     contentPadding: PaddingValues,
     onLineClick: (Long) -> Unit
 ) {
-    val lineAlignment = if (textAlign == TextAlign.Start) Alignment.Start else Alignment.End
-    val rowArrangement = if (textAlign == TextAlign.Start) Arrangement.Start else Arrangement.End
+    val lineAlignment = when (textAlign) {
+        TextAlign.Start, TextAlign.Left -> Alignment.Start
+        TextAlign.End, TextAlign.Right -> Alignment.End
+        else -> Alignment.CenterHorizontally
+    }
+    val rowArrangement = when (textAlign) {
+        TextAlign.Start, TextAlign.Left -> Arrangement.Start
+        TextAlign.End, TextAlign.Right -> Arrangement.End
+        else -> Arrangement.Center
+    }
 
     LazyColumn(
         state = listState,
@@ -1726,12 +1845,16 @@ private fun UnisonLyricsAttributionFooter(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val horizontalArrangement = if (textAlign == TextAlign.Start) {
-        Arrangement.spacedBy(8.dp, Alignment.Start)
-    } else {
-        Arrangement.spacedBy(8.dp, Alignment.End)
+    val horizontalArrangement = when (textAlign) {
+        TextAlign.Start, TextAlign.Left -> Arrangement.spacedBy(8.dp, Alignment.Start)
+        TextAlign.End, TextAlign.Right -> Arrangement.spacedBy(8.dp, Alignment.End)
+        else -> Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)
     }
-    val horizontalAlignment = if (textAlign == TextAlign.Start) Alignment.Start else Alignment.End
+    val horizontalAlignment = when (textAlign) {
+        TextAlign.Start, TextAlign.Left -> Alignment.Start
+        TextAlign.End, TextAlign.Right -> Alignment.End
+        else -> Alignment.CenterHorizontally
+    }
 
     Column(
         modifier = modifier
