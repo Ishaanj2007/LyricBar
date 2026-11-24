@@ -300,16 +300,22 @@ private suspend fun Call.awaitBiniResponse(): BiniHttpResult = suspendCancellabl
         }
 
         override fun onResponse(call: Call, response: Response) {
+            var result: BiniHttpResult? = null
+            var error: Throwable? = null
             response.use { resp ->
                 try {
                     val body = resp.body?.string().orEmpty()
-                    if (isResumed.compareAndSet(false, true) && cont.isActive) {
-                        cont.resume(BiniHttpResult(resp.code, body))
-                    }
+                    result = BiniHttpResult(resp.code, body)
                 } catch (e: Throwable) {
-                    if (isResumed.compareAndSet(false, true) && cont.isActive) {
-                        cont.resumeWithException(e)
-                    }
+                    error = e
+                }
+            }
+            if (isResumed.compareAndSet(false, true) && cont.isActive) {
+                val err = error
+                if (err != null) {
+                    cont.resumeWithException(err)
+                } else {
+                    cont.resume(result!!)
                 }
             }
         }

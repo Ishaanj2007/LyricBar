@@ -1330,7 +1330,7 @@ class MultiProviderLyricsTest {
 
     @Test
     fun `TD-05 Test 18 - response-body read IOException is propagated through continuation and triggers cooldown`() = runBlocking {
-        var responseClosed = false
+        val responseClosed = java.util.concurrent.atomic.AtomicBoolean(false)
         val failingClient = mockHttpClient { request ->
             Response.Builder()
                 .request(request)
@@ -1344,7 +1344,7 @@ class MultiProviderLyricsTest {
                         throw IOException("Connection reset by peer during body read")
                     }
                     override fun close() {
-                        responseClosed = true
+                        responseClosed.set(true)
                         super.close()
                     }
                 })
@@ -1361,7 +1361,7 @@ class MultiProviderLyricsTest {
         val result = repo.getOrFetchLyrics(TrackMetadata(title = "Body Error", artist = "Artist", durationSec = 180))
         assertTrue(result.isFailure)
         assertTrue("Response body IOException must trigger transient cooldown", repo.isProviderInCooldown("LRCLIB"))
-        assertTrue("Underlying Response must be closed on body read exception", responseClosed)
+        assertTrue("Underlying Response must be closed on body read exception", responseClosed.get())
     }
 
     @Test
