@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Ishaanj2007/LyricBar/releases/latest"><img src="https://img.shields.io/badge/Release-v2.6.0-6C5CE7?style=flat-square&logo=android" alt="Latest Release" /></a>
+  <a href="https://github.com/Ishaanj2007/LyricBar/releases/latest"><img src="https://img.shields.io/badge/Release-v2.7.0-6C5CE7?style=flat-square&logo=android" alt="Latest Release" /></a>
   <a href="https://android.com"><img src="https://img.shields.io/badge/Platform-Android%207.0%2B%20(API%2024--35)-00B894?style=flat-square&logo=android" alt="Android Version" /></a>
   <a href="https://kotlinlang.org"><img src="https://img.shields.io/badge/Kotlin-2.0.21-7F52FF?style=flat-square&logo=kotlin" alt="Kotlin" /></a>
   <a href="https://developer.android.com/jetpack/compose"><img src="https://img.shields.io/badge/UI-Jetpack%20Compose%20%2B%20M3-4285F4?style=flat-square&logo=jetpackcompose" alt="Jetpack Compose" /></a>
@@ -17,12 +17,12 @@
 </p>
 
 <p align="center">
-  <b>LyricBar v2.6.0</b> — Synchronized Floating Lyrics for Android
+  <b>LyricBar v2.7.0</b> — Synchronized Floating Lyrics for Android
 </p>
 
 <p align="center">
   <a href="#screenshots-">Screenshots</a> •
-  <a href="#whats-new-in-v260-">What's New</a> •
+  <a href="#whats-new-in-v270-">What's New</a> •
   <a href="#features-">Features</a> •
   <a href="#multi-provider-lyrics-architecture-">Lyrics Providers</a> •
   <a href="#floating-hud--customization-">Floating HUD</a> •
@@ -38,19 +38,19 @@
 
 ## Screenshots 📸
 
-| Now Playing | Synchronized Lyrics | Overlay Controls | Playback History | Settings & Themes |
-| :---: | :---: | :---: | :---: | :---: |
-| <img src="Screenshots/Screenshot1_LyricBar.png" width="190" alt="Now Playing Screen" /> | <img src="Screenshots/Screenshot2_LyricBar.png" width="190" alt="Synchronized Lyrics View" /> | <img src="Screenshots/Screenshot3_LyricBar.png" width="190" alt="Overlay Controls" /> | <img src="Screenshots/Screenshot4_LyricBar.png" width="190" alt="Playback History Log" /> | <img src="Screenshots/Screenshot5_LyricBar.png" width="190" alt="Settings & Themes" /> |
+| Now Playing | Synchronized Lyrics | Playback History | Settings & Themes |
+| :---: | :---: | :---: | :---: |
+| <img src="Screenshots/Screenshot1_NowPlaying.jpg" width="210" alt="Now Playing Screen" /> | <img src="Screenshots/Screenshot2_Lyrics.jpg" width="210" alt="Synchronized Lyrics View" /> | <img src="Screenshots/Screenshot3_History.jpg" width="210" alt="Playback History Log" /> | <img src="Screenshots/Screenshot4_Settings.jpg" width="210" alt="Settings & Themes" /> |
 
 ---
 
-## What's New in v2.6.0 🚀
+## What's New in v2.7.0 🚀
 
-- **Expanded 7-Provider Lyrics Lineup (`Lyrica`, `LiriQo`, `Unison`)** — Added **Lyrica** (Hindi, Bollywood, Marathi, Punjabi, Tamil, Telugu, and global tracks), **LiriQo** (international and Asian catalogs with strict candidate/version filtering), and **Unison** (community-submitted LRC & safe TTML-to-line-synced lyrics with ETag caching, offline attribution persistence, and clickable song/curator links), alongside **LRCLIB**, **lrc.red**, **LyricsPlus** (promoted above KuGou), and **KuGou**.
-- **Click-through Overlay Mode** — New toggle under **Settings → Floating Overlay & Timeline** that makes the floating HUD non-touchable (`FLAG_NOT_TOUCHABLE`) so taps and swipes pass cleanly through to underlying apps, automatically pausing 2D drag mode while active.
-- **Triple-tap Floating HUD to Open LyricBar** — Triple-tap anywhere on the interactive floating HUD (`HudTripleTapDetector`) to open LyricBar's main activity with subtle visual pulse feedback, while safely ignoring single/double taps, 4th+ taps, long presses, dragging, and multi-pointer gestures.
-- **Settings & Menu Refinements** — Organized **HUD Backdrop** into its own dedicated accordion section (`SECTION_HUD_BACKDROP`) with live preview, improved accordion state management (collapsed by default with *Expand All / Collapse All*), and refined the frosted-glass provider dropdown (`ProviderFloatingGlassMenu`) with viewport clamping and scrollable provider rows.
-- **Accurate MediaSession Eligibility & Stale-Lyrics Prevention** — Added `MediaSessionEligibility` and `MediaSessionPipelineEngine` filtering so non-music browser videos, podcasts, and audiobooks do not trigger unnecessary lyrics fetches, show stale lyrics from previous songs, or pollute playback history.
+- **Permanent Application ID (`com.ishaan.lyricbar`) & Selective Backup/Restore** — Migrated to LyricBar's permanent package identifier (`versionCode` 11) with a portable `.zip` Backup & Restore system covering App Settings, HUD Configuration, Playback History, and Imported `.lrc` Lyrics, plus allowlist Android Auto Backup and Device-to-Device transfer rules.
+- **Dynamic HUD Accent Colour & Independent Alignment** — Optional Palette-based accent colour extraction from active album artwork (`ArtworkAccentExtractor`), a tap-to-cycle alignment toggle on the Lyrics screen, and separate alignment preferences for the Lyrics screen and floating HUD.
+- **In-App Feedback Centre & Modernized Update Dialog** — Added a dedicated Feedback Centre in **Settings → About & Developer** with structured diagnostics and templates, plus native Markdown release-notes rendering (`SimpleMarkdownView`) inside the Update Dialog.
+- **Artwork, Blur, Font & Provider Hardening** — Eliminated album artwork flickering, prevented stale async blur results from rendering over newly switched tracks, added LRU eviction to `ArtworkMemoryCache`, cached overlay `Typeface` resources process-wide, and hardened cancellation/response cleanup across all 7 lyrics providers.
+- **Release Optimization & Modularization** — Enabled R8 code minification and resource shrinking, configured permanent release signing, modularized `MinimalOverlayView`, and expanded the automated unit test suite to 438 tests.
 
 ---
 
@@ -135,7 +135,7 @@ LyricBar uses a modular, 7-tier lyrics provider architecture to maximize regiona
 
 👉 **[Download the Latest Release](https://github.com/Ishaanj2007/LyricBar/releases/latest)**
 
-1. Download `LyricBar-2.6.0.apk` (or architecture-specific variant) from the latest release assets.
+1. Download `LyricBar-2.7.0.apk` (or architecture-specific variant) from the latest release assets.
 2. Open the APK on your Android device.
 3. Allow installation from unknown sources if prompted.
 4. Launch LyricBar and grant the required permissions (Overlay & Notification Listener).
@@ -160,7 +160,7 @@ LyricBar uses a modular, 7-tier lyrics provider architecture to maximize regiona
 | **Frosted Glass Effects** | Haze 1.3.1 |
 | **Local Persistence** | Room 2.6.1 & Jetpack DataStore 1.1.1 |
 | **Background Scheduling** | AndroidX WorkManager 2.10.0 |
-| **Networking** | OkHttp 4.12.0 & Retrofit 2.11.0 |
+| **Networking** | OkHttp 4.12.0 |
 | **Concurrency** | Kotlin Coroutines 1.9.0 & StateFlow |
 | **Architecture** | MVVM with Lifecycle-Aware Compose |
 
@@ -203,7 +203,7 @@ chmod +x gradlew
 # Build Debug APK
 ./gradlew :app:assembleDebug
 
-# Run Unit Tests (332 tests across 37 suites)
+# Run Unit Tests (438 tests across 47 suites)
 ./gradlew :app:testDebugUnitTest
 
 # Compile Android Instrumented Tests
@@ -225,10 +225,10 @@ LyricBar maintains automated test coverage across its data, parsing, HUD positio
 
 | Test Scope | Count | Status | Notes |
 | :--- | :---: | :---: | :--- |
-| **Local JVM Unit Tests** | 332 | **Passing (100%)** | 37 test suites in `app/src/test/java/` covering the 7-provider fallback chain (`LRCLIB`, `lrc.red`, `LyricsPlus`, `KuGou`, `Lyrica`, `LiriQo`, `Unison`), `TtmlParser`, LRC import bounds, `MediaSession` eligibility & pipeline filtering, HUD orientation positioning, 1s hold-to-reposition & drag rollback, Click-through overlay mode, Triple-tap HUD launch, Settings accordion state, HUD colour/contrast system, Room migrations, and 48h WorkManager updater / notification deduplication. |
-| **Executed Test Cases** | 332 | **332 Passed (0 failed)** | Verified via `:app:testDebugUnitTest`. |
+| **Local JVM Unit Tests** | 438 | **Passing (100%)** | 47 test suites in `app/src/test/java/` covering the 7-provider fallback chain (`LRCLIB`, `lrc.red`, `LyricsPlus`, `KuGou`, `Lyrica`, `LiriQo`, `Unison`), `TtmlParser`, LRC import bounds, portable `.zip` Backup & Restore, `MediaSession` eligibility & pipeline filtering, HUD orientation positioning & modular layout/gesture engines, 1s hold-to-reposition & drag rollback, Click-through overlay mode, Triple-tap HUD launch, Settings accordion state, HUD colour/contrast & dynamic accent system, Room migrations, and 48h WorkManager updater / notification deduplication. |
+| **Executed Test Cases** | 438 | **438 Passed (0 failed)** | Verified via `:app:testDebugUnitTest`. |
 | **Instrumented Tests** | 1 | **Configured & Compiles** | Located in `app/src/androidTest/java/` using AndroidX Test Runner and JUnit4. |
-| **Total Test Methods** | 333 | — | 332 local unit tests + 1 instrumented test. |
+| **Total Test Methods** | 439 | — | 438 local unit tests + 1 instrumented test. |
 
 ---
 
@@ -241,11 +241,10 @@ LyricBar maintains automated test coverage across its data, parsing, HUD positio
 │   │   └── ci.yml                    # Automated GitHub Actions CI workflow
 │   └── ISSUE_TEMPLATE/
 ├── Screenshots/
-│   ├── Screenshot1_LyricBar.png      # Now Playing Screen
-│   ├── Screenshot2_LyricBar.png      # Synchronized Lyrics View
-│   ├── Screenshot3_LyricBar.png      # Floating Overlay Controls
-│   ├── Screenshot4_LyricBar.png      # Playback History Log
-│   ├── Screenshot5_LyricBar.png      # Settings & Material Themes
+│   ├── Screenshot1_NowPlaying.jpg    # Now Playing Screen
+│   ├── Screenshot2_Lyrics.jpg        # Synchronized Lyrics View
+│   ├── Screenshot3_History.jpg       # Playback History Log
+│   ├── Screenshot4_Settings.jpg      # Settings & Material Themes
 │   └── lyricbarlogo.png              # App Brand Logo
 ├── app/
 │   ├── build.gradle.kts              # Application build config & dependencies
@@ -260,7 +259,7 @@ LyricBar maintains automated test coverage across its data, parsing, HUD positio
 │       │   │   ├── service/          # MediaListener, Eligibility Filter, Overlay Service & HudPositioningEngine
 │       │   │   └── ui/               # Responsive Compose Screens, MinimalOverlayView & Theme
 │       │   └── res/                  # Vector Assets, Bundled Google Fonts & XML Configs
-│       ├── test/                     # 332 Local Automated Unit Tests (37 test suites)
+│       ├── test/                     # 438 Local Automated Unit Tests (47 test suites)
 │       └── androidTest/              # Instrumented Android Tests
 ├── gradle/
 │   ├── libs.versions.toml            # Version Catalog
