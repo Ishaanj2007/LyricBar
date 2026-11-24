@@ -143,6 +143,8 @@ fun UpdateDialog(
                         is UpdateUiState.UpToDate -> {
                             UpToDateContent(
                                 installedVersion = state.installedVersion,
+                                checkedAt = state.checkedAt,
+                                onCheckAgain = { updateManager.checkForUpdates(isUserInitiated = true) },
                                 onClose = {
                                     updateManager.dismiss()
                                     onDismiss()
@@ -221,6 +223,13 @@ fun UpdateDialog(
                         is UpdateUiState.Error -> {
                             ErrorContent(
                                 message = state.message,
+                                isRetryable = state.isRetryable,
+                                lastSuccessfulCheckMs = state.lastSuccessfulCheckMs,
+                                cachedRelease = state.cachedRelease,
+                                onRetry = { updateManager.checkForUpdates(isUserInitiated = true) },
+                                onOpenCached = { release ->
+                                    updateManager.startDownload(release)
+                                },
                                 onClose = {
                                     updateManager.dismiss()
                                     onDismiss()
@@ -263,8 +272,19 @@ private fun CheckingContent() {
 @Composable
 private fun UpToDateContent(
     installedVersion: String,
+    checkedAt: Long,
+    onCheckAgain: () -> Unit,
     onClose: () -> Unit
 ) {
+    val formattedTime = remember(checkedAt) {
+        if (checkedAt > 0L) {
+            java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT)
+                .format(java.util.Date(checkedAt))
+        } else {
+            "Just now"
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -304,16 +324,49 @@ private fun UpToDateContent(
             modifier = Modifier.padding(horizontal = 12.dp)
         )
 
-        Spacer(modifier = Modifier.height(6.dp))
-
-        Button(
-            onClick = onClose,
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag("update_uptodate_close_button"),
-            shape = RoundedCornerShape(12.dp)
+        Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+            modifier = Modifier.padding(top = 2.dp)
         ) {
-            Text("Done")
+            Text(
+                text = "Last checked: $formattedTime",
+                style = MaterialTheme.typography.labelSmall.copy(
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                ),
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            OutlinedButton(
+                onClick = onCheckAgain,
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Check Again")
+            }
+
+            Button(
+                onClick = onClose,
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("update_uptodate_close_button"),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text("Done")
+            }
         }
     }
 }
@@ -392,7 +445,7 @@ private fun UpdateAvailableContent(
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(max = 200.dp),
+                .heightIn(max = 240.dp),
             shape = RoundedCornerShape(12.dp),
             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
             border = androidx.compose.foundation.BorderStroke(
@@ -404,14 +457,10 @@ private fun UpdateAvailableContent(
                 modifier = Modifier
                     .fillMaxSize()
                     .verticalScroll(scrollState)
-                    .padding(12.dp)
+                    .padding(14.dp)
             ) {
-                Text(
-                    text = release.body.ifBlank { "No release notes provided." },
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        lineHeight = 18.sp
-                    )
+                com.example.ui.components.SimpleMarkdownView(
+                    markdown = release.body
                 )
             }
         }
@@ -957,8 +1006,22 @@ private fun InstallationLaunchedContent(
 @Composable
 private fun ErrorContent(
     message: String,
+    isRetryable: Boolean,
+    lastSuccessfulCheckMs: Long?,
+    cachedRelease: ReleaseInfo?,
+    onRetry: () -> Unit,
+    onOpenCached: (ReleaseInfo) -> Unit,
     onClose: () -> Unit
 ) {
+    val formattedLastSuccess = remember(lastSuccessfulCheckMs) {
+        if (lastSuccessfulCheckMs != null && lastSuccessfulCheckMs > 0L) {
+            java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT)
+                .format(java.util.Date(lastSuccessfulCheckMs))
+        } else {
+            null
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -998,12 +1061,94 @@ private fun ErrorContent(
             modifier = Modifier.padding(horizontal = 8.dp)
         )
 
-        Button(
-            onClick = onClose,
+        if (formattedLastSuccess != null) {
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+            ) {
+                Text(
+                    text = "Last successful check: $formattedLastSuccess",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                    ),
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                )
+            }
+        }
+
+        if (cachedRelease != null) {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
+                ),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = "Previously Fetched Release Available",
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    )
+                    Text(
+                        text = "${cachedRelease.name.ifBlank { "LyricBar " + cachedRelease.tagName }} is saved offline and ready to download.",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    )
+                    OutlinedButton(
+                        onClick = { onOpenCached(cachedRelease) },
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Download,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Download Saved Release (${cachedRelease.cleanVersionName})")
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Row(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Text("Dismiss")
+            OutlinedButton(
+                onClick = onClose,
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text("Dismiss")
+            }
+
+            if (isRetryable) {
+                Button(
+                    onClick = onRetry,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Retry")
+                }
+            }
         }
     }
 }

@@ -65,6 +65,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import com.example.data.preferences.LyricsAlignment
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -107,6 +111,18 @@ fun LyricsScreen(
     val livePreferences by playbackManager.preferencesRepository.userPreferencesFlow
         .collectAsStateWithLifecycle(initialValue = userPreferences)
     val selectedProvider = livePreferences.lyricsProvider
+
+    val currentLyricsAlignment = livePreferences.lyricsScreenAlignment
+    val currentLyricsTextAlign = when (currentLyricsAlignment) {
+        LyricsAlignment.LEFT -> TextAlign.Start
+        LyricsAlignment.RIGHT -> TextAlign.End
+        LyricsAlignment.CENTER -> TextAlign.Center
+    }
+    val onCycleAlignment: () -> Unit = {
+        coroutineScope.launch {
+            playbackManager.preferencesRepository.cycleLyricsScreenAlignment()
+        }
+    }
 
     val listState = rememberLazyListState()
     var showManualSearchDialog by remember { mutableStateOf(false) }
@@ -366,6 +382,8 @@ fun LyricsScreen(
                                     ) {
                                         LyricsActionButtonsRow(
                                             themePrimary = themePrimary,
+                                            alignment = currentLyricsAlignment,
+                                            onCycleAlignment = onCycleAlignment,
                                             onResync = onResyncClick,
                                             onSearch = onSearchClick,
                                             onImport = onImportClick
@@ -382,6 +400,7 @@ fun LyricsScreen(
                                 delayChevronRotation = delayChevronRotation,
                                 themePrimary = themePrimary,
                                 hazeState = hazeState,
+                                isLoadingProvider = isLoading && currentLyrics != null,
                                 onToggleProviderMenu = { isProviderMenuExpanded = !isProviderMenuExpanded },
                                 onToggleDelay = { isDelayExpanded = !isDelayExpanded },
                                 onSelectorPositioned = { pos, size ->
@@ -434,9 +453,9 @@ fun LyricsScreen(
                                         activeIndex = activeIndex,
                                         playbackState = playbackState,
                                         trackOffset = trackOffset,
-                                        userPreferences = userPreferences,
+                                        userPreferences = livePreferences,
                                         themePrimary = themePrimary,
-                                        textAlign = TextAlign.Start,
+                                        textAlign = currentLyricsTextAlign,
                                         contentPadding = PaddingValues(top = 4.dp, bottom = 14.dp),
                                         onLineClick = { timeMs ->
                                             userScrolledAway = false
@@ -492,6 +511,8 @@ fun LyricsScreen(
                             titleText = trackTitleText,
                             artistText = trackArtistText,
                             themePrimary = themePrimary,
+                            alignment = currentLyricsAlignment,
+                            onCycleAlignment = onCycleAlignment,
                             compact = true,
                             onResync = onResyncClick,
                             onSearch = onSearchClick,
@@ -507,6 +528,7 @@ fun LyricsScreen(
                             themePrimary = themePrimary,
                             hazeState = hazeState,
                             compact = true,
+                            isLoadingProvider = isLoading && currentLyrics != null,
                             onToggleProviderMenu = { isProviderMenuExpanded = !isProviderMenuExpanded },
                             onToggleDelay = { isDelayExpanded = !isDelayExpanded },
                             onSelectorPositioned = { pos, size ->
@@ -552,9 +574,9 @@ fun LyricsScreen(
                                     activeIndex = activeIndex,
                                     playbackState = playbackState,
                                     trackOffset = trackOffset,
-                                    userPreferences = userPreferences,
+                                    userPreferences = livePreferences,
                                     themePrimary = themePrimary,
-                                    textAlign = TextAlign.End,
+                                    textAlign = currentLyricsTextAlign,
                                     contentPadding = PaddingValues(top = 4.dp, bottom = 12.dp),
                                     onLineClick = { timeMs ->
                                         userScrolledAway = false
@@ -607,6 +629,8 @@ fun LyricsScreen(
                                 titleText = playbackState.track?.title ?: currentLyrics?.title?.takeIf { it.isNotBlank() } ?: "Someone To Spend Time With",
                                 artistText = playbackState.track?.artist ?: currentLyrics?.artist?.takeIf { it.isNotBlank() } ?: "Los Retros",
                                 themePrimary = themePrimary,
+                                alignment = currentLyricsAlignment,
+                                onCycleAlignment = onCycleAlignment,
                                 compact = false,
                                 onResync = onResyncClick,
                                 onSearch = onSearchClick,
@@ -622,6 +646,7 @@ fun LyricsScreen(
                                 themePrimary = themePrimary,
                                 hazeState = hazeState,
                                 compact = false,
+                                isLoadingProvider = isLoading && currentLyrics != null,
                                 onToggleProviderMenu = { isProviderMenuExpanded = !isProviderMenuExpanded },
                                 onToggleDelay = { isDelayExpanded = !isDelayExpanded },
                                 onSelectorPositioned = { pos, size ->
@@ -667,9 +692,9 @@ fun LyricsScreen(
                                         activeIndex = activeIndex,
                                         playbackState = playbackState,
                                         trackOffset = trackOffset,
-                                        userPreferences = userPreferences,
+                                        userPreferences = livePreferences,
                                         themePrimary = themePrimary,
-                                        textAlign = TextAlign.End,
+                                        textAlign = currentLyricsTextAlign,
                                         contentPadding = PaddingValues(
                                             top = 6.dp,
                                             bottom = if (hasBottomNavPill) 240.dp else 104.dp
@@ -825,8 +850,69 @@ private fun LyricsArtworkThumbnail(
 }
 
 @Composable
+fun LyricsAlignmentIcon(
+    alignment: LyricsAlignment,
+    tint: Color,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier.size(16.dp)) {
+        val strokeWidthPx = 1.75.dp.toPx()
+        val cap = StrokeCap.Round
+        val fullWidth = 14.dp.toPx()
+        val midWidth = 8.5.dp.toPx()
+        val botWidth = 11.5.dp.toPx()
+        val startX = 1.dp.toPx()
+        val endX = startX + fullWidth
+        val midX = (startX + endX) / 2f
+
+        val y1 = 3.5.dp.toPx()
+        val y2 = 8.0.dp.toPx()
+        val y3 = 12.5.dp.toPx()
+
+        // Top line (full width)
+        drawLine(
+            color = tint,
+            start = Offset(startX, y1),
+            end = Offset(endX, y1),
+            strokeWidth = strokeWidthPx,
+            cap = cap
+        )
+
+        // Middle line (alignment-dependent positioning)
+        val (mStart, mEnd) = when (alignment) {
+            LyricsAlignment.LEFT -> startX to (startX + midWidth)
+            LyricsAlignment.CENTER -> (midX - midWidth / 2f) to (midX + midWidth / 2f)
+            LyricsAlignment.RIGHT -> (endX - midWidth) to endX
+        }
+        drawLine(
+            color = tint,
+            start = Offset(mStart, y2),
+            end = Offset(mEnd, y2),
+            strokeWidth = strokeWidthPx,
+            cap = cap
+        )
+
+        // Bottom line (alignment-dependent positioning)
+        val (bStart, bEnd) = when (alignment) {
+            LyricsAlignment.LEFT -> startX to (startX + botWidth)
+            LyricsAlignment.CENTER -> (midX - botWidth / 2f) to (midX + botWidth / 2f)
+            LyricsAlignment.RIGHT -> (endX - botWidth) to endX
+        }
+        drawLine(
+            color = tint,
+            start = Offset(bStart, y3),
+            end = Offset(bEnd, y3),
+            strokeWidth = strokeWidthPx,
+            cap = cap
+        )
+    }
+}
+
+@Composable
 private fun LyricsActionButtonsRow(
     themePrimary: Color,
+    alignment: LyricsAlignment,
+    onCycleAlignment: () -> Unit,
     onResync: () -> Unit,
     onSearch: () -> Unit,
     onImport: () -> Unit
@@ -891,6 +977,30 @@ private fun LyricsActionButtonsRow(
                 )
             }
         }
+
+        Surface(
+            onClick = onCycleAlignment,
+            shape = CircleShape,
+            color = Color.White.copy(alpha = 0.10f),
+            border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.15f)),
+            modifier = Modifier
+                .size(32.dp)
+                .testTag("lyrics_alignment_toggle_button")
+        ) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier.semantics {
+                    contentDescription = "Lyrics alignment: ${alignment.displayName}"
+                    role = Role.Button
+                }
+            ) {
+                LyricsAlignmentIcon(
+                    alignment = alignment,
+                    tint = Color.White.copy(alpha = 0.90f),
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        }
     }
 }
 
@@ -900,6 +1010,8 @@ private fun LyricsPortraitTopHeader(
     titleText: String,
     artistText: String,
     themePrimary: Color,
+    alignment: LyricsAlignment,
+    onCycleAlignment: () -> Unit,
     compact: Boolean,
     onResync: () -> Unit,
     onSearch: () -> Unit,
@@ -961,6 +1073,8 @@ private fun LyricsPortraitTopHeader(
 
                 LyricsActionButtonsRow(
                     themePrimary = themePrimary,
+                    alignment = alignment,
+                    onCycleAlignment = onCycleAlignment,
                     onResync = onResync,
                     onSearch = onSearch,
                     onImport = onImport
@@ -980,6 +1094,7 @@ private fun LyricsProviderAndDelayCard(
     themePrimary: Color,
     hazeState: HazeState?,
     compact: Boolean = false,
+    isLoadingProvider: Boolean = false,
     onToggleProviderMenu: () -> Unit,
     onToggleDelay: () -> Unit,
     onSelectorPositioned: (Offset, IntSize) -> Unit
@@ -1039,14 +1154,24 @@ private fun LyricsProviderAndDelayCard(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                    Icon(
-                        imageVector = Icons.Default.KeyboardArrowDown,
-                        contentDescription = "Expand provider menu",
-                        tint = Color.White.copy(alpha = 0.75f),
-                        modifier = Modifier
-                            .size(18.dp)
-                            .graphicsLayer { rotationZ = providerChevronRotation }
-                    )
+                    if (isLoadingProvider) {
+                        CircularProgressIndicator(
+                            modifier = Modifier
+                                .size(16.dp)
+                                .testTag("lyrics_provider_loading_spinner"),
+                            strokeWidth = 2.dp,
+                            color = themePrimary
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.KeyboardArrowDown,
+                            contentDescription = "Expand provider menu",
+                            tint = Color.White.copy(alpha = 0.75f),
+                            modifier = Modifier
+                                .size(18.dp)
+                                .graphicsLayer { rotationZ = providerChevronRotation }
+                        )
+                    }
                 }
 
                 HorizontalDivider(
@@ -1146,14 +1271,24 @@ private fun LyricsProviderAndDelayCard(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                    Icon(
-                        imageVector = Icons.Default.KeyboardArrowDown,
-                        contentDescription = "Expand provider menu",
-                        tint = Color.White.copy(alpha = 0.75f),
-                        modifier = Modifier
-                            .size(18.dp)
-                            .graphicsLayer { rotationZ = providerChevronRotation }
-                    )
+                    if (isLoadingProvider) {
+                        CircularProgressIndicator(
+                            modifier = Modifier
+                                .size(16.dp)
+                                .testTag("lyrics_provider_loading_spinner"),
+                            strokeWidth = 2.dp,
+                            color = themePrimary
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.KeyboardArrowDown,
+                            contentDescription = "Expand provider menu",
+                            tint = Color.White.copy(alpha = 0.75f),
+                            modifier = Modifier
+                                .size(18.dp)
+                                .graphicsLayer { rotationZ = providerChevronRotation }
+                        )
+                    }
                 }
 
                 Box(
@@ -1372,19 +1507,35 @@ private fun LyricsEmptyOrLoadingState(
                     modifier = Modifier.size(if (compact) 48.dp else 68.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Default.MusicNote,
-                            contentDescription = "No lyrics icon",
-                            tint = themePrimary,
-                            modifier = Modifier.size(if (compact) 24.dp else 34.dp)
-                        )
+                        if (isLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier
+                                    .size(if (compact) 24.dp else 34.dp)
+                                    .testTag("lyrics_empty_state_loading_spinner"),
+                                strokeWidth = if (compact) 2.5.dp else 3.dp,
+                                color = themePrimary
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.MusicNote,
+                                contentDescription = "No lyrics icon",
+                                tint = themePrimary,
+                                modifier = Modifier.size(if (compact) 24.dp else 34.dp)
+                            )
+                        }
                     }
                 }
 
                 Spacer(modifier = Modifier.height(if (compact) 10.dp else 16.dp))
 
                 Text(
-                    text = if (hasTrack) "No lyrics found for this track" else "No track currently playing",
+                    text = if (isLoading) {
+                        "Searching for lyrics…"
+                    } else if (hasTrack) {
+                        "No lyrics found for this track"
+                    } else {
+                        "No track currently playing"
+                    },
                     style = MaterialTheme.typography.titleMedium.copy(fontSize = if (compact) 15.5.sp else 17.sp),
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
@@ -1394,90 +1545,77 @@ private fun LyricsEmptyOrLoadingState(
                 Spacer(modifier = Modifier.height(4.dp))
 
                 Text(
-                    text = "Search for matching lyrics online or select an LRC file manually",
+                    text = if (isLoading) {
+                        "Checking online providers for synchronized lyrics…"
+                    } else {
+                        "Search for matching lyrics online or select an LRC file manually"
+                    },
                     style = MaterialTheme.typography.bodyMedium.copy(fontSize = if (compact) 12.sp else 13.sp),
                     color = Color.White.copy(alpha = 0.72f),
                     textAlign = TextAlign.Center,
                     lineHeight = if (compact) 16.sp else 18.sp
                 )
 
-                if (isLoading) {
-                    Spacer(modifier = Modifier.height(if (compact) 10.dp else 14.dp))
+                if (!isLoading) {
+                    Spacer(modifier = Modifier.height(if (compact) 14.dp else 20.dp))
+
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp,
-                            color = themePrimary
-                        )
-                        Text(
-                            text = "Searching online providers…",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color.White.copy(alpha = 0.80f)
-                        )
-                    }
-                }
+                        Button(
+                            onClick = onSearch,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = themePrimary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = if (compact) 14.dp else 18.dp, vertical = 10.dp),
+                            modifier = Modifier
+                                .defaultMinSize(minHeight = 44.dp)
+                                .testTag("empty_state_search_button")
+                        ) {
+                            Icon(
+                                Icons.Default.Search,
+                                contentDescription = "Search for matching lyrics",
+                                tint = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                "Search Lyrics",
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
 
-                Spacer(modifier = Modifier.height(if (compact) 14.dp else 20.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Button(
-                        onClick = onSearch,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = themePrimary,
-                            contentColor = MaterialTheme.colorScheme.onPrimary
-                        ),
-                        shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = if (compact) 14.dp else 18.dp, vertical = 10.dp),
-                        modifier = Modifier
-                            .defaultMinSize(minHeight = 44.dp)
-                            .testTag("empty_state_search_button")
-                    ) {
-                        Icon(
-                            Icons.Default.Search,
-                            contentDescription = "Search for matching lyrics",
-                            tint = MaterialTheme.colorScheme.onPrimary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            "Search Lyrics",
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-
-                    OutlinedButton(
-                        onClick = onImport,
-                        shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = if (compact) 14.dp else 18.dp, vertical = 10.dp),
-                        border = BorderStroke(1.dp, themeSecondary.copy(alpha = 0.50f)),
-                        modifier = Modifier
-                            .defaultMinSize(minHeight = 44.dp)
-                            .testTag("empty_state_import_button")
-                    ) {
-                        Icon(
-                            Icons.Default.UploadFile,
-                            contentDescription = "Select an LRC file manually",
-                            tint = themeSecondary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            "Import Lyrics",
-                            color = themeSecondary,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        OutlinedButton(
+                            onClick = onImport,
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = if (compact) 14.dp else 18.dp, vertical = 10.dp),
+                            border = BorderStroke(1.dp, themeSecondary.copy(alpha = 0.50f)),
+                            modifier = Modifier
+                                .defaultMinSize(minHeight = 44.dp)
+                                .testTag("empty_state_import_button")
+                        ) {
+                            Icon(
+                                Icons.Default.UploadFile,
+                                contentDescription = "Select an LRC file manually",
+                                tint = themeSecondary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                "Import Lyrics",
+                                color = themeSecondary,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 }
             }
@@ -1498,8 +1636,16 @@ private fun LyricsLinesLazyColumn(
     contentPadding: PaddingValues,
     onLineClick: (Long) -> Unit
 ) {
-    val lineAlignment = if (textAlign == TextAlign.Start) Alignment.Start else Alignment.End
-    val rowArrangement = if (textAlign == TextAlign.Start) Arrangement.Start else Arrangement.End
+    val lineAlignment = when (textAlign) {
+        TextAlign.Start, TextAlign.Left -> Alignment.Start
+        TextAlign.End, TextAlign.Right -> Alignment.End
+        else -> Alignment.CenterHorizontally
+    }
+    val rowArrangement = when (textAlign) {
+        TextAlign.Start, TextAlign.Left -> Arrangement.Start
+        TextAlign.End, TextAlign.Right -> Arrangement.End
+        else -> Arrangement.Center
+    }
 
     LazyColumn(
         state = listState,
@@ -1699,12 +1845,16 @@ private fun UnisonLyricsAttributionFooter(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val horizontalArrangement = if (textAlign == TextAlign.Start) {
-        Arrangement.spacedBy(8.dp, Alignment.Start)
-    } else {
-        Arrangement.spacedBy(8.dp, Alignment.End)
+    val horizontalArrangement = when (textAlign) {
+        TextAlign.Start, TextAlign.Left -> Arrangement.spacedBy(8.dp, Alignment.Start)
+        TextAlign.End, TextAlign.Right -> Arrangement.spacedBy(8.dp, Alignment.End)
+        else -> Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)
     }
-    val horizontalAlignment = if (textAlign == TextAlign.Start) Alignment.Start else Alignment.End
+    val horizontalAlignment = when (textAlign) {
+        TextAlign.Start, TextAlign.Left -> Alignment.Start
+        TextAlign.End, TextAlign.Right -> Alignment.End
+        else -> Alignment.CenterHorizontally
+    }
 
     Column(
         modifier = modifier

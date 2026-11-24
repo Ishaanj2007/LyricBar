@@ -22,7 +22,9 @@ import android.view.animation.DecelerateInterpolator
 import com.example.MainActivity
 import com.example.R
 import com.example.data.preferences.ThemePreset
+import android.graphics.Bitmap
 import com.example.ui.components.MinimalOverlayView
+import com.example.ui.components.loadArtworkBitmapSafely
 import com.example.ui.theme.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -47,6 +49,8 @@ class OverlayService : Service() {
     private var hasAppliedInitialPrefs = false
     private var isInitializingLandscapeProfile = false
     private var currentPrefs = com.example.data.preferences.UserPreferences()
+    private var dynamicAccentCurrentColor: Int? = null
+    private var dynamicAccentExtractionJob: Job? = null
 
     private val displayListener = object : DisplayManager.DisplayListener {
         override fun onDisplayAdded(displayId: Int) = Unit
@@ -484,10 +488,66 @@ class OverlayService : Service() {
 
                 // 2. Update track duration ONLY when track changes
                 val trackKey = playbackState.track?.key
-                if (trackKey != lastAppliedTrackKey) {
+                val trackChanged = trackKey != lastAppliedTrackKey
+                if (trackChanged) {
                     lastAppliedTrackKey = trackKey
                     val trackDurationSec = playbackState.track?.durationSec ?: 0
                     view.trackDurationMs = if (trackDurationSec > 0) trackDurationSec * 1000L else null
+                }
+
+                // Dynamic HUD Accent Colour handling
+                if (!prefs.hudDynamicAccentEnabled) {
+                    dynamicAccentExtractionJob?.cancel()
+                    dynamicAccentExtractionJob = null
+                    if (dynamicAccentCurrentColor != null) {
+                        dynamicAccentCurrentColor = null
+                        view.activeLyricColor = prefs.hudActiveLyricColor
+                    }
+                } else {
+                    val track = playbackState.track
+                    val currentTrackKey = track?.key
+                    if (currentTrackKey.isNullOrBlank()) {
+                        dynamicAccentExtractionJob?.cancel()
+                        dynamicAccentExtractionJob = null
+                        if (dynamicAccentCurrentColor != null) {
+                            dynamicAccentCurrentColor = null
+                            view.activeLyricColor = prefs.hudActiveLyricColor
+                        }
+                    } else if (trackChanged || dynamicAccentCurrentColor == null) {
+                        val cached = ArtworkAccentExtractor.getCachedAccent(currentTrackKey)
+                        if (cached != null) {
+                            dynamicAccentExtractionJob?.cancel()
+                            dynamicAccentExtractionJob = null
+                            dynamicAccentCurrentColor = cached
+                            view.activeLyricColor = cached
+                        } else {
+                            dynamicAccentExtractionJob?.cancel()
+                            if (trackChanged) {
+                                dynamicAccentCurrentColor = null
+                                view.activeLyricColor = prefs.hudActiveLyricColor
+                            }
+                            val embeddedBitmap = track.albumArtBitmap
+                            val artUri = track.albumArtUri
+                            dynamicAccentExtractionJob = serviceScope.launch(Dispatchers.Default) {
+                                val bitmapToUse: Bitmap? = if (embeddedBitmap != null && !embeddedBitmap.isRecycled) {
+                                    embeddedBitmap
+                                } else if (!artUri.isNullOrBlank() &&
+                                    !artUri.startsWith("http://", ignoreCase = true) &&
+                                    !artUri.startsWith("https://", ignoreCase = true)
+                                ) {
+                                    loadArtworkBitmapSafely(applicationContext, artUri, reqSize = 512)
+                                } else null
+
+                                val extracted = ArtworkAccentExtractor.extractAccentColor(currentTrackKey, bitmapToUse)
+                                withContext(Dispatchers.Main) {
+                                    if (isActive && lastAppliedTrackKey == currentTrackKey && currentPrefs.hudDynamicAccentEnabled) {
+                                        dynamicAccentCurrentColor = extracted
+                                        overlayView?.activeLyricColor = extracted ?: currentPrefs.hudActiveLyricColor
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
 
                 // 3. Update styling properties, primary color, and orientation-aware bounds when preferences or display geometry change
@@ -505,7 +565,12 @@ class OverlayService : Service() {
                         view.hudBackdropCornerRadiusDp = prefs.hudBackdropCornerRadiusDp.toFloat()
                         view.hudBackdropHorizontalPaddingDp = prefs.hudBackdropHorizontalPaddingDp.toFloat()
                         view.hudBackdropVerticalPaddingDp = prefs.hudBackdropVerticalPaddingDp.toFloat()
-                        view.activeLyricColor = prefs.hudActiveLyricColor
+                        val effectiveActiveColor = if (prefs.hudDynamicAccentEnabled && dynamicAccentCurrentColor != null) {
+                            dynamicAccentCurrentColor!!
+                        } else {
+                            prefs.hudActiveLyricColor
+                        }
+                        view.activeLyricColor = effectiveActiveColor
                         view.inactiveLyricColor = prefs.hudInactiveLyricColor
                         view.typewriterSpeed = prefs.typewriterSpeed
                         view.smoothTransitionSpeed = prefs.smoothTransitionSpeed
@@ -707,6 +772,9 @@ class OverlayService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         cancelVisibilityAnimation()
+        dynamicAccentExtractionJob?.cancel()
+        dynamicAccentExtractionJob = null
+        dynamicAccentCurrentColor = null
         serviceScope.cancel()
         try {
             displayManager?.unregisterDisplayListener(displayListener)

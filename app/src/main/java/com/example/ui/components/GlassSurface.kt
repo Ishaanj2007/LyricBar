@@ -13,8 +13,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
@@ -53,6 +58,7 @@ import androidx.compose.ui.platform.LocalContext
 import com.example.data.model.TrackMetadata
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.isActive
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 
@@ -628,6 +634,194 @@ fun createArtworkGlowBitmap(
 }
 
 /**
+ * Record holding canonical artwork state for an active track.
+ */
+internal data class TrackArtworkRecord(
+    val canonicalBitmap: Bitmap?,
+    val uriStr: String,
+    val revisionId: Long
+)
+
+internal var bitmapEqualityChecker: (Bitmap?, Bitmap?) -> Boolean = { a, b ->
+    if (a === b) true
+    else if (a == null || b == null) false
+    else {
+        try {
+            val aRecycled = a.isRecycled
+            val bRecycled = b.isRecycled
+            if (aRecycled || bRecycled) false
+            else if (a.width != b.width || a.height != b.height || a.config != b.config) false
+            else a.sameAs(b)
+        } catch (_: Throwable) {
+            false
+        }
+    }
+}
+
+internal fun areBitmapsIdentical(a: Bitmap?, b: Bitmap?): Boolean = bitmapEqualityChecker(a, b)
+
+/**
+ * Lifecycle-safe, collision-free artwork canonicalizer.
+ * Guarantees stable object identity across pause/seek/HUD recompositions,
+ * while safely detecting genuinely updated artwork via background content comparison.
+ */
+object ArtworkCanonicalizer {
+    private val globalRevisionGen = java.util.concurrent.atomic.AtomicLong(1L)
+    private val requestTokenGen = java.util.concurrent.atomic.AtomicLong(1L)
+    private val trackRecords = object : LinkedHashMap<String, TrackArtworkRecord>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, TrackArtworkRecord>?): Boolean {
+            return size > 16
+        }
+    }
+
+    @Synchronized
+    fun getCanonicalBitmap(trackKey: String, incoming: Bitmap?): Bitmap? {
+        val cleanKey = trackKey.trim()
+        val incomingSafe = try { incoming?.takeIf { !it.isRecycled } } catch (_: Throwable) { incoming }
+        if (cleanKey.isBlank()) return incomingSafe
+        val record = trackRecords[cleanKey]
+        val canonical = record?.canonicalBitmap
+        if (canonical != null) {
+            val isCanonicalRecycled = try { canonical.isRecycled } catch (_: Throwable) { false }
+            if (!isCanonicalRecycled) {
+                if (incoming == null) return canonical
+                if (canonical === incoming) return canonical
+                if (areBitmapsIdentical(canonical, incoming)) {
+                    return canonical
+                }
+            }
+        }
+        return incomingSafe
+    }
+
+    @Synchronized
+    fun getArtworkIdentity(trackKey: String, bitmap: Bitmap?): String {
+        val cleanKey = trackKey.trim()
+        val isBitmapRecycled = try { bitmap?.isRecycled ?: true } catch (_: Throwable) { false }
+        if (cleanKey.isBlank() || bitmap == null || isBitmapRecycled) {
+            return if (cleanKey.isBlank()) "idle_sunset" else "$cleanKey::none"
+        }
+        val record = trackRecords[cleanKey]
+        if (record != null && record.canonicalBitmap === bitmap) {
+            return "$cleanKey::r${record.revisionId}"
+        }
+        val rev = record?.revisionId ?: globalRevisionGen.incrementAndGet()
+        trackRecords[cleanKey] = TrackArtworkRecord(bitmap, record?.uriStr ?: "", rev)
+        return "$cleanKey::r$rev"
+    }
+
+    @Synchronized
+    fun canonicalize(
+        trackKey: String,
+        uriStr: String,
+        newBitmap: Bitmap?
+    ): Pair<Bitmap?, String> {
+        val cleanKey = trackKey.trim()
+        val cleanUri = uriStr.trim()
+
+        val isRecycled = try { newBitmap?.isRecycled ?: true } catch (_: Throwable) { false }
+
+        if (cleanKey.isBlank() && cleanUri.isBlank() && (newBitmap == null || isRecycled)) {
+            return Pair(null, "empty::none")
+        }
+
+        val existingRecord = trackRecords[cleanKey]
+        val canonical = existingRecord?.canonicalBitmap
+
+        if (newBitmap == null || isRecycled) {
+            if (cleanUri.isBlank()) {
+                val rev = existingRecord?.revisionId ?: globalRevisionGen.incrementAndGet()
+                trackRecords[cleanKey] = TrackArtworkRecord(null, "", rev)
+                return Pair(null, "$cleanKey::none")
+            }
+            val rev = existingRecord?.revisionId ?: globalRevisionGen.incrementAndGet()
+            return Pair(null, "$cleanKey::$cleanUri::r$rev")
+        }
+
+        if (canonical != null && canonical === newBitmap && existingRecord.uriStr == cleanUri) {
+            return Pair(canonical, "$cleanKey::r${existingRecord.revisionId}")
+        }
+
+        if (canonical != null && existingRecord.uriStr == cleanUri) {
+            if (areBitmapsIdentical(canonical, newBitmap)) {
+                return Pair(canonical, "$cleanKey::r${existingRecord.revisionId}")
+            }
+        }
+
+        val newRev = globalRevisionGen.incrementAndGet()
+        if (existingRecord != null) {
+            val oldIdentity = "$cleanKey::r${existingRecord.revisionId}"
+            ArtworkMemoryCache.remove("blur_$oldIdentity")
+            ArtworkMemoryCache.removeMatching("glow_$oldIdentity")
+        }
+
+        trackRecords[cleanKey] = TrackArtworkRecord(newBitmap, cleanUri, newRev)
+        return Pair(newBitmap, "$cleanKey::r$newRev")
+    }
+
+    suspend fun resolveAsync(
+        trackKey: String,
+        uriStr: String,
+        incoming: Bitmap?
+    ): Bitmap? {
+        val cleanKey = trackKey.trim()
+        val cleanUri = uriStr.trim()
+        val isRecycled = try { incoming?.isRecycled ?: true } catch (_: Throwable) { false }
+        if (cleanKey.isBlank() || incoming == null || isRecycled) {
+            return incoming?.takeIf {
+                try { !it.isRecycled } catch (_: Throwable) { true }
+            }
+        }
+
+        val requestToken = requestTokenGen.incrementAndGet()
+
+        val existingRecord = synchronized(this) { trackRecords[cleanKey] }
+        val canonical = existingRecord?.canonicalBitmap
+
+        if (canonical != null && canonical === incoming && existingRecord.uriStr == cleanUri) {
+            return canonical
+        }
+
+        if (canonical != null && existingRecord.uriStr == cleanUri) {
+            val isIdentical = withContext(Dispatchers.Default) {
+                areBitmapsIdentical(canonical, incoming)
+            }
+            if (isIdentical) {
+                return canonical
+            }
+        }
+
+        return synchronized(this) {
+            if (!isTokenValid(requestToken)) {
+                return@synchronized canonical ?: incoming.takeIf {
+                    try { !it.isRecycled } catch (_: Throwable) { true }
+                }
+            }
+
+            val newRev = globalRevisionGen.incrementAndGet()
+            if (existingRecord != null) {
+                val oldIdentity = "$cleanKey::r${existingRecord.revisionId}"
+                ArtworkMemoryCache.remove("blur_$oldIdentity")
+                ArtworkMemoryCache.removeMatching("glow_$oldIdentity")
+            }
+
+            trackRecords[cleanKey] = TrackArtworkRecord(incoming, cleanUri, newRev)
+            incoming
+        }
+    }
+
+    @Synchronized
+    fun isTokenValid(token: Long): Boolean = token <= requestTokenGen.get()
+
+    @Synchronized
+    fun clear() {
+        requestTokenGen.incrementAndGet()
+        trackRecords.clear()
+        ArtworkMemoryCache.clear()
+    }
+}
+
+/**
  * Shared, lifecycle-safe artwork glow bitmap remember helper.
  * Generates and caches the organic rounded-silhouette glow off the main thread.
  */
@@ -638,28 +832,36 @@ fun rememberArtworkGlowBitmap(
     glowPalette: ArtworkGlowPalette? = null
 ): Bitmap? {
     val trackKey = track?.key ?: ""
-    val uriStr = track?.albumArtUri ?: ""
     val paletteHash = glowPalette?.let { "${it.topColor.hashCode()}_${it.bottomColor.hashCode()}" } ?: ""
-    val cacheKey = remember(trackKey, uriStr, artworkBitmap, paletteHash) {
-        if (artworkBitmap != null && !artworkBitmap.isRecycled) {
-            buildArtworkCacheKey(trackKey, uriStr, "glow_mask_320_${artworkBitmap.hashCode()}_$paletteHash")
+    // BUG-005: Key only on trackKey, not artworkBitmap. Each MediaSession callback may deliver
+    // a new Bitmap allocation with identical pixels; using the Bitmap reference as a remember key
+    // causes getArtworkIdentity to see a fresh reference → new revision → glow recomputed needlessly.
+    val artworkIdentity = remember(trackKey) {
+        ArtworkCanonicalizer.getArtworkIdentity(trackKey, artworkBitmap)
+    }
+    val glowCacheKey = remember(artworkIdentity, paletteHash) {
+        if (artworkBitmap != null && !artworkBitmap.isRecycled && !artworkIdentity.endsWith("::none") && artworkIdentity != "idle_sunset") {
+            "glow_${artworkIdentity}_$paletteHash"
         } else ""
     }
 
-    val cached = if (cacheKey.isNotBlank()) ArtworkMemoryCache.get(cacheKey) else null
+    val cached = if (glowCacheKey.isNotBlank()) ArtworkMemoryCache.get(glowCacheKey) else null
 
     return produceState<Bitmap?>(
         initialValue = cached,
-        key1 = cacheKey,
-        key2 = artworkBitmap,
-        key3 = glowPalette
+        key1 = glowCacheKey,
+        // BUG-005: Removed key2 = artworkBitmap. glowCacheKey already encodes artwork identity;
+        // using artworkBitmap as an additional key restarts the coroutine on every new Bitmap
+        // allocation with identical pixels, even when glowCacheKey (the stable cache key) is unchanged.
+        key2 = glowPalette
     ) {
-        if (artworkBitmap == null || artworkBitmap.isRecycled) {
+        val expectedKey = glowCacheKey
+        if (artworkBitmap == null || artworkBitmap.isRecycled || expectedKey.isBlank()) {
             value = null
             return@produceState
         }
 
-        val memCached = ArtworkMemoryCache.get(cacheKey)
+        val memCached = ArtworkMemoryCache.get(expectedKey)
         if (memCached != null && !memCached.isRecycled) {
             value = memCached
             return@produceState
@@ -669,13 +871,34 @@ fun rememberArtworkGlowBitmap(
             createArtworkGlowBitmap(artworkBitmap, targetSize = 320, paddingPx = 50, palette = glowPalette)
         }
 
-        if (glow != null && !glow.isRecycled) {
-            ArtworkMemoryCache.put(cacheKey, glow)
+        if (isActive && glow != null && !glow.isRecycled && glowCacheKey == expectedKey) {
+            ArtworkMemoryCache.put(expectedKey, glow)
             value = glow
         }
     }.value
 }
 
+
+/**
+ * Immutable Crossfade state container for cinematic blurred background.
+ */
+private class CinematicBackgroundState(
+    val identity: String,
+    val bitmap: Bitmap?
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is CinematicBackgroundState) return false
+        return identity == other.identity &&
+            (bitmap != null) == (other.bitmap != null)
+    }
+
+    override fun hashCode(): Int {
+        var result = identity.hashCode()
+        result = 31 * result + (if (bitmap != null) 1 else 0)
+        return result
+    }
+}
 
 /**
  * Cinematic Now Playing Atmospheric Background.
@@ -693,35 +916,93 @@ fun CinematicArtworkBackground(
 ) {
     val backgroundColor = MaterialTheme.colorScheme.background
 
-    val blurCacheKey = remember(artworkBitmap, trackKey) {
-        if (artworkBitmap != null && !artworkBitmap.isRecycled) {
-            "blur_${trackKey}_${artworkBitmap.hashCode()}"
-        } else ""
+    // BUG-005: Key on trackKey and whether artworkBitmap is present. Identical-pixel Bitmap re-allocations
+    // from MediaSession must not restart the blur pipeline, but artwork arriving after metadata must update.
+    val artworkIdentity = remember(trackKey, artworkBitmap != null) {
+        ArtworkCanonicalizer.getArtworkIdentity(trackKey, artworkBitmap)
     }
 
-    // Generate or cache the smooth pre-blurred ambient bitmap asynchronously off the main thread
-    val blurredBitmap = produceState<Bitmap?>(
-        initialValue = if (blurCacheKey.isNotBlank()) ArtworkMemoryCache.get(blurCacheKey) else null,
-        key1 = artworkBitmap,
-        key2 = trackKey
+    val blurCacheKey = remember(artworkIdentity) {
+        if (artworkIdentity == "idle_sunset" || artworkIdentity.endsWith("::none")) "" else "blur_$artworkIdentity"
+    }
+
+    val cachedBlurred = remember(blurCacheKey) {
+        if (blurCacheKey.isNotBlank()) ArtworkMemoryCache.get(blurCacheKey) else null
+    }
+
+    // Generate or cache the smooth pre-blurred ambient bitmap asynchronously off the main thread.
+    // Pairs the generated bitmap with blurCacheKey to ensure stale blurred artwork from a previous track is never used.
+    val blurredResult = produceState<Pair<String, Bitmap?>>(
+        initialValue = Pair(blurCacheKey, cachedBlurred),
+        key1 = blurCacheKey
     ) {
-        if (artworkBitmap == null || artworkBitmap.isRecycled) {
-            value = null
+        val expectedKey = blurCacheKey
+        value = Pair(expectedKey, cachedBlurred)
+        if (artworkBitmap == null || artworkBitmap.isRecycled || expectedKey.isBlank()) {
+            value = Pair(expectedKey, null)
             return@produceState
         }
-        val cached = ArtworkMemoryCache.get(blurCacheKey)
-        if (cached != null && !cached.isRecycled) {
-            value = cached
+        if (cachedBlurred != null && !cachedBlurred.isRecycled) {
+            value = Pair(expectedKey, cachedBlurred)
             return@produceState
         }
         val blurred = withContext(Dispatchers.Default) {
             createBlurredArtworkBitmap(artworkBitmap)
         }
-        if (blurred != null && !blurred.isRecycled) {
-            ArtworkMemoryCache.put(blurCacheKey, blurred)
-            value = blurred
+        if (isActive && blurred != null && !blurred.isRecycled && blurCacheKey == expectedKey) {
+            ArtworkMemoryCache.put(expectedKey, blurred)
+            value = Pair(expectedKey, blurred)
         }
     }.value
+
+    val currentBlurred = if (blurredResult.first == blurCacheKey && blurCacheKey.isNotBlank() && blurredResult.second?.isRecycled == false) {
+        blurredResult.second
+    } else {
+        cachedBlurred?.takeIf { !it.isRecycled }
+    }
+
+    val latestArtworkBitmap by rememberUpdatedState(artworkBitmap)
+    val latestTrackKey by rememberUpdatedState(trackKey)
+    val latestBlurredBitmap by rememberUpdatedState(currentBlurred)
+
+    // Stable background state: holds the previous blurred background steady until
+    // the new track's blurred bitmap is ready. Never transitions to raw artwork.
+    var bgTargetState by remember {
+        mutableStateOf(
+            if (currentBlurred != null && !currentBlurred.isRecycled) {
+                CinematicBackgroundState("art_$artworkIdentity", currentBlurred)
+            } else {
+                CinematicBackgroundState("idle_sunset", null)
+            }
+        )
+    }
+
+    LaunchedEffect(artworkIdentity, currentBlurred) {
+        val targetIdentity = if (trackKey.isNotBlank() && !artworkIdentity.endsWith("::none") && artworkIdentity != "idle_sunset") {
+            "art_$artworkIdentity"
+        } else {
+            "idle_sunset"
+        }
+
+        if (currentBlurred != null && !currentBlurred.isRecycled && targetIdentity != "idle_sunset") {
+            if (bgTargetState.identity != targetIdentity || bgTargetState.bitmap !== currentBlurred) {
+                bgTargetState = CinematicBackgroundState(targetIdentity, currentBlurred)
+            }
+        } else if (targetIdentity == "idle_sunset") {
+            // Track has no artwork or idle -> immediately switch to idle_sunset (prevent previous track's blur lingering)
+            if (bgTargetState.identity != "idle_sunset") {
+                bgTargetState = CinematicBackgroundState("idle_sunset", null)
+            }
+        } else {
+            // MED-02: Track is active and has artwork, but its blurred bitmap is still being generated.
+            // If the current background belongs to a different track, clear it to idle_sunset immediately
+            // to prevent the previous track's blur from appearing over the new track during rapid switching.
+            val cleanKey = trackKey.trim()
+            if (bgTargetState.identity != "idle_sunset" && !bgTargetState.identity.startsWith("art_$cleanKey::")) {
+                bgTargetState = CinematicBackgroundState("idle_sunset", null)
+            }
+        }
+    }
 
     Box(
         modifier = modifier
@@ -734,23 +1015,16 @@ fun CinematicArtworkBackground(
                 .fillMaxSize()
                 .then(if (hazeState != null) Modifier.hazeSource(state = hazeState) else Modifier)
         ) {
-            // Stable target key prevents re-triggering Crossfade when identical track is playing/paused
-            val stableKey = if (artworkBitmap != null && !artworkBitmap.isRecycled) {
-                "art_${trackKey.ifEmpty { artworkBitmap.hashCode().toString() }}"
-            } else {
-                "idle_sunset"
-            }
-
             // 1. Softly blurred ambient artwork background (or warm sunset atmospheric canvas when idle)
             androidx.compose.animation.Crossfade(
-                targetState = stableKey,
+                targetState = bgTargetState,
                 animationSpec = tween(durationMillis = 260),
                 label = "cinematic_bg_crossfade"
-            ) { key ->
-                if (key.startsWith("art_") && artworkBitmap != null && !artworkBitmap.isRecycled) {
-                    val displayBitmap = blurredBitmap ?: artworkBitmap
+            ) { state ->
+                val bm = state.bitmap
+                if (state.identity.startsWith("art_") && bm != null && !bm.isRecycled) {
                     Image(
-                        bitmap = displayBitmap.asImageBitmap(),
+                        bitmap = bm.asImageBitmap(),
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
                         alpha = 1.0f,
@@ -814,30 +1088,64 @@ fun CinematicArtworkBackground(
 object ArtworkMemoryCache {
     private val maxMemory = Runtime.getRuntime().maxMemory()
     // Allocate 1/8th of available runtime heap, bounded between 16MB and 32MB
-    private val cacheSizeBytes = (maxMemory / 8L).coerceIn(16L * 1024 * 1024, 32L * 1024 * 1024).toInt()
+    private val cacheSizeBytes = (maxMemory / 8L).coerceIn(16L * 1024 * 1024, 32L * 1024 * 1024)
+    // MIN-03: Cap maximum entries to prevent unbounded growth during long playlist sessions
+    private const val MAX_ENTRIES = 32
 
-    private val lruCache = object : android.util.LruCache<String, Bitmap>(cacheSizeBytes) {
-        override fun sizeOf(key: String, value: Bitmap): Int {
-            return value.byteCount.coerceAtLeast(1)
+    private var currentSizeBytes: Long = 0L
+    private val map = LinkedHashMap<String, Bitmap>(32, 0.75f, true)
+
+    @Synchronized
+    fun get(key: String): Bitmap? {
+        val bm = map[key] ?: return null
+        val recycled = try { bm.isRecycled } catch (_: Throwable) { false }
+        return if (!recycled) bm else {
+            remove(key)
+            null
         }
     }
 
     @Synchronized
-    fun get(key: String): Bitmap? {
-        val bm = lruCache.get(key)
-        return if (bm != null && !bm.isRecycled) bm else null
+    fun put(key: String, bitmap: Bitmap) {
+        val recycled = try { bitmap.isRecycled } catch (_: Throwable) { false }
+        if (recycled) return
+        remove(key)
+        val bytes = try { bitmap.byteCount.toLong().coerceAtLeast(1L) } catch (_: Throwable) { 1L }
+        map[key] = bitmap
+        currentSizeBytes += bytes
+        trimToSize()
     }
 
     @Synchronized
-    fun put(key: String, bitmap: Bitmap) {
-        if (!bitmap.isRecycled && bitmap.width > 0 && bitmap.height > 0) {
-            lruCache.put(key, bitmap)
+    fun remove(key: String): Bitmap? {
+        val removed = map.remove(key) ?: return null
+        val bytes = try { removed.byteCount.toLong().coerceAtLeast(1L) } catch (_: Throwable) { 1L }
+        currentSizeBytes = (currentSizeBytes - bytes).coerceAtLeast(0L)
+        return removed
+    }
+
+    @Synchronized
+    fun removeMatching(prefix: String) {
+        val toRemove = map.keys.filter { it.startsWith(prefix) || it.contains(prefix) }
+        for (k in toRemove) {
+            remove(k)
         }
     }
 
     @Synchronized
     fun clear() {
-        lruCache.evictAll()
+        map.clear()
+        currentSizeBytes = 0L
+    }
+
+    private fun trimToSize() {
+        val iterator = map.entries.iterator()
+        while ((currentSizeBytes > cacheSizeBytes || map.size > MAX_ENTRIES) && iterator.hasNext()) {
+            val entry = iterator.next()
+            val bytes = try { entry.value.byteCount.toLong().coerceAtLeast(1L) } catch (_: Throwable) { 1L }
+            currentSizeBytes = (currentSizeBytes - bytes).coerceAtLeast(0L)
+            iterator.remove()
+        }
     }
 }
 
@@ -853,7 +1161,7 @@ fun buildArtworkCacheKey(trackKey: String, uriStr: String, variant: String = "fu
 
 /**
  * Shared, lifecycle-safe artwork bitmap remember helper.
- * Uses a bounded memory cache and never drops state to null when the track identity is stable,
+ * Uses a bounded memory cache and canonicalizes identical bitmaps across MediaSession updates,
  * eliminating the double-flicker bug on playback state changes.
  */
 @Composable
@@ -867,10 +1175,25 @@ fun rememberArtworkBitmap(track: TrackMetadata?): Bitmap? {
         buildArtworkCacheKey(trackKey, uriStr, "full_512")
     }
 
-    // If an active embedded bitmap is provided, cache and return immediately
+    var canonicalBitmap by remember(trackKey) {
+        mutableStateOf(ArtworkCanonicalizer.getCanonicalBitmap(trackKey, embedded))
+    }
+
+    LaunchedEffect(trackKey, uriStr, embedded) {
+        if (embedded != null && !embedded.isRecycled) {
+            val resolved = ArtworkCanonicalizer.resolveAsync(trackKey, uriStr, embedded)
+            if (resolved != null && !resolved.isRecycled) {
+                if (cacheKey.isNotBlank()) ArtworkMemoryCache.put(cacheKey, resolved)
+                canonicalBitmap = resolved
+            }
+        }
+    }
+
+    // If an active embedded bitmap is provided, canonicalize and return stable reference
     if (embedded != null && !embedded.isRecycled) {
-        if (cacheKey.isNotBlank()) ArtworkMemoryCache.put(cacheKey, embedded)
-        return embedded
+        val canonical = canonicalBitmap ?: ArtworkCanonicalizer.getCanonicalBitmap(trackKey, embedded) ?: embedded
+        if (cacheKey.isNotBlank()) ArtworkMemoryCache.put(cacheKey, canonical)
+        return canonical
     }
 
     // Check memory cache synchronously to avoid any momentary null frame
@@ -899,8 +1222,9 @@ fun rememberArtworkBitmap(track: TrackMetadata?): Bitmap? {
                 loadArtworkBitmapSafely(context, uriStr, reqSize = 512)
             }
             if (loaded != null && !loaded.isRecycled) {
-                ArtworkMemoryCache.put(cacheKey, loaded)
-                value = loaded
+                val resolved = ArtworkCanonicalizer.resolveAsync(trackKey, uriStr, loaded) ?: loaded
+                ArtworkMemoryCache.put(cacheKey, resolved)
+                value = resolved
             }
         }
     }.value

@@ -47,6 +47,9 @@ jobs:
       - name: Assemble Debug APK
         run: ./gradlew :app:assembleDebug --stacktrace
 
+      - name: Verify Release Minification (R8)
+        run: ./gradlew :app:minifyReleaseWithR8 --stacktrace
+
       - name: Upload Test Results
         if: always()
         uses: actions/upload-artifact@v4

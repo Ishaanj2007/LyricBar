@@ -172,26 +172,7 @@ class MinimalOverlayView(
             }
         }
 
-    // Layout data structures for zero-allocation rendering & smooth multi-line wrapping
-    data class LayoutWord(
-        val word: String,
-        val width: Float,
-        val startMs: Long,
-        val endMs: Long,
-        var x: Float = 0f,
-        var y: Float = 0f,
-        val graphemeBoundaries: IntArray = computeGraphemeBoundaries(word)
-    ) {
-        val graphemeCount: Int get() = graphemeBoundaries.size
-    }
-
-    data class LayoutLine(
-        val words: List<LayoutWord>,
-        val lineWidth: Float,
-        var baselineY: Float = 0f,
-        val totalGraphemes: Int = words.sumOf { it.graphemeCount },
-        val totalChars: Int = words.sumOf { it.word.length }
-    )
+    // Layout data structures are defined in HudTextLayoutEngine.kt
 
     private val currentLayoutLines = mutableListOf<LayoutLine>()
     private var previousLayoutLines = listOf<LayoutLine>()
@@ -645,11 +626,7 @@ class MinimalOverlayView(
             if (field != value) {
                 field = value
                 val tf = if (value != null) {
-                    try {
-                        ResourcesCompat.getFont(context, value)
-                    } catch (_: Exception) {
-                        null
-                    }
+                    getCachedTypeface(context, value)
                 } else null
                 val typeface = tf ?: android.graphics.Typeface.DEFAULT_BOLD
                 wordActivePaint.typeface = typeface
@@ -700,8 +677,7 @@ class MinimalOverlayView(
     var minBackdropHeightPx: Int = 0
     var isPointOnInteractiveControl: ((x: Float, y: Float) -> Boolean)? = null
 
-    // Touch and drag/resize tracking
-    private enum class TouchTarget { NONE, MOVE, RESIZE_TOP, RESIZE_BOTTOM, RESIZE_LEFT, RESIZE_RIGHT, RESIZE_TL, RESIZE_TR, RESIZE_BL, RESIZE_BR }
+    // Touch and drag/resize tracking (TouchTarget defined in HudGestureControllers.kt)
     private var activeTouchTarget = TouchTarget.NONE
 
     // One-second hold-to-reposition controller & subtle neutral visual/haptic feedback
@@ -1139,288 +1115,78 @@ class MinimalOverlayView(
             return
         }
 
-        val paddingHorizontal = getEffectiveContentHorizontalInsetPx()
-        val contentLeft = paddingHorizontal
-        val contentRight = (width - paddingHorizontal).coerceAtLeast(contentLeft + 60f)
-        val availableWidth = (contentRight - contentLeft).coerceAtLeast(60f)
-        val spaceWidth = wordActivePaint.measureText(" ")
+        val result = HudTextLayoutEngine.computeLayout(
+            rawText = rawText,
+            words = if (currentLine != null && currentLine.isWordSynced && currentLine.words.isNotEmpty()) currentLine.words else null,
+            isWordSynced = currentLine?.isWordSynced == true,
+            lineStartMs = currentLine?.timeMs ?: 0L,
+            lineEndMs = currentLine?.endTimeMs ?: 0L,
+            nextLyricTimestampMs = nextLyricTimestampMs,
+            singleLineMode = singleLineMode,
+            adaptiveScrollingEnabled = adaptiveScrollingEnabled,
+            textAlignMode = textAlignMode,
+            viewWidth = width,
+            viewHeight = height,
+            contentHorizontalPaddingPx = getEffectiveContentHorizontalInsetPx(),
+            spaceWidth = wordActivePaint.measureText(" "),
+            measureText = { wordActivePaint.measureText(it) },
+            fontAscent = wordActivePaint.fontMetrics.ascent,
+            fontDescent = wordActivePaint.fontMetrics.descent,
+            hudBackdropEnabled = hudBackdropEnabled,
+            backdropVerticalPaddingPx = getBackdropVerticalPaddingPx()
+        )
 
-        // 1. Prepare raw word list (either with word-level timestamps or single-word fallback)
-        val wordsToWrap: List<LayoutWord>
-        if (currentLine != null && currentLine.isWordSynced && currentLine.words.isNotEmpty()) {
-            wordsToWrap = currentLine.words.map { wt ->
-                LayoutWord(
-                    word = wt.word,
-                    width = wordActivePaint.measureText(wt.word),
-                    startMs = wt.startMs,
-                    endMs = wt.endMs
-                )
-            }
-        } else {
-            val tokens = rawText.trim().split(Regex("\\s+"))
-            val lineStart = currentLine?.timeMs ?: 0L
-            val rawEnd = currentLine?.endTimeMs ?: 0L
-            val lineEnd = if (rawEnd > lineStart) {
-                rawEnd
-            } else if (nextLyricTimestampMs != null && nextLyricTimestampMs!! > lineStart) {
-                nextLyricTimestampMs!!
-            } else {
-                lineStart + 3500L
-            }
-            wordsToWrap = tokens.map { token ->
-                LayoutWord(
-                    word = token,
-                    width = wordActivePaint.measureText(token),
-                    startMs = lineStart,
-                    endMs = lineEnd
-                )
-            }
-        }
-
-        if (wordsToWrap.isEmpty()) {
+        if (result.lines.isEmpty()) {
             invalidate()
             return
         }
 
-        // 2. Wrap words into lines strictly respecting availableWidth (or keep single line if singleLineMode)
-        val lineList = mutableListOf<LayoutLine>()
-        if (singleLineMode) {
-            var curLineWidth = 0f
-            for ((idx, w) in wordsToWrap.withIndex()) {
-                curLineWidth += w.width + (if (idx > 0) spaceWidth else 0f)
-            }
-            lineList.add(LayoutLine(wordsToWrap.toMutableList(), curLineWidth))
-            maxScrollX = if (adaptiveScrollingEnabled && curLineWidth > availableWidth) {
-                (curLineWidth - availableWidth + 24f).coerceAtLeast(0f)
-            } else {
-                0f
-            }
-        } else {
-            var curLineWords = mutableListOf<LayoutWord>()
-            var curLineWidth = 0f
-
-            for (w in wordsToWrap) {
-                val additionalWidth = if (curLineWords.isEmpty()) w.width else (spaceWidth + w.width)
-                if (curLineWords.isNotEmpty() && (curLineWidth + additionalWidth > availableWidth)) {
-                    lineList.add(LayoutLine(curLineWords, curLineWidth))
-                    curLineWords = mutableListOf(w)
-                    curLineWidth = w.width
-                } else {
-                    curLineWords.add(w)
-                    curLineWidth += additionalWidth
-                }
-            }
-            if (curLineWords.isNotEmpty()) {
-                lineList.add(LayoutLine(curLineWords, curLineWidth))
-            }
-            maxScrollX = 0f
-        }
-
-        // 3. Compute paragraph alignment (LEFT, CENTER / CENTRE, RIGHT) for each line
-        val alignUpper = textAlignMode.trim().uppercase()
-        for (line in lineList) {
-            val startX = if (singleLineMode && line.lineWidth > availableWidth && adaptiveScrollingEnabled) {
-                // When single line exceeds width and scrolling is enabled, start at contentLeft
-                contentLeft
-            } else {
-                when (alignUpper) {
-                    "LEFT" -> contentLeft
-                    "RIGHT" -> (contentRight - line.lineWidth).coerceAtLeast(contentLeft)
-                    else -> contentLeft + ((availableWidth - line.lineWidth) / 2f).coerceAtLeast(0f)
-                }
-            }
-            var curX = startX
-            for (w in line.words) {
-                w.x = curX
-                curX += w.width + spaceWidth
-            }
-        }
-
-        // 4. Compute vertical baseline coordinates & auto-scroll boundaries
-        val fontMetrics = wordActivePaint.fontMetrics
-        val fontHeight = fontMetrics.descent - fontMetrics.ascent
-        val lineSpacing = (fontHeight * 0.28f).coerceAtLeast(6f)
-        val lineHeight = fontHeight + lineSpacing
-        val totalTextHeight = (lineList.size * lineHeight) - lineSpacing
-        val availableHeight = height.toFloat()
-        val verticalInset = if (hudBackdropEnabled) (getBackdropVerticalPaddingPx() + 4f) else 0f
-        val effectiveTextViewportHeight = (availableHeight - verticalInset * 2f).coerceAtLeast(fontHeight)
-
-        if (totalTextHeight <= effectiveTextViewportHeight) {
-            // Fits entirely inside overlay: center vertically
-            val topY = (availableHeight - totalTextHeight) / 2f
-            val startBaseline = topY - fontMetrics.ascent
-            lineList.forEachIndexed { idx, line ->
-                val by = startBaseline + (idx * lineHeight)
-                line.baselineY = by
-                line.words.forEach { it.y = by }
-            }
-            maxScrollY = 0f
-        } else {
-            // Multi-line wrapped text exceeds overlay height: smooth vertical auto-scroll mode
-            val topMargin = verticalInset.coerceAtLeast(18f)
-            val startBaseline = topMargin - fontMetrics.ascent
-            lineList.forEachIndexed { idx, line ->
-                val by = startBaseline + (idx * lineHeight)
-                line.baselineY = by
-                line.words.forEach { it.y = by }
-            }
-            maxScrollY = (totalTextHeight - effectiveTextViewportHeight + 16f).coerceAtLeast(0f)
-        }
-
-        currentLayoutLines.addAll(lineList)
-        totalLayoutGraphemes = currentLayoutLines.sumOf { it.totalGraphemes }
-        totalLayoutChars = currentLayoutLines.sumOf { it.totalChars }
+        maxScrollX = result.maxScrollX
+        maxScrollY = result.maxScrollY
+        currentLayoutLines.addAll(result.lines)
+        totalLayoutGraphemes = result.totalGraphemes
+        totalLayoutChars = result.totalChars
         startLoopIfNeeded()
         invalidate()
     }
 
     private fun updateScrollTarget(posMs: Long) {
-        if (maxScrollY <= 0f || currentLayoutLines.isEmpty()) {
-            targetScrollY = 0f
-            return
-        }
-
-        val isWordSynced = activeLyricLine?.isWordSynced == true
-        if (activeLyricLine?.timeMs == 0L && activeLyricLine?.endTimeMs == 0L && !isWordSynced) {
-            targetScrollY = 0f
-            return
-        }
-
-        var activeLineIdx = 0
-        if (isWordSynced && activeLyricLine?.words?.isNotEmpty() == true) {
-            for ((lineIdx, line) in currentLayoutLines.withIndex()) {
-                val lineStartMs = line.words.firstOrNull()?.startMs ?: 0L
-                if (posMs >= lineStartMs) {
-                    activeLineIdx = lineIdx
-                }
-            }
-        } else {
-            val lineStart = activeLyricLine?.timeMs ?: 0L
-            val rawEnd = activeLyricLine?.endTimeMs ?: 0L
-            val lineEnd = if (rawEnd > lineStart) {
-                rawEnd
-            } else if (nextLyricTimestampMs != null && nextLyricTimestampMs!! > lineStart) {
-                nextLyricTimestampMs!!
-            } else {
-                lineStart + 3500L
-            }
-            val rawDuration = (lineEnd - lineStart).coerceIn(1200L, 12000L)
-            val totalChars = currentLayoutLines.sumOf { l -> l.words.sumOf { it.word.length } }.coerceAtLeast(1)
-            var charAcc = 0
-            for ((lineIdx, line) in currentLayoutLines.withIndex()) {
-                val lineChars = line.words.sumOf { it.word.length }.coerceAtLeast(1)
-                val startFrac = charAcc.toFloat() / totalChars
-                val lStart = lineStart + (rawDuration * startFrac).toLong()
-                if (posMs >= lStart) {
-                    activeLineIdx = lineIdx
-                }
-                charAcc += lineChars
-            }
-        }
-
-        val fontMetrics = wordActivePaint.fontMetrics
-        val fontHeight = fontMetrics.descent - fontMetrics.ascent
-        val activeLineCenterY = currentLayoutLines[activeLineIdx].baselineY + fontMetrics.ascent + (fontHeight / 2f)
-
-        // Center the active line vertically in the overlay window
-        val idealScrollY = activeLineCenterY - (height / 2f)
-        targetScrollY = idealScrollY.coerceIn(0f, maxScrollY)
+        val currentLine = activeLyricLine
+        targetScrollY = HudTextLayoutEngine.calculateVerticalScrollTarget(
+            posMs = posMs,
+            lines = currentLayoutLines,
+            maxScrollY = maxScrollY,
+            viewHeight = height,
+            isWordSynced = currentLine?.isWordSynced == true,
+            words = if (currentLine != null && currentLine.isWordSynced && currentLine.words.isNotEmpty()) currentLine.words else null,
+            lineStartMs = currentLine?.timeMs ?: 0L,
+            lineEndMs = currentLine?.endTimeMs ?: 0L,
+            nextLyricTimestampMs = nextLyricTimestampMs,
+            fontAscent = wordActivePaint.fontMetrics.ascent,
+            fontDescent = wordActivePaint.fontMetrics.descent
+        )
     }
 
     private fun updateHorizontalScrollTarget(posMs: Long) {
-        if (!singleLineMode || !adaptiveScrollingEnabled || maxScrollX <= 0f || currentLayoutLines.isEmpty()) {
-            targetScrollX = 0f
-            return
-        }
-
-        val isWordSynced = activeLyricLine?.isWordSynced == true
-        if (activeLyricLine?.timeMs == 0L && activeLyricLine?.endTimeMs == 0L && !isWordSynced) {
-            targetScrollX = 0f
-            return
-        }
-
-        val line = currentLayoutLines.firstOrNull() ?: return
-        val currentStyle = when (animationStyle) {
-            "KARAOKE", "APPLE_MUSIC" -> "KARAOKE"
-            "SMOOTH_SLIDE", "SMOOTH_SLIDE_UP", "SOFT_FADE", "SCALE_POP" -> "SMOOTH_SLIDE"
-            "TYPEWRITER" -> "TYPEWRITER"
-            "INSTANT", "MINIMAL_STATIC" -> "INSTANT"
-            else -> "KARAOKE"
-        }
-
-        val paddingHorizontal = getEffectiveContentHorizontalInsetPx()
-        val contentLeft = paddingHorizontal
-        val availableWidth = (width - paddingHorizontal * 2).coerceAtLeast(60f)
-
-        if (currentStyle == "KARAOKE" && isWordSynced && line.words.isNotEmpty()) {
-            // Apple-style Karaoke with word-level timing: follow active singing focus point smoothly
-            val firstWordStart = line.words.first().startMs
-            val lastWordEnd = line.words.last().endMs.coerceAtLeast(firstWordStart + 1L)
-
-            if (posMs < firstWordStart) {
-                targetScrollX = 0f
-                return
-            }
-            if (posMs >= lastWordEnd) {
-                targetScrollX = maxScrollX
-                return
-            }
-
-            var focusX = contentLeft
-            for (w in line.words) {
-                if (posMs < w.startMs) {
-                    break
-                } else if (posMs >= w.endMs) {
-                    focusX = w.x + w.width
-                } else {
-                    val wProg = com.example.domain.lyricsengine.LyricsTimingEngine.calculateWordGlowProgress(
-                        startMs = w.startMs,
-                        endMs = w.endMs,
-                        currentPositionMs = posMs,
-                        speedMultiplier = karaokeGlowSpeed
-                    )
-                    focusX = w.x + (w.width * wProg)
-                    break
-                }
-            }
-
-            val desiredOffset = (focusX - (contentLeft + availableWidth * 0.45f)) * scrollSpeedMultiplier.coerceIn(1.0f, 1.5f)
-            targetScrollX = desiredOffset.coerceIn(0f, maxScrollX)
-        } else if (currentStyle == "TYPEWRITER") {
-            // Coordinate horizontal scrolling with typewriter character reveal
-            val speed = (typewriterSpeed * scrollSpeedMultiplier).coerceIn(0.3f, 4.5f)
-            val lineStart = activeLyricLine?.timeMs ?: 0L
-            val rawEnd = activeLyricLine?.endTimeMs ?: 0L
-            val lineEnd = if (rawEnd > lineStart) {
-                rawEnd
-            } else if (nextLyricTimestampMs != null && nextLyricTimestampMs!! > lineStart) {
-                nextLyricTimestampMs!!
-            } else {
-                lineStart + 3500L
-            }
-            val baseDuration = (lineEnd - lineStart).coerceIn(1200L, 8000L)
-            val duration = (baseDuration / speed).toLong().coerceIn(600L, 12000L)
-
-            val frac = if (posMs < lineStart) 0f
-                else if (posMs >= lineStart + duration) 1f
-                else ((posMs - lineStart).toFloat() / duration).coerceIn(0f, 1f)
-
-            val revealedWidth = line.lineWidth * frac
-            val desiredOffset = (contentLeft + revealedWidth) - (contentLeft + availableWidth * 0.55f)
-            targetScrollX = desiredOffset.coerceIn(0f, maxScrollX)
-        } else {
-            // Playback-synchronized adaptive horizontal scroll based on current and next lyric timestamps
-            val lineStart = activeLyricLine?.timeMs ?: 0L
-            val progress = com.example.domain.lyricsengine.LyricsTimingEngine.calculateAdaptiveScrollProgress(
-                currentLineStartMs = lineStart,
-                nextTimestampMs = nextLyricTimestampMs,
-                trackDurationMs = trackDurationMs,
-                currentPositionMs = posMs,
-                speedMultiplier = scrollSpeedMultiplier
-            )
-            targetScrollX = (maxScrollX * progress).coerceIn(0f, maxScrollX)
-        }
+        val currentLine = activeLyricLine
+        targetScrollX = HudTextLayoutEngine.calculateHorizontalScrollTarget(
+            posMs = posMs,
+            line = currentLayoutLines.firstOrNull(),
+            singleLineMode = singleLineMode,
+            adaptiveScrollingEnabled = adaptiveScrollingEnabled,
+            maxScrollX = maxScrollX,
+            animationStyle = animationStyle,
+            isWordSynced = currentLine?.isWordSynced == true,
+            lineStartMs = currentLine?.timeMs ?: 0L,
+            lineEndMs = currentLine?.endTimeMs ?: 0L,
+            nextLyricTimestampMs = nextLyricTimestampMs,
+            viewWidth = width,
+            contentHorizontalPaddingPx = getEffectiveContentHorizontalInsetPx(),
+            karaokeGlowSpeed = karaokeGlowSpeed,
+            typewriterSpeed = typewriterSpeed,
+            scrollSpeedMultiplier = scrollSpeedMultiplier,
+            trackDurationMs = trackDurationMs
+        )
     }
 
     fun startLoopIfNeeded() {
@@ -2168,105 +1934,16 @@ class MinimalOverlayView(
         dy: Int,
         target: TouchTarget
     ): HudWindowBounds {
-        val initialX = initialBounds.x
-        val initialY = initialBounds.y
-        val initialW = initialBounds.width
-        val initialH = initialBounds.height
-
         val geom = displayGeometry
         val constraints = geom?.let {
             HudPositioningEngine.computeConstraints(
                 geometry = it,
-                currentWidthPx = initialW,
-                currentEffectiveHeightPx = initialH,
+                currentWidthPx = initialBounds.width,
+                currentEffectiveHeightPx = initialBounds.height,
                 minBackdropHeightPx = minBackdropHeightPx
             )
         }
-        val minW = constraints?.minWidthPx ?: 280
-        val maxW = constraints?.maxWidthPx ?: 2000
-        val minH = constraints?.minHeightPx ?: 60
-        val maxH = constraints?.maxHeightPx ?: 800
-        val minX = constraints?.minX ?: -2000
-        val maxRight = constraints?.minSafeRightPx ?: Int.MAX_VALUE
-        val minY = constraints?.minY ?: 0
-        val maxBottom = constraints?.maxSafeBottomPx ?: Int.MAX_VALUE
-
-        var targetX = initialX
-        var targetY = initialY
-        var targetW = initialW
-        var targetH = initialH
-
-        when (target) {
-            TouchTarget.MOVE -> {
-                val moveMaxX = if (maxRight < Int.MAX_VALUE) (maxRight - initialW).coerceAtLeast(minX) else 2000
-                val moveMaxY = if (maxBottom < Int.MAX_VALUE) (maxBottom - initialH).coerceAtLeast(minY) else 3000
-                targetX = (initialX + dx).coerceIn(minX, moveMaxX)
-                targetY = (initialY + dy).coerceIn(minY, moveMaxY)
-            }
-            TouchTarget.RESIZE_RIGHT -> {
-                val availMaxW = if (maxRight < Int.MAX_VALUE) (maxRight - initialX).coerceIn(minW, maxW) else maxW
-                targetW = (initialW + dx).coerceIn(minW, availMaxW)
-            }
-            TouchTarget.RESIZE_BOTTOM -> {
-                val availMaxH = if (maxBottom < Int.MAX_VALUE) (maxBottom - initialY).coerceIn(minH, maxH) else maxH
-                targetH = (initialH + dy).coerceIn(minH, availMaxH)
-            }
-            TouchTarget.RESIZE_BR -> {
-                val availMaxW = if (maxRight < Int.MAX_VALUE) (maxRight - initialX).coerceIn(minW, maxW) else maxW
-                val availMaxH = if (maxBottom < Int.MAX_VALUE) (maxBottom - initialY).coerceIn(minH, maxH) else maxH
-                targetW = (initialW + dx).coerceIn(minW, availMaxW)
-                targetH = (initialH + dy).coerceIn(minH, availMaxH)
-            }
-            TouchTarget.RESIZE_LEFT -> {
-                val anchorRight = initialX + initialW
-                val availMaxW = (anchorRight - minX).coerceIn(minW, maxW)
-                val newW = (initialW - dx).coerceIn(minW, availMaxW)
-                targetW = newW
-                targetX = (anchorRight - newW).coerceIn(minX, (maxRight - newW).coerceAtLeast(minX))
-            }
-            TouchTarget.RESIZE_TOP -> {
-                val anchorBottom = initialY + initialH
-                val availMaxH = (anchorBottom - minY).coerceIn(minH, maxH)
-                val newH = (initialH - dy).coerceIn(minH, availMaxH)
-                targetH = newH
-                targetY = (anchorBottom - newH).coerceIn(minY, (maxBottom - newH).coerceAtLeast(minY))
-            }
-            TouchTarget.RESIZE_TL -> {
-                val anchorRight = initialX + initialW
-                val anchorBottom = initialY + initialH
-                val availMaxW = (anchorRight - minX).coerceIn(minW, maxW)
-                val availMaxH = (anchorBottom - minY).coerceIn(minH, maxH)
-                val newW = (initialW - dx).coerceIn(minW, availMaxW)
-                val newH = (initialH - dy).coerceIn(minH, availMaxH)
-                targetW = newW
-                targetH = newH
-                targetX = (anchorRight - newW).coerceIn(minX, (maxRight - newW).coerceAtLeast(minX))
-                targetY = (anchorBottom - newH).coerceIn(minY, (maxBottom - newH).coerceAtLeast(minY))
-            }
-            TouchTarget.RESIZE_TR -> {
-                val anchorBottom = initialY + initialH
-                val availMaxW = if (maxRight < Int.MAX_VALUE) (maxRight - initialX).coerceIn(minW, maxW) else maxW
-                val availMaxH = (anchorBottom - minY).coerceIn(minH, maxH)
-                val newW = (initialW + dx).coerceIn(minW, availMaxW)
-                val newH = (initialH - dy).coerceIn(minH, availMaxH)
-                targetW = newW
-                targetH = newH
-                targetY = (anchorBottom - newH).coerceIn(minY, (maxBottom - newH).coerceAtLeast(minY))
-            }
-            TouchTarget.RESIZE_BL -> {
-                val anchorRight = initialX + initialW
-                val availMaxW = (anchorRight - minX).coerceIn(minW, maxW)
-                val availMaxH = if (maxBottom < Int.MAX_VALUE) (maxBottom - initialY).coerceIn(minH, maxH) else maxH
-                val newW = (initialW - dx).coerceIn(minW, availMaxW)
-                val newH = (initialH + dy).coerceIn(minH, availMaxH)
-                targetW = newW
-                targetH = newH
-                targetX = (anchorRight - newW).coerceIn(minX, (maxRight - newW).coerceAtLeast(minX))
-            }
-            TouchTarget.NONE -> {}
-        }
-
-        return HudWindowBounds(targetX, targetY, targetW, targetH)
+        return HudBoundsCalculator.computeEditMoveBounds(initialBounds, dx, dy, target, constraints)
     }
 
     private fun computeNormalMoveBounds(
@@ -2274,30 +1951,16 @@ class MinimalOverlayView(
         dx: Int,
         dy: Int
     ): HudWindowBounds {
-        val initialX = initialBounds.x
-        val initialY = initialBounds.y
-        val initialW = initialBounds.width
-        val initialH = initialBounds.height
-
         val geom = displayGeometry
         val constraints = geom?.let {
             HudPositioningEngine.computeConstraints(
                 geometry = it,
-                currentWidthPx = initialW,
-                currentEffectiveHeightPx = initialH,
+                currentWidthPx = initialBounds.width,
+                currentEffectiveHeightPx = initialBounds.height,
                 minBackdropHeightPx = minBackdropHeightPx
             )
         }
-        val minX = constraints?.minX ?: -2000
-        val maxRight = constraints?.minSafeRightPx ?: Int.MAX_VALUE
-        val minY = constraints?.minY ?: 0
-        val maxBottom = constraints?.maxSafeBottomPx ?: Int.MAX_VALUE
-        val moveMaxX = if (maxRight < Int.MAX_VALUE) (maxRight - initialW).coerceAtLeast(minX) else 2000
-        val moveMaxY = if (maxBottom < Int.MAX_VALUE) (maxBottom - initialH).coerceAtLeast(minY) else 3000
-
-        val targetX = (initialX + dx).coerceIn(minX, moveMaxX)
-        val targetY = (initialY + dy).coerceIn(minY, moveMaxY)
-        return HudWindowBounds(targetX, targetY, initialW, initialH)
+        return HudBoundsCalculator.computeNormalMoveBounds(initialBounds, dx, dy, constraints)
     }
 
     private fun handleNormalTouchEvent(event: MotionEvent): Boolean {
@@ -2497,51 +2160,54 @@ class MinimalOverlayView(
     }
 
     companion object {
-        const val BLACK_BACKDROP_COLOR: Int = HudColorSystem.BLACK_BACKDROP_COLOR
-        const val GREY_BACKDROP_COLOR: Int = HudColorSystem.GREY_BACKDROP_COLOR
+        private val typefaceCache = java.util.concurrent.ConcurrentHashMap<Int, android.graphics.Typeface>()
 
-        const val ACTIVE_LYRIC_COLOR: Int = HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR
-        const val INACTIVE_LYRIC_COLOR: Int = HudColorSystem.DEFAULT_INACTIVE_LYRIC_COLOR
-        const val INACTIVE_LYRIC_ALPHA_RATIO: Float = 0.64f
-        const val OUTGOING_LYRIC_ALPHA_RATIO: Float = 0.44f
-        const val ACTIVE_SHADOW_ALPHA: Int = 215
-        const val INACTIVE_SHADOW_ALPHA: Int = 95
-        const val ACTIVE_GLOW_ALPHA: Int = 140
-
-        data class BackdropAppearanceSpec(
-            val style: String,
-            val fillColor: Int,
-            val fillAlpha: Int
-        )
-
-        data class LyricColorHierarchy(
-            val baseAlpha: Int,
-            val activeAlpha: Int,
-            val inactiveAlpha: Int,
-            val outgoingAlpha: Int,
-            val activeColor: Int = HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR,
-            val inactiveColor: Int = HudColorSystem.DEFAULT_INACTIVE_LYRIC_COLOR
-        )
-
-        fun normalizeBackdropStyle(style: String?): String {
-            if (style.isNullOrBlank()) return "BLACK"
-            return when (style.trim().uppercase(java.util.Locale.US)) {
-                "GREY", "GRAY" -> "GREY"
-                else -> "BLACK"
+        /**
+         * MED-03: Caches parsed font Typeface instances at process scope to prevent repeated
+         * asset parsing and allocation on every overlay recreation/reattachment.
+         * Uses context.applicationContext to guarantee no short-lived context leakage.
+         */
+        fun getCachedTypeface(context: Context, @androidx.annotation.FontRes fontResId: Int): android.graphics.Typeface {
+            return typefaceCache.getOrPut(fontResId) {
+                try {
+                    ResourcesCompat.getFont(context.applicationContext, fontResId)
+                        ?: android.graphics.Typeface.DEFAULT_BOLD
+                } catch (_: Exception) {
+                    android.graphics.Typeface.DEFAULT_BOLD
+                }
             }
         }
 
-        fun computeBackdropAppearance(style: String, opacity: Float): BackdropAppearanceSpec {
-            val normalizedStyle = normalizeBackdropStyle(style)
-            val clampedOpacity = opacity.coerceIn(0f, 1f)
-            val fillColor = if (normalizedStyle == "GREY") GREY_BACKDROP_COLOR else BLACK_BACKDROP_COLOR
-            val fillAlpha = (clampedOpacity * 255f).roundToInt().coerceIn(0, 255)
-            return BackdropAppearanceSpec(
-                style = normalizedStyle,
-                fillColor = fillColor,
-                fillAlpha = fillAlpha
-            )
+        fun clearTypefaceCache() {
+            typefaceCache.clear()
         }
+
+        fun isTypefaceCached(@androidx.annotation.FontRes fontResId: Int): Boolean {
+            return typefaceCache.containsKey(fontResId)
+        }
+
+        fun putCachedTypefaceForTesting(@androidx.annotation.FontRes fontResId: Int, typeface: android.graphics.Typeface) {
+            typefaceCache[fontResId] = typeface
+        }
+
+        fun cachedTypefaceCount(): Int = typefaceCache.size
+
+        const val BLACK_BACKDROP_COLOR: Int = HudVisualSpecs.BLACK_BACKDROP_COLOR
+        const val GREY_BACKDROP_COLOR: Int = HudVisualSpecs.GREY_BACKDROP_COLOR
+
+        const val ACTIVE_LYRIC_COLOR: Int = HudVisualSpecs.ACTIVE_LYRIC_COLOR
+        const val INACTIVE_LYRIC_COLOR: Int = HudVisualSpecs.INACTIVE_LYRIC_COLOR
+        const val INACTIVE_LYRIC_ALPHA_RATIO: Float = HudVisualSpecs.INACTIVE_LYRIC_ALPHA_RATIO
+        const val OUTGOING_LYRIC_ALPHA_RATIO: Float = HudVisualSpecs.OUTGOING_LYRIC_ALPHA_RATIO
+        const val ACTIVE_SHADOW_ALPHA: Int = HudVisualSpecs.ACTIVE_SHADOW_ALPHA
+        const val INACTIVE_SHADOW_ALPHA: Int = HudVisualSpecs.INACTIVE_SHADOW_ALPHA
+        const val ACTIVE_GLOW_ALPHA: Int = HudVisualSpecs.ACTIVE_GLOW_ALPHA
+
+        fun normalizeBackdropStyle(style: String?): String =
+            HudVisualSpecs.normalizeBackdropStyle(style)
+
+        fun computeBackdropAppearance(style: String, opacity: Float): BackdropAppearanceSpec =
+            HudVisualSpecs.computeBackdropAppearance(style, opacity)
 
         fun computeLyricColorHierarchy(
             activeColor: Int = HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR,
@@ -2549,39 +2215,13 @@ class MinimalOverlayView(
             textOpacity: Float,
             animProgress: Float = 1f,
             isFadeStyle: Boolean = false
-        ): LyricColorHierarchy {
-            val safeActive = HudColorSystem.sanitizeOpaqueColor(activeColor, HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR)
-            val safeInactive = HudColorSystem.sanitizeOpaqueColor(inactiveColor, HudColorSystem.DEFAULT_INACTIVE_LYRIC_COLOR)
-            val clampedOpacity = textOpacity.coerceIn(0.15f, 1.0f)
-            val clampedProgress = animProgress.coerceIn(0f, 1f)
-            val baseAlpha = (255f * clampedOpacity).roundToInt().coerceIn(0, 255)
-            val activeAlpha = (baseAlpha * clampedProgress).roundToInt().coerceIn(0, 255)
-            val inactiveAlpha = (activeAlpha * INACTIVE_LYRIC_ALPHA_RATIO).roundToInt().coerceIn(0, 255)
-            val outgoingRatio = if (isFadeStyle) 1f else OUTGOING_LYRIC_ALPHA_RATIO
-            val outgoingAlpha = (baseAlpha * (1f - clampedProgress) * outgoingRatio).roundToInt().coerceIn(0, 255)
-            return LyricColorHierarchy(
-                baseAlpha = baseAlpha,
-                activeAlpha = activeAlpha,
-                inactiveAlpha = inactiveAlpha,
-                outgoingAlpha = outgoingAlpha,
-                activeColor = safeActive,
-                inactiveColor = safeInactive
-            )
-        }
-
-        data class BackdropRenderSpec(
-            val left: Float,
-            val top: Float,
-            val right: Float,
-            val bottom: Float,
-            val cornerRadiusPx: Float,
-            val style: String,
-            val fillColor: Int,
-            val fillAlpha: Int
-        ) {
-            val width: Float get() = (right - left).coerceAtLeast(0f)
-            val height: Float get() = (bottom - top).coerceAtLeast(0f)
-        }
+        ): LyricColorHierarchy = HudVisualSpecs.computeLyricColorHierarchy(
+            activeColor = activeColor,
+            inactiveColor = inactiveColor,
+            textOpacity = textOpacity,
+            animProgress = animProgress,
+            isFadeStyle = isFadeStyle
+        )
 
         fun computeBackdropSpec(
             enabled: Boolean,
@@ -2599,527 +2239,27 @@ class MinimalOverlayView(
             textBottom: Float,
             hasVisibleText: Boolean = true,
             boundsAlreadyExpanded: Boolean = false
-        ): BackdropRenderSpec? {
-            val clampedOpacity = opacity.coerceIn(0f, 1f)
-            if (!enabled || !hasVisibleText || clampedOpacity <= 0f || viewWidth <= 0 || viewHeight <= 0) {
-                return null
-            }
-            if (textRight <= textLeft || textBottom <= textTop) {
-                return null
-            }
-
-            val safeDensity = density.coerceAtLeast(0.5f)
-            val horizPadPx = if (boundsAlreadyExpanded) 0f else horizontalPaddingDp.coerceIn(0f, 32f) * safeDensity
-            val vertPadPx = if (boundsAlreadyExpanded) 0f else verticalPaddingDp.coerceIn(0f, 24f) * safeDensity
-
-            val left = (textLeft - horizPadPx).coerceAtLeast(2f)
-            val top = (textTop - vertPadPx).coerceAtLeast(2f)
-            val right = (textRight + horizPadPx).coerceAtMost((viewWidth - 2f).coerceAtLeast(left))
-            val bottom = (textBottom + vertPadPx).coerceAtMost((viewHeight - 2f).coerceAtLeast(top))
-
-            if (right <= left || bottom <= top) {
-                return null
-            }
-
-            val maxRadiusPx = (minOf(right - left, bottom - top) / 2f).coerceAtLeast(0f)
-            val cornerRadiusPx = (cornerRadiusDp.coerceIn(0f, 32f) * safeDensity).coerceIn(0f, maxRadiusPx)
-            val appearance = computeBackdropAppearance(style, clampedOpacity)
-
-            return BackdropRenderSpec(
-                left = left,
-                top = top,
-                right = right,
-                bottom = bottom,
-                cornerRadiusPx = cornerRadiusPx,
-                style = appearance.style,
-                fillColor = appearance.fillColor,
-                fillAlpha = appearance.fillAlpha
-            )
-        }
-
-        fun computeGraphemeBoundaries(text: String): IntArray {
-            if (text.isEmpty()) return intArrayOf()
-            val it = java.text.BreakIterator.getCharacterInstance()
-            it.setText(text)
-            val boundaries = mutableListOf<Int>()
-            var end = it.next()
-            while (end != java.text.BreakIterator.DONE) {
-                boundaries.add(end)
-                end = it.next()
-            }
-            return boundaries.toIntArray()
-        }
-    }
-}
-
-class HudHoldGestureController(
-    private val touchSlopPx: Float,
-    val holdDurationMs: Long = HOLD_REPOSITION_DELAY_MS
-) {
-    enum class State {
-        IDLE,
-        PENDING_HOLD,
-        CANCELLED_BEFORE_HOLD,
-        ACTIVE_REPOSITION
-    }
-
-    enum class UpResult {
-        NONE,
-        TRIGGER_TAP,
-        COMMIT_REPOSITION
-    }
-
-    var state: State = State.IDLE
-        private set
-    var activePointerId: Int = INVALID_POINTER_ID
-        private set
-    var downRawX: Float = 0f
-        private set
-    var downRawY: Float = 0f
-        private set
-    var activationRawX: Float = 0f
-        private set
-    var activationRawY: Float = 0f
-        private set
-
-    fun onDown(
-        rawX: Float,
-        rawY: Float,
-        pointerId: Int,
-        isOnInteractiveControl: Boolean = false
-    ): Boolean {
-        if (isOnInteractiveControl) {
-            reset()
-            return false
-        }
-        activePointerId = pointerId
-        downRawX = rawX
-        downRawY = rawY
-        activationRawX = rawX
-        activationRawY = rawY
-        state = State.PENDING_HOLD
-        return true
-    }
-
-    /** Returns true if finger movement beyond touch slop cancelled a pending hold. */
-    fun onMove(rawX: Float, rawY: Float): Boolean {
-        return when (state) {
-            State.PENDING_HOLD -> {
-                activationRawX = rawX
-                activationRawY = rawY
-                val dist = hypot(rawX - downRawX, rawY - downRawY)
-                if (dist > touchSlopPx) {
-                    state = State.CANCELLED_BEFORE_HOLD
-                    true
-                } else {
-                    false
-                }
-            }
-            State.ACTIVE_REPOSITION,
-            State.IDLE,
-            State.CANCELLED_BEFORE_HOLD -> false
-        }
-    }
-
-    fun onHoldTimeout(elapsedMs: Long = holdDurationMs): Boolean {
-        if (state != State.PENDING_HOLD) return false
-        if (elapsedMs < holdDurationMs) return false
-        state = State.ACTIVE_REPOSITION
-        return true
-    }
-
-    /** Returns true if a secondary pointer cancelled a pending hold. */
-    fun onMultiPointerDown(): Boolean {
-        if (state == State.PENDING_HOLD) {
-            state = State.CANCELLED_BEFORE_HOLD
-            return true
-        }
-        return false
-    }
-
-    fun onUp(): UpResult {
-        val result = when (state) {
-            State.PENDING_HOLD -> UpResult.TRIGGER_TAP
-            State.ACTIVE_REPOSITION -> UpResult.COMMIT_REPOSITION
-            State.IDLE, State.CANCELLED_BEFORE_HOLD -> UpResult.NONE
-        }
-        reset()
-        return result
-    }
-
-    /** Returns true if an active reposition was interrupted. */
-    fun onCancel(): Boolean {
-        val wasActive = state == State.ACTIVE_REPOSITION
-        reset()
-        return wasActive
-    }
-
-    fun reset() {
-        state = State.IDLE
-        activePointerId = INVALID_POINTER_ID
-        downRawX = 0f
-        downRawY = 0f
-        activationRawX = 0f
-        activationRawY = 0f
-    }
-
-    companion object {
-        const val HOLD_REPOSITION_DELAY_MS = 1000L
-        const val HOLD_REPOSITION_SECONDS = (HOLD_REPOSITION_DELAY_MS / 1000L).toInt()
-        const val INVALID_POINTER_ID = -1
-    }
-}
-
-data class HudWindowBounds(
-    val x: Int,
-    val y: Int,
-    val width: Int,
-    val height: Int
-)
-
-data class HudDragSnapshot(
-    val orientation: HudOrientation,
-    val initialBounds: HudWindowBounds
-)
-
-class HudDragTransactionCoordinator(
-    val holdController: HudHoldGestureController,
-    private val readBounds: () -> HudWindowBounds,
-    private val applyDragBounds: (HudWindowBounds) -> Unit,
-    private val restoreBounds: (HudWindowBounds) -> Unit,
-    private val commitBounds: (HudOrientation, HudWindowBounds) -> Unit,
-    private val onTapAction: () -> Unit = {}
-) {
-    var activeSnapshot: HudDragSnapshot? = null
-        private set
-    var isEditDragActive: Boolean = false
-        private set
-    var isClickThroughEnabled: Boolean = false
-        private set
-    var initialTouchX: Float = 0f
-        private set
-    var initialTouchY: Float = 0f
-        private set
-
-    val isTransactionActive: Boolean
-        get() = activeSnapshot != null &&
-            (isEditDragActive || holdController.state == HudHoldGestureController.State.ACTIVE_REPOSITION)
-
-    fun setClickThroughEnabled(enabled: Boolean): Boolean {
-        isClickThroughEnabled = enabled
-        return if (enabled) cancelActiveDrag() else false
-    }
-
-    fun onNormalDown(
-        rawX: Float,
-        rawY: Float,
-        pointerId: Int,
-        isOnInteractiveControl: Boolean = false
-    ): Boolean {
-        if (isClickThroughEnabled) {
-            cancelActiveDrag()
-            return false
-        }
-        if (isTransactionActive) {
-            cancelActiveDrag()
-        }
-        return holdController.onDown(
-            rawX = rawX,
-            rawY = rawY,
-            pointerId = pointerId,
-            isOnInteractiveControl = isOnInteractiveControl
+        ): BackdropRenderSpec? = HudVisualSpecs.computeBackdropSpec(
+            enabled = enabled,
+            style = style,
+            opacity = opacity,
+            cornerRadiusDp = cornerRadiusDp,
+            horizontalPaddingDp = horizontalPaddingDp,
+            verticalPaddingDp = verticalPaddingDp,
+            density = density,
+            viewWidth = viewWidth,
+            viewHeight = viewHeight,
+            textLeft = textLeft,
+            textTop = textTop,
+            textRight = textRight,
+            textBottom = textBottom,
+            hasVisibleText = hasVisibleText,
+            boundsAlreadyExpanded = boundsAlreadyExpanded
         )
-    }
 
-    fun onNormalMultiPointerDown(): Boolean {
-        if (isClickThroughEnabled) return false
-        return holdController.onMultiPointerDown()
-    }
-
-    fun onNormalMovePending(rawX: Float, rawY: Float): Boolean {
-        if (isClickThroughEnabled) return false
-        return holdController.onMove(rawX, rawY)
-    }
-
-    fun onHoldTimeout(
-        orientation: HudOrientation,
-        elapsedMs: Long = holdController.holdDurationMs
-    ): Boolean {
-        if (isClickThroughEnabled) {
-            cancelActiveDrag()
-            return false
-        }
-        if (!holdController.onHoldTimeout(elapsedMs)) {
-            return false
-        }
-        initialTouchX = holdController.activationRawX
-        initialTouchY = holdController.activationRawY
-        activeSnapshot = HudDragSnapshot(
-            orientation = orientation,
-            initialBounds = readBounds()
-        )
-        return true
-    }
-
-    fun onNormalDragMove(
-        rawX: Float,
-        rawY: Float,
-        computeTarget: (initialBounds: HudWindowBounds, dx: Int, dy: Int) -> HudWindowBounds
-    ): Boolean {
-        if (isClickThroughEnabled || holdController.state != HudHoldGestureController.State.ACTIVE_REPOSITION) {
-            return false
-        }
-        val snapshot = activeSnapshot ?: return false
-        val dx = (rawX - initialTouchX).toInt()
-        val dy = (rawY - initialTouchY).toInt()
-        applyDragBounds(computeTarget(snapshot.initialBounds, dx, dy))
-        return true
-    }
-
-    fun onNormalUp(): HudHoldGestureController.UpResult {
-        if (isClickThroughEnabled) {
-            cancelActiveDrag()
-            return HudHoldGestureController.UpResult.NONE
-        }
-        val result = holdController.onUp()
-        when (result) {
-            HudHoldGestureController.UpResult.TRIGGER_TAP -> {
-                activeSnapshot = null
-                onTapAction()
-            }
-            HudHoldGestureController.UpResult.COMMIT_REPOSITION -> {
-                val snapshot = activeSnapshot
-                activeSnapshot = null
-                if (snapshot != null) {
-                    commitBounds(snapshot.orientation, readBounds())
-                }
-            }
-            HudHoldGestureController.UpResult.NONE -> {
-                activeSnapshot = null
-            }
-        }
-        return result
-    }
-
-    fun onEditDown(orientation: HudOrientation, rawX: Float, rawY: Float): HudDragSnapshot? {
-        if (isClickThroughEnabled) {
-            cancelActiveDrag()
-            return null
-        }
-        if (isTransactionActive || holdController.state != HudHoldGestureController.State.IDLE) {
-            cancelActiveDrag()
-        }
-        isEditDragActive = true
-        initialTouchX = rawX
-        initialTouchY = rawY
-        val snapshot = HudDragSnapshot(
-            orientation = orientation,
-            initialBounds = readBounds()
-        )
-        activeSnapshot = snapshot
-        return snapshot
-    }
-
-    fun onEditMove(
-        rawX: Float,
-        rawY: Float,
-        computeTarget: (initialBounds: HudWindowBounds, dx: Int, dy: Int) -> HudWindowBounds
-    ): Boolean {
-        if (!isEditDragActive) return false
-        val snapshot = activeSnapshot ?: return false
-        val dx = (rawX - initialTouchX).toInt()
-        val dy = (rawY - initialTouchY).toInt()
-        applyDragBounds(computeTarget(snapshot.initialBounds, dx, dy))
-        return true
-    }
-
-    fun onEditUp(): Boolean {
-        if (!isEditDragActive) return false
-        isEditDragActive = false
-        val snapshot = activeSnapshot
-        activeSnapshot = null
-        if (snapshot != null) {
-            commitBounds(snapshot.orientation, readBounds())
-        }
-        return true
-    }
-
-    /**
-     * Cancels any pending or active drag gesture.
-     * Returns true if an active drag transaction was rolled back to its original bounds.
-     */
-    fun cancelActiveDrag(): Boolean {
-        val wasHoldActive = holdController.onCancel()
-        val wasEditActive = isEditDragActive
-        isEditDragActive = false
-        val snapshot = activeSnapshot
-        activeSnapshot = null
-
-        val shouldRollback = (wasHoldActive || wasEditActive) && snapshot != null
-        if (shouldRollback) {
-            restoreBounds(snapshot!!.initialBounds)
-        }
-        return shouldRollback
+        fun computeGraphemeBoundaries(text: String): IntArray =
+            HudVisualSpecs.computeGraphemeBoundaries(text)
     }
 }
 
-class HudTripleTapDetector(
-    private val tapTouchSlopPx: Float,
-    val maxTapDurationMs: Long = DEFAULT_MAX_TAP_DURATION_MS,
-    val maxTapIntervalMs: Long = DEFAULT_MAX_TAP_INTERVAL_MS,
-    val launchCooldownMs: Long = DEFAULT_LAUNCH_COOLDOWN_MS
-) {
-    var tapCount: Int = 0
-        private set
-    var isEnabled: Boolean = true
-        private set
-    private var activePointerId: Int = INVALID_POINTER_ID
-    private var downRawX: Float = 0f
-    private var downRawY: Float = 0f
-    private var downTimestampMs: Long = 0L
-    private var currentTouchInvalidated: Boolean = false
-    private var lastTapUpTimestampMs: Long = Long.MIN_VALUE
-    private var lastTriggerTimestampMs: Long = Long.MIN_VALUE
-
-    fun setEnabled(enabled: Boolean) {
-        if (isEnabled != enabled) {
-            isEnabled = enabled
-            if (!enabled) {
-                reset()
-            }
-        }
-    }
-
-    fun onDown(
-        rawX: Float,
-        rawY: Float,
-        pointerId: Int,
-        timestampMs: Long,
-        isOnInteractiveControl: Boolean = false
-    ): Boolean {
-        if (!isEnabled || isOnInteractiveControl) {
-            reset()
-            return false
-        }
-        if (lastTriggerTimestampMs != Long.MIN_VALUE &&
-            (timestampMs - lastTriggerTimestampMs) in 0L until launchCooldownMs
-        ) {
-            tapCount = 0
-            activePointerId = INVALID_POINTER_ID
-            currentTouchInvalidated = true
-            return false
-        }
-        if (tapCount > 0 &&
-            (lastTapUpTimestampMs == Long.MIN_VALUE ||
-                timestampMs < lastTapUpTimestampMs ||
-                (timestampMs - lastTapUpTimestampMs) > maxTapIntervalMs)
-        ) {
-            tapCount = 0
-            lastTapUpTimestampMs = Long.MIN_VALUE
-        }
-        activePointerId = pointerId
-        downRawX = rawX
-        downRawY = rawY
-        downTimestampMs = timestampMs
-        currentTouchInvalidated = false
-        return true
-    }
-
-    fun onMove(rawX: Float, rawY: Float, pointerId: Int): Boolean {
-        if (!isEnabled || currentTouchInvalidated || activePointerId == INVALID_POINTER_ID) {
-            return false
-        }
-        if (pointerId != activePointerId) {
-            return false
-        }
-        val dist = hypot(rawX - downRawX, rawY - downRawY)
-        if (dist > tapTouchSlopPx) {
-            invalidateSequence()
-            return true
-        }
-        return false
-    }
-
-    fun onMultiPointerDown() {
-        if (activePointerId != INVALID_POINTER_ID || tapCount > 0) {
-            invalidateSequence()
-        }
-    }
-
-    fun onDragOrHoldActivated() {
-        invalidateSequence()
-    }
-
-    fun onUp(pointerId: Int, timestampMs: Long): Boolean {
-        if (!isEnabled) {
-            reset()
-            return false
-        }
-        if (currentTouchInvalidated || activePointerId == INVALID_POINTER_ID || pointerId != activePointerId) {
-            val wasInvalidated = currentTouchInvalidated
-            resetActiveTouchOnly()
-            if (wasInvalidated) {
-                tapCount = 0
-                lastTapUpTimestampMs = Long.MIN_VALUE
-            }
-            return false
-        }
-        val durationMs = timestampMs - downTimestampMs
-        resetActiveTouchOnly()
-
-        if (durationMs < 0L || durationMs > maxTapDurationMs) {
-            tapCount = 0
-            lastTapUpTimestampMs = Long.MIN_VALUE
-            return false
-        }
-
-        tapCount += 1
-        lastTapUpTimestampMs = timestampMs
-
-        if (tapCount >= REQUIRED_TAP_COUNT) {
-            tapCount = 0
-            lastTapUpTimestampMs = Long.MIN_VALUE
-            lastTriggerTimestampMs = timestampMs
-            return true
-        }
-        return false
-    }
-
-    fun onCancel() {
-        reset()
-    }
-
-    fun reset() {
-        tapCount = 0
-        activePointerId = INVALID_POINTER_ID
-        downRawX = 0f
-        downRawY = 0f
-        downTimestampMs = 0L
-        currentTouchInvalidated = false
-        lastTapUpTimestampMs = Long.MIN_VALUE
-    }
-
-    private fun invalidateSequence() {
-        tapCount = 0
-        lastTapUpTimestampMs = Long.MIN_VALUE
-        currentTouchInvalidated = true
-        activePointerId = INVALID_POINTER_ID
-    }
-
-    private fun resetActiveTouchOnly() {
-        activePointerId = INVALID_POINTER_ID
-        downRawX = 0f
-        downRawY = 0f
-        downTimestampMs = 0L
-        currentTouchInvalidated = false
-    }
-
-    companion object {
-        const val REQUIRED_TAP_COUNT = 3
-        const val DEFAULT_MAX_TAP_DURATION_MS = 400L
-        const val DEFAULT_MAX_TAP_INTERVAL_MS = 450L
-        const val DEFAULT_LAUNCH_COOLDOWN_MS = 800L
-        const val INVALID_POINTER_ID = -1
-    }
-}
 

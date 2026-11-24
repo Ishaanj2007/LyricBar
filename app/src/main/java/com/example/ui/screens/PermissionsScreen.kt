@@ -122,7 +122,7 @@ fun PermissionsScreen(
                         text = "Welcome to LyricBar",
                         style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface,
+                        color = Color.White,
                         textAlign = TextAlign.Center
                     )
 
@@ -131,7 +131,7 @@ fun PermissionsScreen(
                     Text(
                         text = "Floating, time-synced lyrics that glide over whatever music player you use. Grant two quick permissions to get started.",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = Color.White.copy(alpha = 0.70f),
                         textAlign = TextAlign.Center,
                         lineHeight = 21.sp
                     )
@@ -176,7 +176,7 @@ fun PermissionsScreen(
                     // Privacy Assurance Card
                     FrostedCard(
                         shape = RoundedCornerShape(14.dp),
-                        backgroundAlpha = 0.16f,
+                        backgroundAlpha = 0.20f,
                         blurRadius = 16.dp,
                         borderWidth = 0.5.dp,
                         borderAlpha = 0.18f,
@@ -204,7 +204,7 @@ fun PermissionsScreen(
                             Text(
                                 text = "100% private. No accounts, no data tracking, and no ads. Only track title and artist queries leave your device to fetch lyrics.",
                                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = Color.White.copy(alpha = 0.70f),
                                 lineHeight = 17.sp
                             )
                         }
@@ -223,8 +223,8 @@ fun PermissionsScreen(
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.primary,
                             contentColor = MaterialTheme.colorScheme.onPrimary,
-                            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.50f),
-                            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.50f)
+                            disabledContainerColor = Color.White.copy(alpha = 0.10f),
+                            disabledContentColor = Color.White.copy(alpha = 0.35f)
                         ),
                         shape = RoundedCornerShape(14.dp)
                     ) {
@@ -252,14 +252,14 @@ private fun PermissionFrostedCard(
 ) {
     val primaryColor = MaterialTheme.colorScheme.primary
     val borderAlpha by androidx.compose.animation.core.animateFloatAsState(
-        targetValue = if (isGranted) 0.35f else 0.20f,
+        targetValue = if (isGranted) 0.32f else 0.18f,
         animationSpec = tween(220),
         label = "perm_border_alpha"
     )
 
     FrostedCard(
         shape = RoundedCornerShape(20.dp),
-        backgroundAlpha = if (isGranted) 0.24f else 0.18f,
+        backgroundAlpha = if (isGranted) 0.28f else 0.20f,
         blurRadius = 20.dp,
         borderWidth = 0.75.dp,
         borderAlpha = borderAlpha,
@@ -272,14 +272,14 @@ private fun PermissionFrostedCard(
             ) {
                 Surface(
                     shape = CircleShape,
-                    color = if (isGranted) primaryColor.copy(alpha = 0.18f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.40f),
+                    color = if (isGranted) primaryColor.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.08f),
                     modifier = Modifier.size(38.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             imageVector = icon,
                             contentDescription = null,
-                            tint = if (isGranted) primaryColor else MaterialTheme.colorScheme.onSurfaceVariant,
+                            tint = if (isGranted) primaryColor else Color.White.copy(alpha = 0.70f),
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -292,7 +292,7 @@ private fun PermissionFrostedCard(
                         text = title,
                         style = MaterialTheme.typography.titleMedium.copy(fontSize = 15.sp),
                         fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = Color.White
                     )
                 }
 
@@ -306,7 +306,7 @@ private fun PermissionFrostedCard(
             Text(
                 text = description,
                 style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = Color.White.copy(alpha = 0.70f),
                 lineHeight = 19.sp
             )
 
@@ -319,8 +319,8 @@ private fun PermissionFrostedCard(
                         .height(44.dp)
                         .testTag(testTag),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f),
-                        contentColor = MaterialTheme.colorScheme.primary
+                        containerColor = primaryColor.copy(alpha = 0.20f),
+                        contentColor = primaryColor
                     ),
                     shape = RoundedCornerShape(10.dp)
                 ) {
@@ -356,13 +356,16 @@ private fun PermissionFrostedCard(
 
 @Composable
 private fun PermissionStatusChip(isGranted: Boolean) {
+    val errorColor = Color(0xFFF87171)
+    val primaryColor = MaterialTheme.colorScheme.primary
+
     val chipBgColor by animateColorAsState(
-        targetValue = if (isGranted) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f) else MaterialTheme.colorScheme.error.copy(alpha = 0.16f),
+        targetValue = if (isGranted) primaryColor.copy(alpha = 0.18f) else errorColor.copy(alpha = 0.16f),
         animationSpec = tween(220),
         label = "perm_chip_bg"
     )
     val chipContentColor by animateColorAsState(
-        targetValue = if (isGranted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+        targetValue = if (isGranted) primaryColor else errorColor,
         animationSpec = tween(220),
         label = "perm_chip_content"
     )

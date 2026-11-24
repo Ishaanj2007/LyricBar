@@ -157,8 +157,23 @@ open class UpdateRepository(
                         }
                     }
                     403, 429 -> {
+                        val retryAfter = response.header("Retry-After")
+                        val resetHeader = response.header("X-RateLimit-Reset")
+                        val resetTimeMsg = if (!retryAfter.isNullOrBlank()) {
+                            " (Retry after $retryAfter seconds)"
+                        } else if (!resetHeader.isNullOrBlank()) {
+                            try {
+                                val resetEpochSec = resetHeader.toLong()
+                                val diffSec = (resetEpochSec - (System.currentTimeMillis() / 1000L)).coerceAtLeast(0L)
+                                if (diffSec in 1..3600) " (Resets in ${diffSec / 60 + 1} min)" else ""
+                            } catch (_: Exception) {
+                                ""
+                            }
+                        } else {
+                            ""
+                        }
                         UpdateFetchResult.NetworkOrServerFailure(
-                            message = "GitHub API rate limit exceeded. Please wait a few moments and try again.",
+                            message = "GitHub API rate limit reached$resetTimeMsg. Please wait a few moments and try again.",
                             isRetryable = true
                         )
                     }
@@ -168,18 +183,36 @@ open class UpdateRepository(
                     }
                     in 500..599 -> {
                         UpdateFetchResult.NetworkOrServerFailure(
-                            message = "GitHub server returned HTTP ${response.code}.",
+                            message = "GitHub servers are temporarily unavailable (HTTP ${response.code}). Please try again later.",
                             isRetryable = true
                         )
                     }
                     else -> {
                         UpdateFetchResult.NetworkOrServerFailure(
-                            message = "GitHub server returned HTTP ${response.code}.",
+                            message = "GitHub service returned HTTP ${response.code}. Please try again later.",
                             isRetryable = false
                         )
                     }
                 }
             }
+        } catch (e: java.net.UnknownHostException) {
+            UpdateFetchResult.NetworkOrServerFailure(
+                message = "Unable to connect to GitHub. Please check your internet connection and DNS settings.",
+                isRetryable = true,
+                cause = e
+            )
+        } catch (e: java.net.SocketTimeoutException) {
+            UpdateFetchResult.NetworkOrServerFailure(
+                message = "Connection timed out while reaching GitHub. Please check your network and try again.",
+                isRetryable = true,
+                cause = e
+            )
+        } catch (e: java.net.ConnectException) {
+            UpdateFetchResult.NetworkOrServerFailure(
+                message = "Unable to reach GitHub servers. Please check your connection and try again.",
+                isRetryable = true,
+                cause = e
+            )
         } catch (e: IOException) {
             UpdateFetchResult.NetworkOrServerFailure(
                 message = "Network error checking for updates: ${e.localizedMessage ?: "Connection failed"}",
@@ -188,7 +221,7 @@ open class UpdateRepository(
             )
         } catch (e: Exception) {
             UpdateFetchResult.NetworkOrServerFailure(
-                message = e.localizedMessage?.takeIf { it.isNotBlank() } ?: "Unexpected error checking for updates.",
+                message = "Unexpected error checking for updates: ${e.localizedMessage?.takeIf { it.isNotBlank() } ?: "Unknown error"}",
                 isRetryable = false,
                 cause = e
             )
@@ -207,9 +240,26 @@ open class UpdateRepository(
                 val isRateLimit = response.code == 403 || response.code == 429
                 val isRetryable = isRateLimit || response.code in 500..599
                 val errorMsg = if (isRateLimit) {
-                    "GitHub API rate limit exceeded. Please wait a few moments and try again."
+                    val retryAfter = response.header("Retry-After")
+                    val resetHeader = response.header("X-RateLimit-Reset")
+                    val resetTimeMsg = if (!retryAfter.isNullOrBlank()) {
+                        " (Retry after $retryAfter seconds)"
+                    } else if (!resetHeader.isNullOrBlank()) {
+                        try {
+                            val resetEpochSec = resetHeader.toLong()
+                            val diffSec = (resetEpochSec - (System.currentTimeMillis() / 1000L)).coerceAtLeast(0L)
+                            if (diffSec in 1..3600) " (Resets in ${diffSec / 60 + 1} min)" else ""
+                        } catch (_: Exception) {
+                            ""
+                        }
+                    } else {
+                        ""
+                    }
+                    "GitHub API rate limit reached$resetTimeMsg. Please wait a few moments and try again."
+                } else if (response.code in 500..599) {
+                    "GitHub servers are temporarily unavailable (HTTP ${response.code}). Please try again later."
                 } else {
-                    "GitHub returned HTTP ${response.code} fetching releases list"
+                    "GitHub service returned HTTP ${response.code}."
                 }
                 return UpdateFetchResult.NetworkOrServerFailure(
                     message = errorMsg,

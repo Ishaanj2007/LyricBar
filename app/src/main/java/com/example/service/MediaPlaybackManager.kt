@@ -25,7 +25,7 @@ class MediaPlaybackManager private constructor(private val context: Context) {
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private val lyricsRepository = CompositeLyricsRepository.getInstance(context)
-    val preferencesRepository = UserPreferencesRepository(context)
+    val preferencesRepository = UserPreferencesRepository.getInstance(context)
 
     private val pipeline = MediaSessionPipelineEngine(
         scope = scope,

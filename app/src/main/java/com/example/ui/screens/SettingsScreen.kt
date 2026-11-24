@@ -55,6 +55,7 @@ import com.example.data.preferences.ThemePreset
 import com.example.data.preferences.UserPreferences
 import com.example.data.repository.CompositeLyricsRepository
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.stringResource
 import com.example.service.HudDisplayMetricsProvider
 import com.example.service.HudOrientation
 import com.example.service.HudOrientationInfoSnapshot
@@ -89,6 +90,8 @@ internal object SettingsAccordionState {
     const val SECTION_TYPOGRAPHY = "typography"
     const val SECTION_LYRICS_PROVIDER = "lyrics_provider"
     const val SECTION_DATA = "data"
+    const val SECTION_BACKUP_RESTORE = "backup_restore"
+    const val SECTION_FEEDBACK = "feedback"
     const val SECTION_ABOUT = "about"
 
     val ALL_SECTION_KEYS: List<String> = listOf(
@@ -101,6 +104,8 @@ internal object SettingsAccordionState {
         SECTION_TYPOGRAPHY,
         SECTION_LYRICS_PROVIDER,
         SECTION_DATA,
+        SECTION_BACKUP_RESTORE,
+        SECTION_FEEDBACK,
         SECTION_ABOUT
     )
 
@@ -144,6 +149,7 @@ fun SettingsScreen(
     var selectedColorTarget by rememberSaveable { mutableStateOf(HudColorTarget.ACTIVE_LYRIC) }
     var activeColorPickerTarget by remember { mutableStateOf<HudColorTarget?>(null) }
     var activeBackupSubScreen by rememberSaveable { mutableStateOf<BackupSubScreen?>(null) }
+    var activeFeedbackSubScreen by rememberSaveable { mutableStateOf<FeedbackTab?>(null) }
 
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, context) {
@@ -166,6 +172,7 @@ fun SettingsScreen(
     LaunchedEffect(openUpdaterSignal) {
         if (openUpdaterSignal > 0) {
             activeBackupSubScreen = null
+            activeFeedbackSubScreen = null
             expandedSections = expandedSections + SettingsAccordionState.SECTION_ABOUT
             showUpdateDialog = true
             updateManager.openUpdaterFromNotification()
@@ -561,6 +568,42 @@ fun SettingsScreen(
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Toggle: Dynamic Accent Colour
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 12.dp)
+                    ) {
+                        Text(
+                            text = "Dynamic Accent Colour",
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Automatically adapt HUD accent colours to the currently playing album artwork.",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = livePreferences.hudDynamicAccentEnabled,
+                        onCheckedChange = { enabled ->
+                            coroutineScope.launch {
+                                playbackManager.preferencesRepository.setHudDynamicAccentEnabled(enabled)
+                            }
+                        },
+                        modifier = Modifier.testTag("settings_dynamic_accent_switch")
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(8.dp))
 
@@ -2217,15 +2260,15 @@ fun SettingsScreen(
 
                 HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
 
-                // Lyrics Alignment inside the container
+                // HUD Lyrics Alignment inside the container
                 Text(
-                    text = "Lyrics Alignment",
+                    text = "HUD Lyrics Alignment",
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "Aligns text inside the invisible overlay container (independent of screen placement)",
+                    text = "Aligns text inside the floating HUD overlay container (independent of screen placement)",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -3178,10 +3221,33 @@ fun SettingsScreen(
     }
 
     val sectionBackupRestore: @Composable () -> Unit = {
-        BackupRestoreSettingsCard(
-            onOpenCreateBackup = { activeBackupSubScreen = BackupSubScreen.CREATE },
-            onOpenRestoreBackup = { activeBackupSubScreen = BackupSubScreen.RESTORE }
-        )
+        SettingsAccordionCard(
+            title = stringResource(R.string.backup_restore_title),
+            subtitle = stringResource(R.string.backup_restore_subtitle),
+            icon = Icons.Default.Backup,
+            isExpanded = SettingsAccordionState.SECTION_BACKUP_RESTORE in expandedSections,
+            onToggle = { toggleSection(SettingsAccordionState.SECTION_BACKUP_RESTORE) }
+        ) {
+            BackupRestoreSettingsContent(
+                onOpenCreateBackup = { activeBackupSubScreen = BackupSubScreen.CREATE },
+                onOpenRestoreBackup = { activeBackupSubScreen = BackupSubScreen.RESTORE }
+            )
+        }
+    }
+
+    val sectionFeedback: @Composable () -> Unit = {
+        SettingsAccordionCard(
+            title = stringResource(R.string.feedback_centre_title),
+            subtitle = stringResource(R.string.feedback_centre_subtitle),
+            icon = Icons.Default.Feedback,
+            isExpanded = SettingsAccordionState.SECTION_FEEDBACK in expandedSections,
+            onToggle = { toggleSection(SettingsAccordionState.SECTION_FEEDBACK) }
+        ) {
+            FeedbackSettingsContent(
+                onOpenBugReport = { activeFeedbackSubScreen = FeedbackTab.BUG_REPORT },
+                onOpenFeatureRequest = { activeFeedbackSubScreen = FeedbackTab.FEATURE_REQUEST }
+            )
+        }
     }
 
     val sectionAbout: @Composable () -> Unit = {
@@ -3210,9 +3276,23 @@ fun SettingsScreen(
                 onCheckForUpdatesClick = {
                     showUpdateDialog = true
                     updateManager.checkForUpdates(isUserInitiated = true)
-                }
+                },
+                onOpenFeedbackClick = { activeFeedbackSubScreen = FeedbackTab.BUG_REPORT }
             )
         }
+    }
+
+    when (val feedbackTab = activeFeedbackSubScreen) {
+        FeedbackTab.BUG_REPORT, FeedbackTab.FEATURE_REQUEST -> {
+            FeedbackCentreScreen(
+                initialTab = feedbackTab,
+                hasBottomNavPill = hasBottomNavPill,
+                onNavigateBack = { activeFeedbackSubScreen = null },
+                modifier = modifier
+            )
+            return
+        }
+        null -> Unit
     }
 
     when (activeBackupSubScreen) {
@@ -3356,6 +3436,7 @@ fun SettingsScreen(
                             sectionTypography()
                             sectionData()
                             sectionBackupRestore()
+                            sectionFeedback()
                             sectionAbout()
                         }
                     }
@@ -3375,6 +3456,7 @@ fun SettingsScreen(
                         sectionLyricsProvider()
                         sectionData()
                         sectionBackupRestore()
+                        sectionFeedback()
                         sectionAbout()
                     }
                 }

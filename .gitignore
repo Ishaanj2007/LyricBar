@@ -1,7 +1,9 @@
+# Android Studio & Gradle
 *.iml
 .gradle
 .kotlin
 /local.properties
+local.properties
 /.idea/caches
 /.idea/libraries
 /.idea/modules.xml
@@ -9,11 +11,22 @@
 /.idea/navEditor.xml
 /.idea/assetWizardSettings.xml
 .DS_Store
-/build
+build/
+**/build/
 /captures
 .externalNativeBuild
 .cxx
-local.properties
 .env
-debug.keystore
 /public/
+
+# Keystores & Signing credentials
+*.jks
+*.keystore
+*.p12
+*.bks
+keystore.properties
+signing.properties
+
+# VS Code
+.vscode/
+

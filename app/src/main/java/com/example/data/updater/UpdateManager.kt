@@ -8,6 +8,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import java.io.File
 
 sealed interface UpdateUiState {
@@ -48,7 +49,12 @@ sealed interface UpdateUiState {
         val settingsIntent: Intent
     ) : UpdateUiState
     data class InstallationLaunched(val release: ReleaseInfo) : UpdateUiState
-    data class Error(val message: String) : UpdateUiState
+    data class Error(
+        val message: String,
+        val isRetryable: Boolean = true,
+        val lastSuccessfulCheckMs: Long? = null,
+        val cachedRelease: ReleaseInfo? = null
+    ) : UpdateUiState
 }
 
 class UpdateManager private constructor(
@@ -58,7 +64,7 @@ class UpdateManager private constructor(
 ) {
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    private val preferencesRepository = UserPreferencesRepository(context.applicationContext)
+    private val preferencesRepository = UserPreferencesRepository.getInstance(context)
     private val notifier = UpdateNotifier(context.applicationContext)
     private val checkEngine = UpdateCheckEngine(
         repository = repository,
@@ -246,10 +252,25 @@ class UpdateManager private constructor(
             }
             is UpdateCheckOutcome.NoStableRelease -> {
                 _cachedAvailableRelease.value = null
-                _uiState.value = UpdateUiState.Error(outcome.reason)
+                _uiState.value = UpdateUiState.Error(
+                    message = outcome.reason,
+                    isRetryable = false,
+                    lastSuccessfulCheckMs = outcome.checkedAtMs
+                )
             }
             is UpdateCheckOutcome.Failure -> {
-                _uiState.value = UpdateUiState.Error(outcome.message)
+                scope.launch {
+                    val prefs = preferencesRepository.userPreferencesFlow.first()
+                    val timestamp: Long = prefs.lastUpdateCheckTimestampMs
+                    val lastCheckTime: Long? = if (timestamp > 0L) timestamp else null
+                    val cached = checkEngine.loadCachedAvailableReleaseOrNull()
+                    _uiState.value = UpdateUiState.Error(
+                        message = outcome.message,
+                        isRetryable = outcome.isRetryable,
+                        lastSuccessfulCheckMs = lastCheckTime,
+                        cachedRelease = cached
+                    )
+                }
             }
             UpdateCheckOutcome.SkippedDisabled,
             UpdateCheckOutcome.SkippedRecent -> {

@@ -8,15 +8,22 @@ import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 import java.io.ByteArrayInputStream
 import java.io.IOException
 import java.util.Base64
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.zip.InflaterInputStream
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import kotlin.math.abs
 
 data class KugouCandidate(
@@ -106,7 +113,7 @@ class KugouProvider(
         }
     }
 
-    private fun searchCandidates(keyword: String, durationMs: Long): List<KugouCandidate> {
+    private suspend fun searchCandidates(keyword: String, durationMs: Long): List<KugouCandidate> {
         val urlBuilder = "${baseUrl.trimEnd('/')}/search".toHttpUrlOrNull()?.newBuilder()
             ?: return emptyList()
         urlBuilder.addQueryParameter("ver", "1")
@@ -123,15 +130,17 @@ class KugouProvider(
             .get()
             .build()
 
-        return try {
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return emptyList()
-                val body = response.body?.string() ?: return emptyList()
-                parseSearchResponse(body)
-            }
-        } catch (_: Exception) {
-            emptyList()
+        val response = client.newCall(request).awaitKugouResponse()
+        if (response.code == 429) {
+            throw IOException("KuGou rate limit exceeded (HTTP 429)")
         }
+        if (response.code in 500..599) {
+            throw IOException("KuGou returned HTTP ${response.code}")
+        }
+        if (response.code !in 200..299 || response.body.isBlank()) {
+            return emptyList()
+        }
+        return parseSearchResponse(response.body)
     }
 
     internal fun parseSearchResponse(jsonBody: String): List<KugouCandidate> {
@@ -224,7 +233,7 @@ class KugouProvider(
         }
     }
 
-    private fun downloadKrcBase64(id: String, accesskey: String): String? {
+    private suspend fun downloadKrcBase64(id: String, accesskey: String): String? {
         val urlBuilder = "${baseUrl.trimEnd('/')}/download".toHttpUrlOrNull()?.newBuilder()
             ?: return null
         urlBuilder.addQueryParameter("ver", "1")
@@ -241,17 +250,19 @@ class KugouProvider(
             .get()
             .build()
 
-        return try {
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return null
-                val body = response.body?.string() ?: return null
-                val root = JsonParser.parseString(body)
-                if (!root.isJsonObject) return null
-                root.asJsonObject.optCleanString("content")
-            }
-        } catch (_: Exception) {
-            null
+        val response = client.newCall(request).awaitKugouResponse()
+        if (response.code == 429) {
+            throw IOException("KuGou rate limit exceeded (HTTP 429)")
         }
+        if (response.code in 500..599) {
+            throw IOException("KuGou returned HTTP ${response.code}")
+        }
+        if (response.code !in 200..299 || response.body.isBlank()) {
+            return null
+        }
+        val root = JsonParser.parseString(response.body)
+        if (!root.isJsonObject) return null
+        return root.asJsonObject.optCleanString("content")
     }
 
     /**
@@ -429,4 +440,40 @@ private fun JsonObject.optLongOrZero(key: String): Long {
     } catch (_: Exception) {
         0L
     }
+}
+
+private data class KugouHttpResult(
+    val code: Int,
+    val body: String
+)
+
+private suspend fun Call.awaitKugouResponse(): KugouHttpResult = suspendCancellableCoroutine { cont ->
+    val isResumed = AtomicBoolean(false)
+    cont.invokeOnCancellation {
+        try {
+            cancel()
+        } catch (_: Throwable) {}
+    }
+    enqueue(object : Callback {
+        override fun onFailure(call: Call, e: IOException) {
+            if (isResumed.compareAndSet(false, true) && cont.isActive) {
+                cont.resumeWithException(e)
+            }
+        }
+
+        override fun onResponse(call: Call, response: Response) {
+            response.use { resp ->
+                try {
+                    val body = resp.body?.string().orEmpty()
+                    if (isResumed.compareAndSet(false, true) && cont.isActive) {
+                        cont.resume(KugouHttpResult(resp.code, body))
+                    }
+                } catch (e: Throwable) {
+                    if (isResumed.compareAndSet(false, true) && cont.isActive) {
+                        cont.resumeWithException(e)
+                    }
+                }
+            }
+        }
+    })
 }

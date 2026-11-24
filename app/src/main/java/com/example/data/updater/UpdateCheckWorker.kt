@@ -12,7 +12,7 @@ class UpdateCheckWorker(
 ) : CoroutineWorker(appContext, workerParams) {
 
     override suspend fun doWork(): Result {
-        val prefsRepo = UserPreferencesRepository(applicationContext)
+        val prefsRepo = UserPreferencesRepository.getInstance(applicationContext)
         val prefs = prefsRepo.userPreferencesFlow.first()
 
         if (!prefs.autoUpdateChecksEnabled) {
