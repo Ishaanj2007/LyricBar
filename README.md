@@ -124,6 +124,15 @@ LyricBar uses a modular, 7-tier lyrics provider architecture to maximize regiona
 
 ## Download 📲
 
+> [!IMPORTANT]
+> **Upgrading from v2.6.x to v2.7.0+ (Package ID Migration):**  
+> In **v2.7.0**, LyricBar's official application ID transitioned to its permanent identifier `com.ishaan.lyricbar`. Because Android treats apps with different package IDs as separate applications, in-app auto-update cannot overwrite v2.6.x directly.  
+> **To migrate your data seamlessly:**
+> 1. In your existing v2.6.1 app, navigate to **Settings → Backup & Restore** and tap **Export Backup** to save a `.zip` archive to your device or Google Drive.
+> 2. Download and install `LyricBar-2.7.0.apk` from GitHub Releases. It will install alongside your existing app.
+> 3. Launch LyricBar v2.7.0, grant the required permissions (Overlay & Notification Listener), navigate to **Settings → Backup & Restore**, tap **Restore Backup**, and select your exported `.zip` file.
+> 4. Once your HUD customisation, history, and imported lyrics are restored, you can safely uninstall the old v2.6.x app.
+
 👉 **[Download the Latest Release](https://github.com/Ishaanj2007/LyricBar/releases/latest)**
 
 1. Download `LyricBar-2.6.0.apk` (or architecture-specific variant) from the latest release assets.
