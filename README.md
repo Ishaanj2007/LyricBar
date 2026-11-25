@@ -44,6 +44,16 @@
 
 ---
 
+## Demo 🎬
+
+<p align="center">
+  <video src="showcase/Showcase-vid.mp4" controls width="320">
+    Your browser does not support the video tag. <a href="showcase/Showcase-vid.mp4">Watch the LyricBar v2.7.0 Demo</a>
+  </video>
+</p>
+
+---
+
 ## What's New in v2.7.0 🚀
 
 - **Permanent Application ID (`com.ishaan.lyricbar`) & Selective Backup/Restore** — Migrated to LyricBar's permanent package identifier (`versionCode` 11) with a portable `.zip` Backup & Restore system covering App Settings, HUD Configuration, Playback History, and Imported `.lrc` Lyrics, plus allowlist Android Auto Backup and Device-to-Device transfer rules.
@@ -135,7 +145,7 @@ LyricBar uses a modular, 7-tier lyrics provider architecture to maximize regiona
 
 👉 **[Download the Latest Release](https://github.com/Ishaanj2007/LyricBar/releases/latest)**
 
-1. Download `LyricBar-2.7.0.apk` (or architecture-specific variant) from the latest release assets.
+1. Download `LyricBar-2.7.0.apk` from the latest release assets.
 2. Open the APK on your Android device.
 3. Allow installation from unknown sources if prompted.
 4. Launch LyricBar and grant the required permissions (Overlay & Notification Listener).
