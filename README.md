@@ -47,8 +47,8 @@
 ## Demo 🎬
 
 <p align="center">
-  <video src="showcase/Showcase-vid.mp4" controls width="320">
-    Your browser does not support the video tag. <a href="showcase/Showcase-vid.mp4">Watch the LyricBar v2.7.0 Demo</a>
+  <video src="Screenshots/Showcase-vid.mp4" controls width="320">
+    Your browser does not support the video tag. <a href="Screenshots/Showcase-vid.mp4">Watch the LyricBar v2.7.0 Demo</a>
   </video>
 </p>
 
