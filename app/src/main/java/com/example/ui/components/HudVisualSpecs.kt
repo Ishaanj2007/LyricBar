@@ -42,6 +42,49 @@ object HudVisualSpecs {
     const val ACTIVE_SHADOW_ALPHA: Int = 215
     const val INACTIVE_SHADOW_ALPHA: Int = 95
     const val ACTIVE_GLOW_ALPHA: Int = 140
+    const val PEAK_GLOW_ALPHA: Int = 200
+    const val WORD_GLOW_SETTLE_MS: Long = 140L
+
+    fun computeRestingGlowRadiusPx(textSizePx: Float): Float {
+        return (textSizePx * 0.24f).coerceIn(5f, 12f)
+    }
+
+    fun computePeakGlowRadiusPx(textSizePx: Float): Float {
+        return (textSizePx * 0.48f).coerceIn(10f, 20f)
+    }
+
+    /**
+     * Computes a smooth 0f..1f luminous envelope for an active karaoke word or line:
+     * ramps in smoothly during attack, blooms near mid-word, holds warm through completion,
+     * and eases back to 0f over [settleMs] after [endMs].
+     */
+    fun computeWordLuminousEnvelope(
+        startMs: Long,
+        endMs: Long,
+        currentPositionMs: Long,
+        progress: Float,
+        settleMs: Long = WORD_GLOW_SETTLE_MS
+    ): Float {
+        if (currentPositionMs < startMs || progress <= 0f) return 0f
+        if (currentPositionMs < endMs) {
+            val p = progress.coerceIn(0f, 1f)
+            val attackT = (p / 0.22f).coerceIn(0f, 1f)
+            val attackEase = 1f - (1f - attackT) * (1f - attackT)
+            val bell = kotlin.math.sin(p * kotlin.math.PI).toFloat().coerceIn(0f, 1f)
+            return maxOf(attackEase * 0.72f, bell).coerceIn(0f, 1f)
+        }
+        if (settleMs <= 0L) return 0f
+        val elapsedSinceEnd = (currentPositionMs - endMs).coerceAtLeast(0L)
+        if (elapsedSinceEnd >= settleMs) return 0f
+        val settleRemaining = 1f - (elapsedSinceEnd.toFloat() / settleMs.toFloat())
+        return (0.72f * settleRemaining * settleRemaining).coerceIn(0f, 1f)
+    }
+
+    fun computeGlowAlpha(baseActiveAlpha: Int, intensity: Float): Int {
+        return (baseActiveAlpha.coerceIn(0, 255) * intensity.coerceIn(0f, 1f))
+            .roundToInt()
+            .coerceIn(0, 255)
+    }
 
     fun normalizeBackdropStyle(style: String?): String {
         if (style.isNullOrBlank()) return "BLACK"
