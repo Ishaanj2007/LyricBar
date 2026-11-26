@@ -422,6 +422,8 @@ class OverlayService : Service() {
 
         try {
             wm.updateViewLayout(view, params)
+            view.invalidate()
+            view.startLoopIfNeeded()
         } catch (_: Exception) {}
     }
 
@@ -809,7 +811,8 @@ class OverlayService : Service() {
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
 
         fun computeOverlayWindowFlags(clickThroughEnabled: Boolean): Int {
             return if (clickThroughEnabled) {

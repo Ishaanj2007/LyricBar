@@ -41,16 +41,16 @@ object HudVisualSpecs {
     const val OUTGOING_LYRIC_ALPHA_RATIO: Float = 0.44f
     const val ACTIVE_SHADOW_ALPHA: Int = 215
     const val INACTIVE_SHADOW_ALPHA: Int = 95
-    const val ACTIVE_GLOW_ALPHA: Int = 140
-    const val PEAK_GLOW_ALPHA: Int = 200
-    const val WORD_GLOW_SETTLE_MS: Long = 140L
+    const val ACTIVE_GLOW_ALPHA: Int = 165
+    const val PEAK_GLOW_ALPHA: Int = 245
+    const val WORD_GLOW_SETTLE_MS: Long = 240L
 
     fun computeRestingGlowRadiusPx(textSizePx: Float): Float {
-        return (textSizePx * 0.24f).coerceIn(5f, 12f)
+        return (textSizePx * 0.24f).coerceIn(6f, 11f)
     }
 
     fun computePeakGlowRadiusPx(textSizePx: Float): Float {
-        return (textSizePx * 0.48f).coerceIn(10f, 20f)
+        return (textSizePx * 0.42f).coerceIn(10f, 18f)
     }
 
     /**
@@ -68,16 +68,16 @@ object HudVisualSpecs {
         if (currentPositionMs < startMs || progress <= 0f) return 0f
         if (currentPositionMs < endMs) {
             val p = progress.coerceIn(0f, 1f)
-            val attackT = (p / 0.22f).coerceIn(0f, 1f)
+            val attackT = (p / 0.16f).coerceIn(0f, 1f)
             val attackEase = 1f - (1f - attackT) * (1f - attackT)
             val bell = kotlin.math.sin(p * kotlin.math.PI).toFloat().coerceIn(0f, 1f)
-            return maxOf(attackEase * 0.72f, bell).coerceIn(0f, 1f)
+            return maxOf(attackEase * 0.82f, bell).coerceIn(0f, 1f)
         }
         if (settleMs <= 0L) return 0f
         val elapsedSinceEnd = (currentPositionMs - endMs).coerceAtLeast(0L)
         if (elapsedSinceEnd >= settleMs) return 0f
         val settleRemaining = 1f - (elapsedSinceEnd.toFloat() / settleMs.toFloat())
-        return (0.72f * settleRemaining * settleRemaining).coerceIn(0f, 1f)
+        return (0.82f * settleRemaining * settleRemaining).coerceIn(0f, 1f)
     }
 
     fun computeGlowAlpha(baseActiveAlpha: Int, intensity: Float): Int {

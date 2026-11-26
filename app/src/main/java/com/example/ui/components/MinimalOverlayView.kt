@@ -49,6 +49,14 @@ class MinimalOverlayView(
         isFakeBoldText = false
     }
 
+    // Shadow-free active glyph paint for glowing karaoke passes so dark contrast shadows
+    // never mute or muddy the luminous active-word halo underneath.
+    private val wordKaraokeCrispPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR
+        textAlign = Paint.Align.LEFT
+        isFakeBoldText = false
+    }
+
     private val wordInactivePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         color = HudColorSystem.DEFAULT_INACTIVE_LYRIC_COLOR
         textAlign = Paint.Align.LEFT
@@ -166,6 +174,7 @@ class MinimalOverlayView(
             if (field != safe) {
                 field = safe
                 wordActivePaint.color = safe
+                wordKaraokeCrispPaint.color = safe
                 wordGlowPaint.color = safe
                 wordPeakGlowPaint.color = safe
                 blurRevealPaint.color = safe
@@ -549,6 +558,7 @@ class MinimalOverlayView(
                     resources.displayMetrics
                 )
                 wordActivePaint.textSize = px
+                wordKaraokeCrispPaint.textSize = px
                 wordInactivePaint.textSize = px
                 previousTextPaint.textSize = px
                 wordGlowPaint.textSize = px
@@ -670,6 +680,7 @@ class MinimalOverlayView(
             if (isBold) android.graphics.Typeface.DEFAULT_BOLD else android.graphics.Typeface.DEFAULT
         }
         wordActivePaint.typeface = typeface
+        wordKaraokeCrispPaint.typeface = typeface
         wordInactivePaint.typeface = typeface
         previousTextPaint.typeface = typeface
         wordGlowPaint.typeface = typeface
@@ -677,6 +688,7 @@ class MinimalOverlayView(
         blurRevealPaint.typeface = typeface
 
         wordActivePaint.isFakeBoldText = isBold
+        wordKaraokeCrispPaint.isFakeBoldText = isBold
         wordInactivePaint.isFakeBoldText = isBold
         previousTextPaint.isFakeBoldText = isBold
         wordGlowPaint.isFakeBoldText = isBold
@@ -880,6 +892,7 @@ class MinimalOverlayView(
             resources.displayMetrics
         )
         wordActivePaint.textSize = initialPx
+        wordKaraokeCrispPaint.textSize = initialPx
         wordInactivePaint.textSize = initialPx
         previousTextPaint.textSize = initialPx
         wordGlowPaint.textSize = initialPx
@@ -1426,9 +1439,12 @@ class MinimalOverlayView(
                     wordInactivePaint.alpha = inactiveAlpha
                     wordActivePaint.color = hierarchy.activeColor
                     wordActivePaint.alpha = incomingAlpha
+                    wordKaraokeCrispPaint.color = hierarchy.activeColor
+                    wordKaraokeCrispPaint.alpha = incomingAlpha
                     wordGlowPaint.color = hierarchy.activeColor
                     wordGlowPaint.alpha = incomingAlpha
                     wordPeakGlowPaint.color = hierarchy.activeColor
+                    val activeGlyphPaint = if (!isDarkActiveInk) wordKaraokeCrispPaint else wordActivePaint
 
                     // Determine the single active visual line index
                     var activeLineIdx = 0
@@ -1468,7 +1484,7 @@ class MinimalOverlayView(
                                             canvas.drawText(w.word, w.x, drawY, wordPeakGlowPaint)
                                         }
                                     }
-                                    canvas.drawText(w.word, w.x, drawY, wordActivePaint)
+                                    canvas.drawText(w.word, w.x, drawY, activeGlyphPaint)
                                 } else {
                                     // Word actively being sung on active line: progressive fill + luminous active bloom
                                     val progress = com.example.domain.lyricsengine.LyricsTimingEngine.calculateWordGlowProgress(
@@ -1488,14 +1504,14 @@ class MinimalOverlayView(
 
                                     // Unsung right portion at inactive colour/opacity (non-overlapping clip)
                                     canvas.save()
-                                    canvas.clipRect(splitX, 0f, w.x + w.width + 36f, height.toFloat())
+                                    canvas.clipRect(splitX, 0f, w.x + w.width + 42f, height.toFloat())
                                     canvas.drawText(w.word, w.x, drawY, wordInactivePaint)
                                     canvas.restore()
 
                                     // Sung left portion with luminous active-word bloom + crisp active glyph
                                     if (progress > 0f) {
                                         canvas.save()
-                                        canvas.clipRect(w.x - 36f, 0f, splitX, height.toFloat())
+                                        canvas.clipRect(w.x - 42f, 0f, splitX, height.toFloat())
                                         if (!isDarkActiveInk) {
                                             canvas.drawText(w.word, w.x, drawY, wordGlowPaint)
                                             if (peakEnv > 0.01f) {
@@ -1503,7 +1519,7 @@ class MinimalOverlayView(
                                                 canvas.drawText(w.word, w.x, drawY, wordPeakGlowPaint)
                                             }
                                         }
-                                        canvas.drawText(w.word, w.x, drawY, wordActivePaint)
+                                        canvas.drawText(w.word, w.x, drawY, activeGlyphPaint)
                                         canvas.restore()
                                     }
                                 }
@@ -1564,9 +1580,12 @@ class MinimalOverlayView(
                     wordInactivePaint.alpha = inactiveAlpha
                     wordActivePaint.color = hierarchy.activeColor
                     wordActivePaint.alpha = incomingAlpha
+                    wordKaraokeCrispPaint.color = hierarchy.activeColor
+                    wordKaraokeCrispPaint.alpha = incomingAlpha
                     wordGlowPaint.color = hierarchy.activeColor
                     wordGlowPaint.alpha = incomingAlpha
                     wordPeakGlowPaint.color = hierarchy.activeColor
+                    val activeGlyphPaint = if (!isDarkActiveInk) wordKaraokeCrispPaint else wordActivePaint
 
                     // Draw prior completed visual lines (0 until activeLineIdx) fully highlighted
                     for (prevIdx in 0 until activeLineIdx) {
@@ -1577,7 +1596,7 @@ class MinimalOverlayView(
                             if (!isDarkActiveInk) {
                                 canvas.drawText(w.word, w.x, drawY, wordGlowPaint)
                             }
-                            canvas.drawText(w.word, w.x, drawY, wordActivePaint)
+                            canvas.drawText(w.word, w.x, drawY, activeGlyphPaint)
                         }
                     }
 
@@ -1619,7 +1638,7 @@ class MinimalOverlayView(
                                         canvas.drawText(w.word, w.x, activeDrawY, wordPeakGlowPaint)
                                     }
                                 }
-                                canvas.drawText(w.word, w.x, activeDrawY, wordActivePaint)
+                                canvas.drawText(w.word, w.x, activeDrawY, activeGlyphPaint)
                             }
                         }
                         else -> {
@@ -1648,7 +1667,7 @@ class MinimalOverlayView(
                                         canvas.drawText(w.word, w.x, activeDrawY, wordPeakGlowPaint)
                                     }
                                 }
-                                canvas.drawText(w.word, w.x, activeDrawY, wordActivePaint)
+                                canvas.drawText(w.word, w.x, activeDrawY, activeGlyphPaint)
                             }
                             canvas.restore()
                         }

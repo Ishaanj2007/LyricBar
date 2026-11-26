@@ -60,13 +60,13 @@ class KaraokeLuminousGlowTest {
     fun `glow radii stay bounded across small and large font sizes`() {
         val smallRest = HudVisualSpecs.computeRestingGlowRadiusPx(20f)
         val smallPeak = HudVisualSpecs.computePeakGlowRadiusPx(20f)
-        assertTrue(smallRest in 5f..12f)
-        assertTrue(smallPeak in 10f..20f)
+        assertTrue(smallRest in 6f..11f)
+        assertTrue(smallPeak in 10f..18f)
         assertTrue(smallPeak > smallRest)
 
         val hugeRest = HudVisualSpecs.computeRestingGlowRadiusPx(120f)
         val hugePeak = HudVisualSpecs.computePeakGlowRadiusPx(120f)
-        assertEquals(12f, hugeRest, 0.001f)
-        assertEquals(20f, hugePeak, 0.001f)
+        assertEquals(11f, hugeRest, 0.001f)
+        assertEquals(18f, hugePeak, 0.001f)
     }
 }
