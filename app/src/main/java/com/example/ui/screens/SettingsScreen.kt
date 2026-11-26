@@ -2704,7 +2704,11 @@ fun SettingsScreen(
         // SECTION 6: TYPOGRAPHY
         SettingsAccordionCard(
             title = "Typography",
-            subtitle = "${userPreferences.selectedFont.title} • ${userPreferences.overlayTextSizeSp.toInt()} sp",
+            subtitle = if (userPreferences.hudBoldLyrics) {
+                "${userPreferences.selectedFont.title} • Bold • ${userPreferences.overlayTextSizeSp.toInt()} sp"
+            } else {
+                "${userPreferences.selectedFont.title} • ${userPreferences.overlayTextSizeSp.toInt()} sp"
+            },
             icon = Icons.Default.FontDownload,
             isExpanded = SettingsAccordionState.SECTION_TYPOGRAPHY in expandedSections,
             onToggle = { toggleSection(SettingsAccordionState.SECTION_TYPOGRAPHY) }
@@ -2855,7 +2859,43 @@ fun SettingsScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(14.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Bold HUD Lyrics Toggle
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                        Text(
+                            text = "Bold Lyrics",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Use a bolder typeface for floating HUD lyrics.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = userPreferences.hudBoldLyrics,
+                        onCheckedChange = { enabled ->
+                            coroutineScope.launch {
+                                playbackManager.preferencesRepository.setHudBoldLyrics(enabled)
+                            }
+                        },
+                        modifier = Modifier.testTag("settings_hud_bold_lyrics_switch")
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                Spacer(modifier = Modifier.height(14.dp))
 
                 // Font Family Selector
                 Text(

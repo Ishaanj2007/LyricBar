@@ -150,6 +150,7 @@ data class BackupHudConfigData(
     val overlayEnabled: Boolean = true,
     val overlayTextSizeSp: Float = 14f,
     val overlayTextOpacity: Float = 1.0f,
+    val hudBoldLyrics: Boolean = false,
     val textShadowEnabled: Boolean = true,
     val overlayTextAlign: String = "CENTER",
     val clickThroughOverlay: Boolean = false,

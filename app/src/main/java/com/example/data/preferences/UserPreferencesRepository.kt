@@ -220,6 +220,7 @@ data class UserPreferences(
     val themeMode: ThemeMode = ThemeMode.FOLLOW_SYSTEM,
     val themePreset: ThemePreset = ThemePreset.ROSE_QUARTZ,
     val selectedFont: FontOption = FontOption.POPPINS,
+    val hudBoldLyrics: Boolean = false,
     val appleMusicStyle: Boolean = true,
     val singleLineLyrics: Boolean = false,
     val adaptiveLyricScrolling: Boolean = true,
@@ -331,6 +332,7 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val THEME_PRESET = stringPreferencesKey("theme_preset")
         val SELECTED_FONT = stringPreferencesKey("selected_font")
+        val HUD_BOLD_LYRICS = booleanPreferencesKey("hud_bold_lyrics")
         val APPLE_MUSIC_STYLE = booleanPreferencesKey("apple_music_style")
         val SINGLE_LINE_LYRICS = booleanPreferencesKey("single_line_lyrics")
         val ADAPTIVE_LYRIC_SCROLLING = booleanPreferencesKey("adaptive_lyric_scrolling")
@@ -476,6 +478,7 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
                 themeMode = themeMode,
                 themePreset = preset,
                 selectedFont = font,
+                hudBoldLyrics = preferences[PreferencesKeys.HUD_BOLD_LYRICS] ?: false,
                 appleMusicStyle = preferences[PreferencesKeys.APPLE_MUSIC_STYLE] ?: true,
                 singleLineLyrics = preferences[PreferencesKeys.SINGLE_LINE_LYRICS] ?: false,
                 adaptiveLyricScrolling = preferences[PreferencesKeys.ADAPTIVE_LYRIC_SCROLLING] ?: true,
@@ -938,6 +941,10 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
         dataStore.edit { it[PreferencesKeys.SELECTED_FONT] = font.name }
     }
 
+    suspend fun setHudBoldLyrics(enabled: Boolean) {
+        dataStore.edit { it[PreferencesKeys.HUD_BOLD_LYRICS] = enabled }
+    }
+
     suspend fun setTrackOffset(trackKey: String, offsetMs: Long) {
         if (trackKey.isBlank()) return
         val key = longPreferencesKey(computeTrackOffsetKey(trackKey))
@@ -1164,6 +1171,7 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
                 prefs[PreferencesKeys.OVERLAY_ENABLED] = hudConfig.overlayEnabled
                 prefs[PreferencesKeys.OVERLAY_TEXT_SIZE] = hudConfig.overlayTextSizeSp.coerceIn(8f, 48f)
                 prefs[PreferencesKeys.OVERLAY_TEXT_OPACITY] = hudConfig.overlayTextOpacity.coerceIn(0.15f, 1.0f)
+                prefs[PreferencesKeys.HUD_BOLD_LYRICS] = hudConfig.hudBoldLyrics
                 prefs[PreferencesKeys.OVERLAY_TEXT_SHADOW] = hudConfig.textShadowEnabled
                 prefs[PreferencesKeys.OVERLAY_TEXT_ALIGN] = safeAlign
                 prefs[PreferencesKeys.CLICK_THROUGH_OVERLAY] = hudConfig.clickThroughOverlay
@@ -1318,6 +1326,7 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
             overlayEnabled = raw[PreferencesKeys.OVERLAY_ENABLED] ?: true,
             overlayTextSizeSp = raw[PreferencesKeys.OVERLAY_TEXT_SIZE] ?: 14f,
             overlayTextOpacity = (raw[PreferencesKeys.OVERLAY_TEXT_OPACITY] ?: 1.0f).coerceIn(0.15f, 1.0f),
+            hudBoldLyrics = raw[PreferencesKeys.HUD_BOLD_LYRICS] ?: false,
             textShadowEnabled = raw[PreferencesKeys.OVERLAY_TEXT_SHADOW] ?: true,
             overlayTextAlign = raw[PreferencesKeys.OVERLAY_TEXT_ALIGN] ?: "CENTER",
             clickThroughOverlay = raw[PreferencesKeys.CLICK_THROUGH_OVERLAY] ?: false,

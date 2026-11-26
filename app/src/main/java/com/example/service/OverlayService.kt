@@ -585,6 +585,7 @@ class OverlayService : Service() {
                         view.adaptiveScrollingEnabled = prefs.adaptiveLyricScrolling
                         view.scrollSpeedMultiplier = prefs.lyricScrollSpeedMultiplier
                         view.fontResId = prefs.selectedFont.fontResId
+                        view.boldLyricsEnabled = prefs.hudBoldLyrics
 
                         val resolvedPrimary = if (prefs.useWallpaperDynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                             try {

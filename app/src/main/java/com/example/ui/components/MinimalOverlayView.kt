@@ -46,25 +46,25 @@ class MinimalOverlayView(
     private val wordActivePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         color = HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR
         textAlign = Paint.Align.LEFT
-        isFakeBoldText = true
+        isFakeBoldText = false
     }
 
     private val wordInactivePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         color = HudColorSystem.DEFAULT_INACTIVE_LYRIC_COLOR
         textAlign = Paint.Align.LEFT
-        isFakeBoldText = true
+        isFakeBoldText = false
     }
 
     private val previousTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         color = HudColorSystem.DEFAULT_INACTIVE_LYRIC_COLOR
         textAlign = Paint.Align.LEFT
-        isFakeBoldText = true
+        isFakeBoldText = false
     }
 
     private val wordGlowPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         color = HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR
         textAlign = Paint.Align.LEFT
-        isFakeBoldText = true
+        isFakeBoldText = false
         setShadowLayer(
             9f,
             0f,
@@ -79,7 +79,7 @@ class MinimalOverlayView(
     private val blurRevealPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         color = HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR
         textAlign = Paint.Align.LEFT
-        isFakeBoldText = true
+        isFakeBoldText = false
     }
 
     // Editable bounding box paints (displayed ONLY when isDragMode == true; neutral high-contrast indicator)
@@ -625,18 +625,44 @@ class MinimalOverlayView(
         set(value) {
             if (field != value) {
                 field = value
-                val tf = if (value != null) {
-                    getCachedTypeface(context, value)
-                } else null
-                val typeface = tf ?: android.graphics.Typeface.DEFAULT_BOLD
-                wordActivePaint.typeface = typeface
-                wordInactivePaint.typeface = typeface
-                previousTextPaint.typeface = typeface
-                wordGlowPaint.typeface = typeface
-                blurRevealPaint.typeface = typeface
+                applyTypographyToPaints()
                 recalculateLayout()
             }
         }
+
+    var boldLyricsEnabled: Boolean = false
+        set(value) {
+            if (field != value) {
+                field = value
+                applyTypographyToPaints()
+                recalculateLayout()
+            }
+        }
+
+    private fun applyTypographyToPaints() {
+        val resId = fontResId
+        val isBold = boldLyricsEnabled
+        val typeface = if (resId != null) {
+            if (isBold) {
+                getCachedBoldTypeface(context, resId)
+            } else {
+                getCachedTypeface(context, resId)
+            }
+        } else {
+            if (isBold) android.graphics.Typeface.DEFAULT_BOLD else android.graphics.Typeface.DEFAULT
+        }
+        wordActivePaint.typeface = typeface
+        wordInactivePaint.typeface = typeface
+        previousTextPaint.typeface = typeface
+        wordGlowPaint.typeface = typeface
+        blurRevealPaint.typeface = typeface
+
+        wordActivePaint.isFakeBoldText = isBold
+        wordInactivePaint.isFakeBoldText = isBold
+        previousTextPaint.isFakeBoldText = isBold
+        wordGlowPaint.isFakeBoldText = isBold
+        blurRevealPaint.isFakeBoldText = isBold
+    }
 
     var isDragMode: Boolean = false
         set(value) {
@@ -838,6 +864,7 @@ class MinimalOverlayView(
         previousTextPaint.textSize = initialPx
         wordGlowPaint.textSize = initialPx
         blurRevealPaint.textSize = initialPx
+        applyTypographyToPaints()
         updateShadow(wordActivePaint, textShadowEnabled, isSubordinate = false, inkColor = activeLyricColor)
         updateShadow(wordInactivePaint, textShadowEnabled, isSubordinate = true, inkColor = inactiveLyricColor)
         updateShadow(previousTextPaint, textShadowEnabled, isSubordinate = true, inkColor = inactiveLyricColor)
@@ -2161,6 +2188,7 @@ class MinimalOverlayView(
 
     companion object {
         private val typefaceCache = java.util.concurrent.ConcurrentHashMap<Int, android.graphics.Typeface>()
+        private val boldTypefaceCache = java.util.concurrent.ConcurrentHashMap<Int, android.graphics.Typeface>()
 
         /**
          * MED-03: Caches parsed font Typeface instances at process scope to prevent repeated
@@ -2171,7 +2199,22 @@ class MinimalOverlayView(
             return typefaceCache.getOrPut(fontResId) {
                 try {
                     ResourcesCompat.getFont(context.applicationContext, fontResId)
-                        ?: android.graphics.Typeface.DEFAULT_BOLD
+                        ?: android.graphics.Typeface.DEFAULT
+                } catch (_: Exception) {
+                    android.graphics.Typeface.DEFAULT
+                }
+            }
+        }
+
+        /**
+         * Derives and caches a bold Typeface from the cached base Typeface without mutating
+         * or overwriting the normal cached Typeface entry.
+         */
+        fun getCachedBoldTypeface(context: Context, @androidx.annotation.FontRes fontResId: Int): android.graphics.Typeface {
+            return boldTypefaceCache.getOrPut(fontResId) {
+                val base = getCachedTypeface(context, fontResId)
+                try {
+                    android.graphics.Typeface.create(base, android.graphics.Typeface.BOLD)
                 } catch (_: Exception) {
                     android.graphics.Typeface.DEFAULT_BOLD
                 }
@@ -2180,6 +2223,7 @@ class MinimalOverlayView(
 
         fun clearTypefaceCache() {
             typefaceCache.clear()
+            boldTypefaceCache.clear()
         }
 
         fun isTypefaceCached(@androidx.annotation.FontRes fontResId: Int): Boolean {

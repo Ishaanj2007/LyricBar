@@ -681,5 +681,5 @@ object BackupZipCodec {
     }
 
     private const val APP_SETTINGS_BASE_FIELD_COUNT = 21
-    private const val HUD_CONFIG_BASE_FIELD_COUNT = 19
+    private const val HUD_CONFIG_BASE_FIELD_COUNT = 20
 }
