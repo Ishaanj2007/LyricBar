@@ -1649,6 +1649,41 @@ fun SettingsScreen(
                                     }
                                 }
                             }
+
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(end = 12.dp)
+                                ) {
+                                    Text(
+                                        text = "Enhanced Glow",
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 13.sp,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = "Add a stronger luminous halo around active karaoke words.",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Switch(
+                                    checked = userPreferences.karaokeEnhancedGlow,
+                                    onCheckedChange = { enabled ->
+                                        coroutineScope.launch {
+                                            playbackManager.preferencesRepository.setKaraokeEnhancedGlow(enabled)
+                                        }
+                                    },
+                                    modifier = Modifier.testTag("settings_karaoke_enhanced_glow_switch")
+                                )
+                            }
                         }
                     }
                 }

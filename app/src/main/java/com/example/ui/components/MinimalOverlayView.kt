@@ -273,11 +273,12 @@ class MinimalOverlayView(
 
         return when (getNormalizedStyle()) {
             "KARAOKE" -> {
+                val settleTailMs = if (karaokeEnhancedGlow) HudVisualSpecs.WORD_GLOW_SETTLE_MS else 100L
                 if (currentLine.isWordSynced && currentLine.words.isNotEmpty()) {
                     val startMs = currentLine.words.first().startMs
                     val endMs = currentLine.words.last().endMs
                     // Animate only within the active singing phrase (+ brief glow settle)
-                    posMs in startMs..(endMs + HudVisualSpecs.WORD_GLOW_SETTLE_MS)
+                    posMs in startMs..(endMs + settleTailMs)
                 } else if (currentLine.timeMs > 0L || currentLine.endTimeMs > 0L) {
                     // Line-timed sweep: animate only during the active line duration (+ brief glow settle)
                     val lineStart = currentLine.timeMs
@@ -289,7 +290,7 @@ class MinimalOverlayView(
                     } else {
                         lineStart + 3500L
                     }
-                    posMs in lineStart..(lineEnd + HudVisualSpecs.WORD_GLOW_SETTLE_MS)
+                    posMs in lineStart..(lineEnd + settleTailMs)
                 } else {
                     // Untimed / static lyrics: no continuous frames required
                     false
@@ -546,6 +547,14 @@ class MinimalOverlayView(
         get() = karaokeGlowSpeed
         set(value) {
             karaokeGlowSpeed = value
+        }
+
+    var karaokeEnhancedGlow: Boolean = false
+        set(value) {
+            if (field != value) {
+                field = value
+                invalidate()
+            }
         }
 
     var textSizeSp: Float = 14f
@@ -1444,7 +1453,8 @@ class MinimalOverlayView(
                     wordGlowPaint.color = hierarchy.activeColor
                     wordGlowPaint.alpha = incomingAlpha
                     wordPeakGlowPaint.color = hierarchy.activeColor
-                    val activeGlyphPaint = if (!isDarkActiveInk) wordKaraokeCrispPaint else wordActivePaint
+                    val useEnhancedGlow = karaokeEnhancedGlow && !isDarkActiveInk
+                    val activeGlyphPaint = if (useEnhancedGlow) wordKaraokeCrispPaint else wordActivePaint
 
                     // Determine the single active visual line index
                     var activeLineIdx = 0
@@ -1470,34 +1480,30 @@ class MinimalOverlayView(
                                     // Word not sung yet on active line: draw with subordinate inactive opacity
                                     canvas.drawText(w.word, w.x, drawY, wordInactivePaint)
                                 } else if (posMs >= w.endMs) {
-                                    // Word fully sung on active line: resting glow + smooth post-word settle + crisp active glyph
+                                    // Word fully sung on active line: resting glow + optional enhanced settle + crisp active glyph
                                     if (!isDarkActiveInk) {
                                         canvas.drawText(w.word, w.x, drawY, wordGlowPaint)
-                                        val settleEnv = HudVisualSpecs.computeWordLuminousEnvelope(
-                                            startMs = w.startMs,
-                                            endMs = w.endMs,
-                                            currentPositionMs = posMs,
-                                            progress = 1f
-                                        )
-                                        if (settleEnv > 0.01f) {
-                                            wordPeakGlowPaint.alpha = HudVisualSpecs.computeGlowAlpha(incomingAlpha, settleEnv)
-                                            canvas.drawText(w.word, w.x, drawY, wordPeakGlowPaint)
+                                        if (useEnhancedGlow) {
+                                            val settleEnv = HudVisualSpecs.computeWordLuminousEnvelope(
+                                                startMs = w.startMs,
+                                                endMs = w.endMs,
+                                                currentPositionMs = posMs,
+                                                progress = 1f
+                                            )
+                                            if (settleEnv > 0.01f) {
+                                                wordPeakGlowPaint.alpha = HudVisualSpecs.computeGlowAlpha(incomingAlpha, settleEnv)
+                                                canvas.drawText(w.word, w.x, drawY, wordPeakGlowPaint)
+                                            }
                                         }
                                     }
                                     canvas.drawText(w.word, w.x, drawY, activeGlyphPaint)
                                 } else {
-                                    // Word actively being sung on active line: progressive fill + luminous active bloom
+                                    // Word actively being sung on active line: progressive fill + optional luminous active bloom
                                     val progress = com.example.domain.lyricsengine.LyricsTimingEngine.calculateWordGlowProgress(
                                         startMs = w.startMs,
                                         endMs = w.endMs,
                                         currentPositionMs = posMs,
                                         speedMultiplier = karaokeGlowSpeed
-                                    )
-                                    val peakEnv = HudVisualSpecs.computeWordLuminousEnvelope(
-                                        startMs = w.startMs,
-                                        endMs = w.endMs,
-                                        currentPositionMs = posMs,
-                                        progress = progress
                                     )
 
                                     val splitX = w.x + (w.width * progress)
@@ -1508,15 +1514,23 @@ class MinimalOverlayView(
                                     canvas.drawText(w.word, w.x, drawY, wordInactivePaint)
                                     canvas.restore()
 
-                                    // Sung left portion with luminous active-word bloom + crisp active glyph
+                                    // Sung left portion with resting glow + optional enhanced bloom + crisp active glyph
                                     if (progress > 0f) {
                                         canvas.save()
                                         canvas.clipRect(w.x - 42f, 0f, splitX, height.toFloat())
                                         if (!isDarkActiveInk) {
                                             canvas.drawText(w.word, w.x, drawY, wordGlowPaint)
-                                            if (peakEnv > 0.01f) {
-                                                wordPeakGlowPaint.alpha = HudVisualSpecs.computeGlowAlpha(incomingAlpha, peakEnv)
-                                                canvas.drawText(w.word, w.x, drawY, wordPeakGlowPaint)
+                                            if (useEnhancedGlow) {
+                                                val peakEnv = HudVisualSpecs.computeWordLuminousEnvelope(
+                                                    startMs = w.startMs,
+                                                    endMs = w.endMs,
+                                                    currentPositionMs = posMs,
+                                                    progress = progress
+                                                )
+                                                if (peakEnv > 0.01f) {
+                                                    wordPeakGlowPaint.alpha = HudVisualSpecs.computeGlowAlpha(incomingAlpha, peakEnv)
+                                                    canvas.drawText(w.word, w.x, drawY, wordPeakGlowPaint)
+                                                }
                                             }
                                         }
                                         canvas.drawText(w.word, w.x, drawY, activeGlyphPaint)
@@ -1585,7 +1599,8 @@ class MinimalOverlayView(
                     wordGlowPaint.color = hierarchy.activeColor
                     wordGlowPaint.alpha = incomingAlpha
                     wordPeakGlowPaint.color = hierarchy.activeColor
-                    val activeGlyphPaint = if (!isDarkActiveInk) wordKaraokeCrispPaint else wordActivePaint
+                    val useEnhancedGlow = karaokeEnhancedGlow && !isDarkActiveInk
+                    val activeGlyphPaint = if (useEnhancedGlow) wordKaraokeCrispPaint else wordActivePaint
 
                     // Draw prior completed visual lines (0 until activeLineIdx) fully highlighted
                     for (prevIdx in 0 until activeLineIdx) {
@@ -1615,12 +1630,16 @@ class MinimalOverlayView(
 
                     val activeLine = currentLayoutLines[activeLineIdx]
                     val activeDrawY = activeLine.baselineY - currentScrollY + incomingOffsetY
-                    val linePeakEnv = HudVisualSpecs.computeWordLuminousEnvelope(
-                        startMs = activeLineStart,
-                        endMs = activeLineStart + activeLineDuration,
-                        currentPositionMs = posMs,
-                        progress = lineProgress
-                    )
+                    val linePeakEnv = if (useEnhancedGlow) {
+                        HudVisualSpecs.computeWordLuminousEnvelope(
+                            startMs = activeLineStart,
+                            endMs = activeLineStart + activeLineDuration,
+                            currentPositionMs = posMs,
+                            progress = lineProgress
+                        )
+                    } else {
+                        0f
+                    }
                     when {
                         lineProgress <= 0f -> {
                             for (wIdx in 0 until activeLine.words.size) {

@@ -184,6 +184,7 @@ data class UserPreferences(
     val blurRevealSpeed: Float = 1.0f, // 0.5x (Slow) to 1.5x (Fast)
     val karaokeSpeed: Float = 1.0f, // 0.5x to 1.5x (Glow Sweep Speed)
     val karaokeGlowSpeed: Float = 1.0f, // 0.5x to 1.5x (Glow Sweep Speed)
+    val karaokeEnhancedGlow: Boolean = false,
     val textShadowEnabled: Boolean = true,
     val hudBackdropEnabled: Boolean = false,
     val hudBackdropStyle: HudBackdropStyle = HudBackdropStyle.BLACK,
@@ -294,6 +295,7 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
         val BLUR_REVEAL_SPEED = floatPreferencesKey("blur_reveal_speed")
         val KARAOKE_SPEED = floatPreferencesKey("karaoke_speed")
         val KARAOKE_GLOW_SPEED = floatPreferencesKey("karaoke_glow_speed")
+        val KARAOKE_ENHANCED_GLOW = booleanPreferencesKey("karaoke_enhanced_glow")
         val OVERLAY_TEXT_SHADOW = booleanPreferencesKey("overlay_text_shadow")
         val HUD_BACKDROP_ENABLED = booleanPreferencesKey("hud_backdrop_enabled")
         val HUD_BACKDROP_STYLE = stringPreferencesKey("hud_backdrop_style")
@@ -434,6 +436,7 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
                 blurRevealSpeed = (preferences[PreferencesKeys.BLUR_REVEAL_SPEED] ?: 1.0f).coerceIn(0.3f, 3.0f),
                 karaokeSpeed = (preferences[PreferencesKeys.KARAOKE_GLOW_SPEED] ?: preferences[PreferencesKeys.KARAOKE_SPEED] ?: 1.0f).coerceIn(0.5f, 1.5f),
                 karaokeGlowSpeed = (preferences[PreferencesKeys.KARAOKE_GLOW_SPEED] ?: preferences[PreferencesKeys.KARAOKE_SPEED] ?: 1.0f).coerceIn(0.5f, 1.5f),
+                karaokeEnhancedGlow = preferences[PreferencesKeys.KARAOKE_ENHANCED_GLOW] ?: false,
                 textShadowEnabled = preferences[PreferencesKeys.OVERLAY_TEXT_SHADOW] ?: true,
                 hudBackdropEnabled = preferences[PreferencesKeys.HUD_BACKDROP_ENABLED] ?: false,
                 hudBackdropStyle = HudBackdropStyle.fromName(preferences[PreferencesKeys.HUD_BACKDROP_STYLE]),
@@ -545,6 +548,10 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
 
     suspend fun setKaraokeGlowSpeed(speed: Float) {
         setKaraokeSpeed(speed)
+    }
+
+    suspend fun setKaraokeEnhancedGlow(enabled: Boolean) {
+        dataStore.edit { it[PreferencesKeys.KARAOKE_ENHANCED_GLOW] = enabled }
     }
 
     suspend fun setAppleMusicStyle(enabled: Boolean) {
@@ -1135,6 +1142,7 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
                 prefs[PreferencesKeys.BLUR_REVEAL_SPEED] = appSettings.blurRevealSpeed.coerceIn(0.3f, 3.0f)
                 prefs[PreferencesKeys.KARAOKE_SPEED] = safeKaraoke
                 prefs[PreferencesKeys.KARAOKE_GLOW_SPEED] = safeKaraoke
+                prefs[PreferencesKeys.KARAOKE_ENHANCED_GLOW] = appSettings.karaokeEnhancedGlow
                 prefs[PreferencesKeys.GLOBAL_OFFSET_MS] = appSettings.globalOffsetMs.coerceIn(-60_000L, 60_000L)
 
                 // Restore per-track timing offsets safely (bounded and prefixed with "offset_")
@@ -1296,6 +1304,7 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
             blurRevealSpeed = (raw[PreferencesKeys.BLUR_REVEAL_SPEED] ?: 1.0f).coerceIn(0.3f, 3.0f),
             karaokeSpeed = karaoke,
             karaokeGlowSpeed = karaoke,
+            karaokeEnhancedGlow = raw[PreferencesKeys.KARAOKE_ENHANCED_GLOW] ?: false,
             globalOffsetMs = raw[PreferencesKeys.GLOBAL_OFFSET_MS] ?: 0L,
             trackOffsets = offsets
         )

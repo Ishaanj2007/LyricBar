@@ -136,6 +136,7 @@ data class BackupAppSettingsData(
     val blurRevealSpeed: Float = 1.0f,
     val karaokeSpeed: Float = 1.0f,
     val karaokeGlowSpeed: Float = 1.0f,
+    val karaokeEnhancedGlow: Boolean = false,
     val globalOffsetMs: Long = 0L,
     val trackOffsets: Map<String, Long> = emptyMap()
 )

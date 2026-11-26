@@ -1,6 +1,9 @@
 package com.example.ui.components
 
+import com.example.data.backup.BackupAppSettingsData
+import com.example.data.preferences.UserPreferences
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -68,5 +71,11 @@ class KaraokeLuminousGlowTest {
         val hugePeak = HudVisualSpecs.computePeakGlowRadiusPx(120f)
         assertEquals(11f, hugeRest, 0.001f)
         assertEquals(18f, hugePeak, 0.001f)
+    }
+
+    @Test
+    fun `enhanced glow preference defaults to false in preferences and app settings backup`() {
+        assertFalse(UserPreferences().karaokeEnhancedGlow)
+        assertFalse(BackupAppSettingsData().karaokeEnhancedGlow)
     }
 }

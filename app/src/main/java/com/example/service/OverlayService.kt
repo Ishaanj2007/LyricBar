@@ -580,6 +580,7 @@ class OverlayService : Service() {
                         view.blurRevealSpeed = prefs.blurRevealSpeed
                         view.karaokeSpeed = prefs.karaokeSpeed
                         view.karaokeGlowSpeed = prefs.karaokeGlowSpeed
+                        view.karaokeEnhancedGlow = prefs.karaokeEnhancedGlow
                         view.textShadowEnabled = prefs.textShadowEnabled
                         view.textAlignMode = prefs.overlayTextAlign
                         view.animationStyle = prefs.animationStyle
