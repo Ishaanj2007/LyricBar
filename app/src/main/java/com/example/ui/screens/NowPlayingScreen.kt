@@ -13,6 +13,7 @@ import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -44,6 +45,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
@@ -133,8 +135,31 @@ internal data class NowPlayingLyricsCardState(
     val prevLine: String?,
     val primaryLine: String,
     val secondaryLine: String?,
-    val showInstrumentalWaveform: Boolean
+    val showInstrumentalWaveform: Boolean,
+    val trackKey: String = "",
+    val activeLineIndex: Int = -1,
+    val isLiveLyricMode: Boolean = false
 )
+
+/**
+ * Determines the vertical rolling direction for Now Playing Live Lyrics transitions:
+ * - `+1`: forward advance or forward seek (roll upward, incoming enters from below)
+ * - `-1`: backward seek (roll downward, incoming enters from above)
+ * - `0`: track switch, non-live state change, or unchanged index (clean crossfade without roll)
+ */
+internal fun resolveLyricsRollDirection(
+    previous: NowPlayingLyricsCardState,
+    next: NowPlayingLyricsCardState
+): Int {
+    if (!previous.isLiveLyricMode || !next.isLiveLyricMode) return 0
+    if (previous.trackKey != next.trackKey) return 0
+    if (previous.activeLineIndex < 0 || next.activeLineIndex < 0) return 0
+    return when {
+        next.activeLineIndex > previous.activeLineIndex -> 1
+        next.activeLineIndex < previous.activeLineIndex -> -1
+        else -> 0
+    }
+}
 
 /**
  * Responsive layout metrics computed dynamically from available window constraints and font scale.
@@ -330,7 +355,9 @@ internal fun resolveNowPlayingLyricsCardState(
     isSynced: Boolean,
     activeLyric: String?,
     prevLyric: String?,
-    nextLyric: String?
+    nextLyric: String?,
+    trackKey: String = track?.identityKey ?: track?.key.orEmpty(),
+    activeLineIndex: Int = -1
 ): NowPlayingLyricsCardState {
     return when {
         !hasSession && track == null -> {
@@ -340,7 +367,10 @@ internal fun resolveNowPlayingLyricsCardState(
                 prevLine = null,
                 primaryLine = "No active music session",
                 secondaryLine = "Play music on Spotify, YouTube Music, or any media player",
-                showInstrumentalWaveform = false
+                showInstrumentalWaveform = false,
+                trackKey = trackKey,
+                activeLineIndex = -1,
+                isLiveLyricMode = false
             )
         }
         !hasSession && track != null -> {
@@ -350,7 +380,10 @@ internal fun resolveNowPlayingLyricsCardState(
                 prevLine = null,
                 primaryLine = "Media session disconnected",
                 secondaryLine = "Resume playback in ${track.sourceAppName.ifBlank { "your music player" }} to sync lyrics",
-                showInstrumentalWaveform = false
+                showInstrumentalWaveform = false,
+                trackKey = trackKey,
+                activeLineIndex = -1,
+                isLiveLyricMode = false
             )
         }
         isLoadingLyrics -> {
@@ -363,7 +396,10 @@ internal fun resolveNowPlayingLyricsCardState(
                     .filter { it.isNotBlank() }
                     .joinToString(" — ")
                     .ifBlank { "Checking online providers…" },
-                showInstrumentalWaveform = false
+                showInstrumentalWaveform = false,
+                trackKey = trackKey,
+                activeLineIndex = -1,
+                isLiveLyricMode = false
             )
         }
         lyrics == null || !hasValidLyrics -> {
@@ -373,7 +409,10 @@ internal fun resolveNowPlayingLyricsCardState(
                 prevLine = null,
                 primaryLine = "No lyrics found for this track",
                 secondaryLine = "Tap Full Lyrics to search or import .lrc",
-                showInstrumentalWaveform = false
+                showInstrumentalWaveform = false,
+                trackKey = trackKey,
+                activeLineIndex = -1,
+                isLiveLyricMode = false
             )
         }
         isSynced -> {
@@ -394,7 +433,10 @@ internal fun resolveNowPlayingLyricsCardState(
                     prevLine = null,
                     primaryLine = validActive ?: "♪ Instrumental ♪",
                     secondaryLine = "Playback paused — resume to continue live sync",
-                    showInstrumentalWaveform = validActive == null
+                    showInstrumentalWaveform = validActive == null,
+                    trackKey = trackKey,
+                    activeLineIndex = activeLineIndex,
+                    isLiveLyricMode = false
                 )
             } else if (validActive != null) {
                 NowPlayingLyricsCardState(
@@ -403,7 +445,10 @@ internal fun resolveNowPlayingLyricsCardState(
                     prevLine = validPrev,
                     primaryLine = validActive,
                     secondaryLine = validNext,
-                    showInstrumentalWaveform = false
+                    showInstrumentalWaveform = false,
+                    trackKey = trackKey,
+                    activeLineIndex = activeLineIndex,
+                    isLiveLyricMode = true
                 )
             } else {
                 NowPlayingLyricsCardState(
@@ -412,7 +457,10 @@ internal fun resolveNowPlayingLyricsCardState(
                     prevLine = null,
                     primaryLine = "♪ Instrumental ♪",
                     secondaryLine = "Lyrics will resume with vocals...",
-                    showInstrumentalWaveform = true
+                    showInstrumentalWaveform = true,
+                    trackKey = trackKey,
+                    activeLineIndex = -1,
+                    isLiveLyricMode = false
                 )
             }
         }
@@ -432,7 +480,10 @@ internal fun resolveNowPlayingLyricsCardState(
                 prevLine = null,
                 primaryLine = firstLine,
                 secondaryLine = "Tap Full Lyrics to read all lines",
-                showInstrumentalWaveform = false
+                showInstrumentalWaveform = false,
+                trackKey = trackKey,
+                activeLineIndex = -1,
+                isLiveLyricMode = false
             )
         }
     }
@@ -506,16 +557,14 @@ fun NowPlayingScreen(
     val coroutineScope = rememberCoroutineScope()
     val state by playbackManager.playbackState.collectAsStateWithLifecycle()
     val activeLyric by playbackManager.activeLyricLine.collectAsStateWithLifecycle()
-    val activeLyricObj by playbackManager.activeLyricObject.collectAsStateWithLifecycle()
+    val activeIndex by playbackManager.activeLyricIndex.collectAsStateWithLifecycle()
     val currentLyrics by playbackManager.currentLyrics.collectAsStateWithLifecycle()
     val isLoadingLyrics by playbackManager.isLoadingLyrics.collectAsStateWithLifecycle()
     val track = state.track
 
-    val activeIdx = remember(activeLyricObj, currentLyrics) {
+    val activeIdx = remember(activeIndex, currentLyrics) {
         val lines = currentLyrics?.lines
-        if (lines != null && activeLyricObj != null) {
-            lines.indexOfFirst { it == activeLyricObj }
-        } else -1
+        if (lines != null && activeIndex in lines.indices) activeIndex else -1
     }
 
     val prevLyric = remember(activeIdx, currentLyrics) {
@@ -660,9 +709,11 @@ fun NowPlayingScreen(
         }
     }
 
+    val trackKey = track?.identityKey ?: track?.key.orEmpty()
     val lyricsCardState = remember(
         hasSession,
         isPlaying,
+        trackKey,
         track,
         isLoadingLyrics,
         lyrics,
@@ -670,7 +721,8 @@ fun NowPlayingScreen(
         isSynced,
         activeLyric,
         prevLyric,
-        nextLyric
+        nextLyric,
+        activeIdx
     ) {
         resolveNowPlayingLyricsCardState(
             hasSession = hasSession,
@@ -682,7 +734,9 @@ fun NowPlayingScreen(
             isSynced = isSynced,
             activeLyric = activeLyric,
             prevLyric = prevLyric,
-            nextLyric = nextLyric
+            nextLyric = nextLyric,
+            trackKey = trackKey,
+            activeLineIndex = activeIdx
         )
     }
 
@@ -1482,6 +1536,11 @@ private fun NowPlayingSongInfoSection(
     }
 }
 
+private data class LiveLyricsReelTarget(
+    val cardState: NowPlayingLyricsCardState,
+    val isCompact: Boolean
+)
+
 @Composable
 private fun NowPlayingLiveLyricsPanel(
     cardState: NowPlayingLyricsCardState,
@@ -1497,6 +1556,9 @@ private fun NowPlayingLiveLyricsPanel(
         primaryColor
     } else {
         Color.White.copy(alpha = 0.68f)
+    }
+    val reelTarget = remember(cardState, isCompact) {
+        LiveLyricsReelTarget(cardState = cardState, isCompact = isCompact)
     }
 
     FrostedCard(
@@ -1578,86 +1640,109 @@ private fun NowPlayingLiveLyricsPanel(
 
             Spacer(modifier = Modifier.height(if (isCompact) 4.dp else 6.dp))
 
-            // Preceding lyric line (only composed when non-compact so empty states reserve zero space)
-            if (!isCompact) {
-                AnimatedContent(
-                    targetState = cardState.prevLine,
-                    transitionSpec = {
-                        (fadeIn(animationSpec = tween(180, easing = LinearOutSlowInEasing))
-                            .togetherWith(fadeOut(animationSpec = tween(140, easing = FastOutLinearInEasing))))
-                            .using(SizeTransform(clip = false))
-                    },
-                    contentAlignment = Alignment.Center,
-                    label = "prev_lyric_transition"
-                ) { prevText ->
-                    if (!prevText.isNullOrBlank()) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                text = prevText,
-                                style = LyricBarTypography.contextualLyricStyle(
-                                    fontOption = userPreferences.selectedFont,
-                                    fontSize = 12.5.sp,
-                                    color = Color.White.copy(alpha = 0.50f)
-                                ),
-                                textAlign = TextAlign.Center,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
+            // Unified 3-line vertical rolling lyric reel:
+            // Moves previous, active, and upcoming lines as one coordinated motion rather than
+            // three disconnected text swaps, while crossfading cleanly on track/mode resets.
+            AnimatedContent(
+                targetState = reelTarget,
+                contentKey = { target ->
+                    val st = target.cardState
+                    if (st.isLiveLyricMode) {
+                        "${st.trackKey}|live|${st.activeLineIndex}|${st.prevLine}|${st.primaryLine}|${st.secondaryLine}|${target.isCompact}"
+                    } else {
+                        "${st.trackKey}|state|${st.badgeText}|${st.primaryLine}|${st.secondaryLine}|${target.isCompact}"
+                    }
+                },
+                transitionSpec = {
+                    val direction = resolveLyricsRollDirection(
+                        previous = initialState.cardState,
+                        next = targetState.cardState
+                    )
+                    when {
+                        direction > 0 -> {
+                            (fadeIn(animationSpec = tween(440, easing = FastOutSlowInEasing)) +
+                                slideInVertically(animationSpec = tween(460, easing = FastOutSlowInEasing)) { height ->
+                                    (height / 3).coerceAtLeast(1)
+                                })
+                                .togetherWith(
+                                    fadeOut(animationSpec = tween(360, easing = FastOutSlowInEasing)) +
+                                        slideOutVertically(animationSpec = tween(460, easing = FastOutSlowInEasing)) { height ->
+                                            -(height / 3).coerceAtLeast(1)
+                                        }
+                                )
+                                .using(SizeTransform(clip = true))
+                        }
+                        direction < 0 -> {
+                            (fadeIn(animationSpec = tween(440, easing = FastOutSlowInEasing)) +
+                                slideInVertically(animationSpec = tween(460, easing = FastOutSlowInEasing)) { height ->
+                                    -(height / 3).coerceAtLeast(1)
+                                })
+                                .togetherWith(
+                                    fadeOut(animationSpec = tween(360, easing = FastOutSlowInEasing)) +
+                                        slideOutVertically(animationSpec = tween(460, easing = FastOutSlowInEasing)) { height ->
+                                            (height / 3).coerceAtLeast(1)
+                                        }
+                                )
+                                .using(SizeTransform(clip = true))
+                        }
+                        else -> {
+                            (fadeIn(animationSpec = tween(320, easing = FastOutSlowInEasing))
+                                .togetherWith(fadeOut(animationSpec = tween(240, easing = FastOutSlowInEasing))))
+                                .using(SizeTransform(clip = false))
                         }
                     }
-                }
-            }
-
-            // Primary active lyric or state headline
-            AnimatedContent(
-                targetState = cardState.primaryLine,
-                transitionSpec = {
-                    ((fadeIn(animationSpec = tween(220, easing = LinearOutSlowInEasing)) +
-                        slideInVertically(animationSpec = tween(220, easing = LinearOutSlowInEasing)) { height -> height / 4 })
-                        .togetherWith(
-                            fadeOut(animationSpec = tween(160, easing = FastOutLinearInEasing)) +
-                                slideOutVertically(animationSpec = tween(160, easing = FastOutLinearInEasing)) { height -> -height / 4 }
-                        ))
-                        .using(SizeTransform(clip = false))
                 },
                 contentAlignment = Alignment.Center,
-                label = "primary_lyric_transition"
-            ) { lyricText ->
-                Text(
-                    text = lyricText,
-                    style = LyricBarTypography.activeLyricStyle(
-                        fontOption = userPreferences.selectedFont,
-                        fontSize = activeLyricFontSizeSp.sp,
-                        color = Color.White
-                    ),
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("now_playing_active_lyric_text")
-                )
-            }
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clipToBounds(),
+                label = "live_lyrics_vertical_reel"
+            ) { target ->
+                val state = target.cardState
+                val compact = target.isCompact
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    // Preceding lyric slot (space-reserved in live non-compact mode to avoid card height jumps)
+                    if (!compact && (!state.prevLine.isNullOrBlank() || state.isLiveLyricMode)) {
+                        Text(
+                            text = state.prevLine ?: "",
+                            style = LyricBarTypography.contextualLyricStyle(
+                                fontOption = userPreferences.selectedFont,
+                                fontSize = 12.5.sp,
+                                color = Color.White.copy(alpha = 0.50f)
+                            ),
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                    }
 
-            // Secondary supporting lyric or status line
-            AnimatedContent(
-                targetState = cardState.secondaryLine,
-                transitionSpec = {
-                    (fadeIn(animationSpec = tween(200, easing = LinearOutSlowInEasing))
-                        .togetherWith(fadeOut(animationSpec = tween(150, easing = FastOutLinearInEasing))))
-                        .using(SizeTransform(clip = false))
-                },
-                contentAlignment = Alignment.Center,
-                label = "secondary_lyric_transition"
-            ) { secText ->
-                if (!secText.isNullOrBlank()) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    // Primary active lyric or state headline
+                    Text(
+                        text = state.primaryLine,
+                        style = LyricBarTypography.activeLyricStyle(
+                            fontOption = userPreferences.selectedFont,
+                            fontSize = activeLyricFontSizeSp.sp,
+                            color = Color.White
+                        ),
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("now_playing_active_lyric_text")
+                    )
+
+                    // Upcoming lyric or supporting status slot (space-reserved in live mode)
+                    if (!state.secondaryLine.isNullOrBlank() || state.isLiveLyricMode) {
                         Spacer(modifier = Modifier.height(3.dp))
                         Text(
-                            text = secText,
+                            text = state.secondaryLine ?: "",
                             style = LyricBarTypography.contextualLyricStyle(
                                 fontOption = userPreferences.selectedFont,
                                 fontSize = 13.sp,

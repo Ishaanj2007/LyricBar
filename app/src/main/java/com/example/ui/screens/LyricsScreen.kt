@@ -11,6 +11,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -22,6 +23,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
@@ -187,16 +189,12 @@ fun LyricsScreen(
     val isDragged by listState.interactionSource.collectIsDraggedAsState()
     var isProgrammaticScroll by remember { mutableStateOf(false) }
     var userScrolledAway by rememberSaveable { mutableStateOf(false) }
+    var resumeScrollNonce by remember { mutableIntStateOf(0) }
+    var lastScrolledLyricsIdentity by remember { mutableStateOf<com.example.data.model.ParsedLyrics?>(null) }
 
     // Suspend auto-following when the user manually drags the lyric list
     LaunchedEffect(isDragged) {
         if (isDragged) {
-            userScrolledAway = true
-        }
-    }
-
-    LaunchedEffect(listState.isScrollInProgress) {
-        if (listState.isScrollInProgress && isDragged && !isProgrammaticScroll) {
             userScrolledAway = true
         }
     }
@@ -207,15 +205,62 @@ fun LyricsScreen(
         userScrolledAway = false
     }
 
-    // Auto-scroll logic: smoothly centers the active line in reading view when following is enabled.
-    // Does NOT reset userScrolledAway on line changes, allowing the user to read earlier/upcoming lyrics uninterrupted.
-    LaunchedEffect(activeIndex, userScrolledAway) {
-        if (!userScrolledAway && activeIndex in 0 until (currentLyrics?.lines?.size ?: 0)) {
-            val targetScroll = (activeIndex - 2).coerceAtLeast(0)
-            if (listState.firstVisibleItemIndex != targetScroll) {
+    // Single-owner auto-scroll coordinator: positions active line in upper-third reading area,
+    // deduplicates same-target scrolls, resets cleanly on track/lyrics swap, and avoids competing jobs.
+    LaunchedEffect(activeIndex, userScrolledAway, currentLyrics, resumeScrollNonce) {
+        val lyrics = currentLyrics
+        val isLyricsReset = lyrics !== lastScrolledLyricsIdentity
+        lastScrolledLyricsIdentity = lyrics
+        if (userScrolledAway) return@LaunchedEffect
+
+        val totalLines = lyrics?.lines?.size ?: 0
+        val layoutInfo = listState.layoutInfo
+        val visibleItem = layoutInfo.visibleItemsInfo.firstOrNull { it.index == activeIndex }
+        val usableHeight = (layoutInfo.viewportSize.height -
+            layoutInfo.beforeContentPadding -
+            layoutInfo.afterContentPadding).coerceAtLeast(0)
+
+        val action = computeLyricsAutoScrollAction(
+            activeIndex = activeIndex,
+            totalLines = totalLines,
+            usableViewportHeightPx = usableHeight,
+            visibleItemOffsetPx = visibleItem?.offset,
+            visibleItemSizePx = visibleItem?.size,
+            canScrollBackward = listState.canScrollBackward,
+            canScrollForward = listState.canScrollForward,
+            isTrackOrLyricsReset = isLyricsReset
+        )
+
+        when (action) {
+            LyricsAutoScrollAction.None -> Unit
+            is LyricsAutoScrollAction.SnapToTop -> {
                 isProgrammaticScroll = true
                 try {
-                    listState.animateScrollToItem(targetScroll)
+                    listState.scrollToItem(action.index)
+                } catch (_: Exception) {
+                } finally {
+                    isProgrammaticScroll = false
+                }
+            }
+            is LyricsAutoScrollAction.ScrollByDelta -> {
+                isProgrammaticScroll = true
+                try {
+                    listState.animateScrollBy(
+                        value = action.deltaPx,
+                        animationSpec = tween(durationMillis = 560, easing = FastOutSlowInEasing)
+                    )
+                } catch (_: Exception) {
+                } finally {
+                    isProgrammaticScroll = false
+                }
+            }
+            is LyricsAutoScrollAction.AnimateToItem -> {
+                isProgrammaticScroll = true
+                try {
+                    listState.animateScrollToItem(
+                        index = action.index,
+                        scrollOffset = action.scrollOffsetPx
+                    )
                 } catch (_: Exception) {
                 } finally {
                     isProgrammaticScroll = false
@@ -266,16 +311,7 @@ fun LyricsScreen(
     val onImportClick: () -> Unit = { filePicker.launch(arrayOf("text/*", "*/*")) }
     val onResumeLiveClick: () -> Unit = {
         userScrolledAway = false
-        val targetScroll = (activeIndex - 2).coerceAtLeast(0)
-        coroutineScope.launch {
-            isProgrammaticScroll = true
-            try {
-                listState.animateScrollToItem(targetScroll)
-            } catch (_: Exception) {
-            } finally {
-                isProgrammaticScroll = false
-            }
-        }
+        resumeScrollNonce++
     }
 
     Box(
@@ -1623,6 +1659,54 @@ private fun LyricsEmptyOrLoadingState(
     }
 }
 
+internal sealed interface LyricsAutoScrollAction {
+    data object None : LyricsAutoScrollAction
+    data class ScrollByDelta(val deltaPx: Float) : LyricsAutoScrollAction
+    data class AnimateToItem(val index: Int, val scrollOffsetPx: Int) : LyricsAutoScrollAction
+    data class SnapToTop(val index: Int = 0) : LyricsAutoScrollAction
+}
+
+/**
+ * Computes the scroll action required to keep [activeIndex] comfortably positioned in the
+ * upper-third reading zone without overlapping bottom player controls or issuing redundant scrolls.
+ */
+internal fun computeLyricsAutoScrollAction(
+    activeIndex: Int,
+    totalLines: Int,
+    usableViewportHeightPx: Int,
+    visibleItemOffsetPx: Int?,
+    visibleItemSizePx: Int?,
+    canScrollBackward: Boolean,
+    canScrollForward: Boolean,
+    isTrackOrLyricsReset: Boolean
+): LyricsAutoScrollAction {
+    if (totalLines <= 0) return LyricsAutoScrollAction.None
+    if (activeIndex !in 0 until totalLines) {
+        return if (isTrackOrLyricsReset) LyricsAutoScrollAction.SnapToTop(0) else LyricsAutoScrollAction.None
+    }
+    if (isTrackOrLyricsReset && activeIndex == 0) {
+        return LyricsAutoScrollAction.SnapToTop(0)
+    }
+
+    val safeUsableHeight = usableViewportHeightPx.coerceAtLeast(0)
+    val baseAnchorPx = (safeUsableHeight * 0.28f).roundToInt()
+    val itemAdjustmentPx = ((visibleItemSizePx ?: 0) * 0.12f).roundToInt()
+    val desiredOffsetPx = (baseAnchorPx - itemAdjustmentPx).coerceAtLeast(0)
+
+    if (visibleItemOffsetPx != null) {
+        val deltaPx = visibleItemOffsetPx - desiredOffsetPx
+        if (kotlin.math.abs(deltaPx) <= 4) return LyricsAutoScrollAction.None
+        if (deltaPx < 0 && !canScrollBackward) return LyricsAutoScrollAction.None
+        if (deltaPx > 0 && !canScrollForward) return LyricsAutoScrollAction.None
+        return LyricsAutoScrollAction.ScrollByDelta(deltaPx.toFloat())
+    }
+
+    return LyricsAutoScrollAction.AnimateToItem(
+        index = activeIndex,
+        scrollOffsetPx = -desiredOffsetPx
+    )
+}
+
 @Composable
 private fun LyricsLinesLazyColumn(
     lyrics: com.example.data.model.ParsedLyrics,
@@ -1646,6 +1730,9 @@ private fun LyricsLinesLazyColumn(
         TextAlign.End, TextAlign.Right -> Arrangement.End
         else -> Arrangement.Center
     }
+    val resolvedFontFamily = remember(userPreferences.selectedFont) {
+        com.example.ui.theme.getFontFamily(userPreferences.selectedFont)
+    }
 
     LazyColumn(
         state = listState,
@@ -1667,24 +1754,24 @@ private fun LyricsLinesLazyColumn(
             }
             val alpha by animateFloatAsState(
                 targetValue = targetAlpha,
-                animationSpec = tween(durationMillis = 200),
+                animationSpec = tween(durationMillis = 340, easing = FastOutSlowInEasing),
                 label = "lyric_alpha"
             )
             val lyricTextColor by animateColorAsState(
                 targetValue = if (isActive) Color.White else Color.White.copy(alpha = alpha),
-                animationSpec = tween(durationMillis = 220),
+                animationSpec = tween(durationMillis = 360, easing = FastOutSlowInEasing),
                 label = "lyric_text_color"
             )
             val lineScale by animateFloatAsState(
                 targetValue = if (isActive) 1.02f else 1.0f,
-                animationSpec = tween(durationMillis = 200),
+                animationSpec = tween(durationMillis = 340, easing = FastOutSlowInEasing),
                 label = "lyric_line_scale"
             )
 
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = if (isActive) 3.dp else 2.dp)
+                    .padding(vertical = 2.dp)
                     .graphicsLayer {
                         scaleX = lineScale
                         scaleY = lineScale
@@ -1710,7 +1797,7 @@ private fun LyricsLinesLazyColumn(
                         .fillMaxWidth()
                         .padding(
                             horizontal = 14.dp,
-                            vertical = if (isActive) 8.dp else 5.dp
+                            vertical = 7.dp
                         ),
                     horizontalAlignment = lineAlignment
                 ) {
@@ -1745,7 +1832,7 @@ private fun LyricsLinesLazyColumn(
                                 karaokeGlowSpeed = userPreferences.karaokeGlowSpeed,
                                 fontSize = if (userPreferences.appleMusicStyle) 26.sp else 23.sp,
                                 lineHeight = if (userPreferences.appleMusicStyle) 34.sp else 30.sp,
-                                fontFamily = com.example.ui.theme.getFontFamily(userPreferences.selectedFont),
+                                fontFamily = resolvedFontFamily,
                                 onSurfaceColor = Color.White,
                                 themePrimary = themePrimary,
                                 textAlign = textAlign,
@@ -1758,7 +1845,7 @@ private fun LyricsLinesLazyColumn(
                                 fontWeight = if (isActive) FontWeight.ExtraBold else FontWeight.Bold,
                                 color = lyricTextColor,
                                 lineHeight = if (isActive) 34.sp else 26.sp,
-                                fontFamily = com.example.ui.theme.getFontFamily(userPreferences.selectedFont),
+                                fontFamily = resolvedFontFamily,
                                 textAlign = textAlign,
                                 modifier = Modifier.weight(1f, fill = false)
                             )

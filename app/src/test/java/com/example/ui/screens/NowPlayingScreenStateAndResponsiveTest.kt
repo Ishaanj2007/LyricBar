@@ -269,4 +269,140 @@ class NowPlayingScreenStateAndResponsiveTest {
         assertEquals("1:02:05", formatNowPlayingTimestamp(3_725_000L))
         assertEquals("--:--", formatNowPlayingTimestamp(-1L))
     }
+
+    @Test
+    fun `vertical rolling direction classifies forward, backward, repeated lines, and resets safely`() {
+        val line2 = NowPlayingLyricsCardState(
+            badgeText = "LIVE LYRICS",
+            isBadgeAccent = true,
+            prevLine = "Line 1",
+            primaryLine = "Yeah",
+            secondaryLine = "Yeah",
+            showInstrumentalWaveform = false,
+            trackKey = "track_a",
+            activeLineIndex = 2,
+            isLiveLyricMode = true
+        )
+        val line3Repeated = line2.copy(
+            prevLine = "Yeah",
+            primaryLine = "Yeah",
+            secondaryLine = "Line 4",
+            activeLineIndex = 3
+        )
+        val line10ForwardSeek = line2.copy(
+            prevLine = "Line 9",
+            primaryLine = "Line 10",
+            secondaryLine = "Line 11",
+            activeLineIndex = 10
+        )
+        val otherTrack = line3Repeated.copy(
+            trackKey = "track_b",
+            activeLineIndex = 0
+        )
+        val pausedState = line3Repeated.copy(
+            badgeText = "LYRICS PAUSED",
+            isBadgeAccent = false,
+            isLiveLyricMode = false
+        )
+
+        assertEquals(1, resolveLyricsRollDirection(line2, line3Repeated))
+        assertEquals(1, resolveLyricsRollDirection(line2, line10ForwardSeek))
+        assertEquals(-1, resolveLyricsRollDirection(line10ForwardSeek, line2))
+        assertEquals(0, resolveLyricsRollDirection(line2, line2))
+        assertEquals(0, resolveLyricsRollDirection(line2, otherTrack))
+        assertEquals(0, resolveLyricsRollDirection(line3Repeated, pausedState))
+        assertEquals(0, resolveLyricsRollDirection(pausedState, line3Repeated))
+    }
+
+    @Test
+    fun `full lyrics auto-scroll action positions reading zone and respects bounds and resets`() {
+        // Empty lyrics -> no scroll
+        assertEquals(
+            LyricsAutoScrollAction.None,
+            computeLyricsAutoScrollAction(
+                activeIndex = 0,
+                totalLines = 0,
+                usableViewportHeightPx = 1000,
+                visibleItemOffsetPx = null,
+                visibleItemSizePx = null,
+                canScrollBackward = false,
+                canScrollForward = false,
+                isTrackOrLyricsReset = false
+            )
+        )
+
+        // Track reset at index 0 -> SnapToTop
+        assertEquals(
+            LyricsAutoScrollAction.SnapToTop(0),
+            computeLyricsAutoScrollAction(
+                activeIndex = 0,
+                totalLines = 30,
+                usableViewportHeightPx = 1000,
+                visibleItemOffsetPx = 500,
+                visibleItemSizePx = 100,
+                canScrollBackward = true,
+                canScrollForward = true,
+                isTrackOrLyricsReset = true
+            )
+        )
+
+        // Visible item below anchor (usable=1000 -> anchor=280, size=100 -> adj=12 -> desired=268; item at 468 -> delta=+200)
+        val forwardDelta = computeLyricsAutoScrollAction(
+            activeIndex = 8,
+            totalLines = 30,
+            usableViewportHeightPx = 1000,
+            visibleItemOffsetPx = 468,
+            visibleItemSizePx = 100,
+            canScrollBackward = true,
+            canScrollForward = true,
+            isTrackOrLyricsReset = false
+        )
+        assertTrue(forwardDelta is LyricsAutoScrollAction.ScrollByDelta)
+        assertEquals(200f, (forwardDelta as LyricsAutoScrollAction.ScrollByDelta).deltaPx, 0.01f)
+
+        // Within 4px deadband -> None
+        assertEquals(
+            LyricsAutoScrollAction.None,
+            computeLyricsAutoScrollAction(
+                activeIndex = 8,
+                totalLines = 30,
+                usableViewportHeightPx = 1000,
+                visibleItemOffsetPx = 270,
+                visibleItemSizePx = 100,
+                canScrollBackward = true,
+                canScrollForward = true,
+                isTrackOrLyricsReset = false
+            )
+        )
+
+        // At top edge (cannot scroll backward) -> None
+        assertEquals(
+            LyricsAutoScrollAction.None,
+            computeLyricsAutoScrollAction(
+                activeIndex = 0,
+                totalLines = 30,
+                usableViewportHeightPx = 1000,
+                visibleItemOffsetPx = 20,
+                visibleItemSizePx = 100,
+                canScrollBackward = false,
+                canScrollForward = true,
+                isTrackOrLyricsReset = false
+            )
+        )
+
+        // Off-screen target (seek) -> AnimateToItem with negative anchor offset
+        assertEquals(
+            LyricsAutoScrollAction.AnimateToItem(index = 22, scrollOffsetPx = -280),
+            computeLyricsAutoScrollAction(
+                activeIndex = 22,
+                totalLines = 30,
+                usableViewportHeightPx = 1000,
+                visibleItemOffsetPx = null,
+                visibleItemSizePx = null,
+                canScrollBackward = true,
+                canScrollForward = true,
+                isTrackOrLyricsReset = false
+            )
+        )
+    }
 }
