@@ -51,14 +51,18 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -1707,6 +1711,30 @@ internal fun computeLyricsAutoScrollAction(
     )
 }
 
+/**
+ * Tunes [themePrimary] into a softly luminous, balanced glow colour for the active lyric line
+ * so dark or highly saturated dynamic accents remain legible and subtle on dark surfaces.
+ */
+internal fun resolveActiveLyricGlowColor(themePrimary: Color): Color {
+    return lerp(themePrimary.copy(alpha = 1f), Color.White, 0.20f).copy(alpha = 1f)
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawGlowHaloPass(
+    glowColor: Color,
+    glowProgress: Float,
+    spreadPx: Float,
+    baseAlpha: Float,
+    baseCornerPx: Float
+) {
+    val corner = baseCornerPx + spreadPx
+    drawRoundRect(
+        color = glowColor.copy(alpha = baseAlpha * glowProgress),
+        topLeft = Offset(-spreadPx, -spreadPx),
+        size = Size(size.width + spreadPx * 2f, size.height + spreadPx * 2f),
+        cornerRadius = CornerRadius(corner, corner)
+    )
+}
+
 @Composable
 private fun LyricsLinesLazyColumn(
     lyrics: com.example.data.model.ParsedLyrics,
@@ -1732,6 +1760,9 @@ private fun LyricsLinesLazyColumn(
     }
     val resolvedFontFamily = remember(userPreferences.selectedFont) {
         com.example.ui.theme.getFontFamily(userPreferences.selectedFont)
+    }
+    val glowColor = remember(themePrimary) {
+        resolveActiveLyricGlowColor(themePrimary)
     }
 
     LazyColumn(
@@ -1767,21 +1798,38 @@ private fun LyricsLinesLazyColumn(
                 animationSpec = tween(durationMillis = 340, easing = FastOutSlowInEasing),
                 label = "lyric_line_scale"
             )
+            val glowProgress by animateFloatAsState(
+                targetValue = if (isActive) 1f else 0f,
+                animationSpec = tween(durationMillis = 340, easing = FastOutSlowInEasing),
+                label = "lyric_active_glow"
+            )
 
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 2.dp)
+                    .padding(horizontal = 8.dp, vertical = 3.dp)
                     .graphicsLayer {
                         scaleX = lineScale
                         scaleY = lineScale
                     }
+                    .drawBehind {
+                        if (glowProgress > 0.005f) {
+                            val baseCornerPx = 14.dp.toPx()
+                            drawGlowHaloPass(glowColor, glowProgress, 1.75.dp.toPx(), 0.11f, baseCornerPx)
+                            drawGlowHaloPass(glowColor, glowProgress, 3.5.dp.toPx(), 0.065f, baseCornerPx)
+                            drawGlowHaloPass(glowColor, glowProgress, 5.5.dp.toPx(), 0.032f, baseCornerPx)
+                            drawGlowHaloPass(glowColor, glowProgress, 7.5.dp.toPx(), 0.014f, baseCornerPx)
+                        }
+                    }
                     .clip(RoundedCornerShape(14.dp))
                     .then(
-                        if (isActive) {
+                        if (glowProgress > 0.005f) {
+                            val borderColor = lerp(Color.White, glowColor, 0.45f)
+                                .copy(alpha = 0.26f * glowProgress)
                             Modifier
-                                .background(Color.White.copy(alpha = 0.10f))
-                                .border(BorderStroke(0.75.dp, Color.White.copy(alpha = 0.18f)), RoundedCornerShape(14.dp))
+                                .background(Color.White.copy(alpha = 0.08f * glowProgress))
+                                .background(glowColor.copy(alpha = 0.08f * glowProgress))
+                                .border(BorderStroke(0.75.dp, borderColor), RoundedCornerShape(14.dp))
                         } else {
                             Modifier
                         }
@@ -1796,7 +1844,7 @@ private fun LyricsLinesLazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(
-                            horizontal = 14.dp,
+                            horizontal = 10.dp,
                             vertical = 7.dp
                         ),
                     horizontalAlignment = lineAlignment
