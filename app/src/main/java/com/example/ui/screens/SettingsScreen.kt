@@ -3362,15 +3362,24 @@ fun SettingsScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.06f))
     ) {
-        val isTwoColumn = maxWidth >= 660.dp
+        val isTwoColumn = maxWidth >= 560.dp
+        val isWideTwoColumn = maxWidth >= 680.dp
+        val isCompactLandscapeHeight = maxHeight < 480.dp && maxWidth > maxHeight
 
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .then(if (hasBottomNavPill) Modifier.windowInsetsPadding(WindowInsets.statusBars) else Modifier)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = if (isTwoColumn) 24.dp else 20.dp, vertical = 12.dp)
-                .padding(bottom = if (hasBottomNavPill) 120.dp else 16.dp),
+                .padding(
+                    horizontal = when {
+                        isWideTwoColumn -> 24.dp
+                        isTwoColumn -> 16.dp
+                        else -> 20.dp
+                    },
+                    vertical = if (isCompactLandscapeHeight) 6.dp else 12.dp
+                )
+                .padding(bottom = if (hasBottomNavPill) 120.dp else 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Column(
@@ -3387,6 +3396,7 @@ fun SettingsScreen(
                         .padding(
                             top = if (isTwoColumn) 2.dp else 8.dp,
                             bottom = when {
+                                isCompactLandscapeHeight && showChipInlineInHeader -> 10.dp
                                 showChipInlineInHeader -> 14.dp
                                 else -> 4.dp
                             }
@@ -3451,14 +3461,15 @@ fun SettingsScreen(
 
                 if (isTwoColumn) {
                     // Two-column landscape/tablet composition (single shared vertical scroll)
+                    val columnSpacing = if (isCompactLandscapeHeight) 10.dp else 14.dp
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(if (isWideTwoColumn) 16.dp else 12.dp),
                         verticalAlignment = Alignment.Top
                     ) {
                         Column(
                             modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(14.dp)
+                            verticalArrangement = Arrangement.spacedBy(columnSpacing)
                         ) {
                             sectionOverlay()
                             sectionHudBackdrop()
@@ -3469,7 +3480,7 @@ fun SettingsScreen(
 
                         Column(
                             modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(14.dp)
+                            verticalArrangement = Arrangement.spacedBy(columnSpacing)
                         ) {
                             sectionLyricsProvider()
                             sectionTheme()

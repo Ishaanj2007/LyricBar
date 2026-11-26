@@ -236,7 +236,8 @@ internal fun computeResponsiveNowPlayingMetrics(
         if (safeH >= 540f) {
             (safeH * 0.34f).coerceIn(180f, 280f)
         } else {
-            ((safeH - 180f) * 0.92f).coerceIn(96f, 220f)
+            val fontHeightReserve = (safeFontScale - 1.0f).coerceAtLeast(0f) * 36f
+            ((safeH - 180f - fontHeightReserve) * 0.92f).coerceIn(96f, 220f)
         }
     } else {
         (safeH - nonArtworkVerticalEstimate).coerceIn(128f, 300f)
@@ -819,13 +820,13 @@ fun NowPlayingScreen(
                                 horizontal = metrics.horizontalPaddingDp.dp,
                                 vertical = if (isShortLandscape) 4.dp else 10.dp
                             ),
-                        horizontalArrangement = Arrangement.spacedBy(if (isWideLandscape) 28.dp else 18.dp),
+                        horizontalArrangement = Arrangement.spacedBy(if (isWideLandscape) 28.dp else 16.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         // Left Column: Header pinned cleanly at top, Artwork + Track Info centered in remaining space
                         Column(
                             modifier = Modifier
-                                .weight(0.44f)
+                                .weight(0.45f)
                                 .fillMaxHeight(),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
@@ -833,6 +834,7 @@ fun NowPlayingScreen(
                                 overlayEnabled = userPreferences.overlayEnabled,
                                 headerTitleSp = metrics.headerTitleSp,
                                 primaryColor = primaryColor,
+                                compact = !isWideLandscape,
                                 onToggleOverlay = toggleOverlayAction
                             )
 
@@ -902,7 +904,7 @@ fun NowPlayingScreen(
                         // Right Column: Live Lyrics Card -> Progress Bar -> Playback Controls
                         Box(
                             modifier = Modifier
-                                .weight(0.56f)
+                                .weight(0.55f)
                                 .fillMaxHeight(),
                             contentAlignment = Alignment.Center
                         ) {
@@ -1233,25 +1235,26 @@ private fun NowPlayingTopHeader(
     overlayEnabled: Boolean,
     headerTitleSp: Float,
     primaryColor: Color,
+    compact: Boolean = false,
     onToggleOverlay: (Boolean) -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 2.dp),
+            .padding(vertical = if (compact) 0.dp else 2.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
         Row(
             modifier = Modifier.weight(1f, fill = false),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(if (compact) 7.dp else 10.dp)
         ) {
             Surface(
                 shape = CircleShape,
                 color = Color.White.copy(alpha = 0.10f),
                 border = BorderStroke(0.75.dp, Color.White.copy(alpha = 0.14f)),
-                modifier = Modifier.size(36.dp)
+                modifier = Modifier.size(if (compact) 30.dp else 36.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
@@ -1259,14 +1262,14 @@ private fun NowPlayingTopHeader(
                         contentDescription = null,
                         tint = primaryColor,
                         modifier = Modifier
-                            .size(18.dp)
+                            .size(if (compact) 15.dp else 18.dp)
                             .graphicsLayer { translationX = 1.dp.toPx() }
                     )
                 }
             }
             Text(
                 text = "LyricBar",
-                fontSize = headerTitleSp.sp,
+                fontSize = if (compact) (headerTitleSp - 1f).coerceAtLeast(15.5f).sp else headerTitleSp.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = Color.White,
                 maxLines = 1,
@@ -1274,11 +1277,11 @@ private fun NowPlayingTopHeader(
             )
         }
 
-        Spacer(modifier = Modifier.width(8.dp))
+        Spacer(modifier = Modifier.width(if (compact) 6.dp else 8.dp))
 
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 8.dp)
         ) {
             val hudLabelColor by animateColorAsState(
                 targetValue = if (overlayEnabled) primaryColor else Color.White.copy(alpha = 0.65f),
@@ -1287,7 +1290,7 @@ private fun NowPlayingTopHeader(
             )
             Text(
                 text = if (overlayEnabled) "HUD On" else "HUD Off",
-                fontSize = 13.sp,
+                fontSize = if (compact) 12.sp else 13.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = hudLabelColor,
                 maxLines = 1

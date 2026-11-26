@@ -331,10 +331,14 @@ fun LyricsScreen(
             val availableWidth = maxWidth
             val availableHeight = maxHeight
             val isLandscape = availableWidth > availableHeight && (availableHeight < 540.dp || availableWidth >= 600.dp)
-            val isTwoPaneLandscape = isLandscape && availableWidth >= 560.dp
+            val isTwoPaneLandscape = isLandscape && availableWidth >= 500.dp
 
             if (isTwoPaneLandscape) {
-                val sidebarWidthFraction = if (availableWidth >= 900.dp) 0.34f else 0.37f
+                val sidebarWidthFraction = when {
+                    availableWidth >= 900.dp -> 0.34f
+                    availableWidth >= 600.dp -> 0.37f
+                    else -> 0.40f
+                }
                 val isShortHeight = availableHeight < 420.dp
                 val isWidePane = availableWidth >= 900.dp
                 val artSize = when {
@@ -352,16 +356,16 @@ fun LyricsScreen(
                             .fillMaxSize()
                             .widthIn(max = 1120.dp)
                             .padding(
-                                horizontal = if (isWidePane) 24.dp else 16.dp,
+                                horizontal = if (isWidePane) 24.dp else 14.dp,
                                 vertical = if (isShortHeight) 8.dp else 14.dp
                             ),
-                        horizontalArrangement = Arrangement.spacedBy(if (isWidePane) 20.dp else 14.dp)
+                        horizontalArrangement = Arrangement.spacedBy(if (isWidePane) 20.dp else 12.dp)
                     ) {
                         // Left Control & Metadata Sidebar
                         Column(
                             modifier = Modifier
                                 .weight(sidebarWidthFraction)
-                                .widthIn(min = 210.dp, max = 330.dp)
+                                .widthIn(min = if (availableWidth >= 600.dp) 210.dp else 196.dp, max = 330.dp)
                                 .fillMaxHeight()
                                 .verticalScroll(rememberScrollState()),
                             verticalArrangement = Arrangement.spacedBy(if (isShortHeight) 8.dp else 12.dp)
@@ -1535,8 +1539,8 @@ private fun LyricsEmptyOrLoadingState(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(
-                        horizontal = if (compact) 18.dp else 24.dp,
-                        vertical = if (compact) 16.dp else 28.dp
+                        horizontal = if (compact) 16.dp else 24.dp,
+                        vertical = if (compact) 12.dp else 28.dp
                     ),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
@@ -1544,13 +1548,13 @@ private fun LyricsEmptyOrLoadingState(
                 Surface(
                     shape = CircleShape,
                     color = themePrimary.copy(alpha = 0.15f),
-                    modifier = Modifier.size(if (compact) 48.dp else 68.dp)
+                    modifier = Modifier.size(if (compact) 42.dp else 68.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         if (isLoading) {
                             CircularProgressIndicator(
                                 modifier = Modifier
-                                    .size(if (compact) 24.dp else 34.dp)
+                                    .size(if (compact) 22.dp else 34.dp)
                                     .testTag("lyrics_empty_state_loading_spinner"),
                                 strokeWidth = if (compact) 2.5.dp else 3.dp,
                                 color = themePrimary
@@ -1560,13 +1564,13 @@ private fun LyricsEmptyOrLoadingState(
                                 imageVector = Icons.Default.MusicNote,
                                 contentDescription = "No lyrics icon",
                                 tint = themePrimary,
-                                modifier = Modifier.size(if (compact) 24.dp else 34.dp)
+                                modifier = Modifier.size(if (compact) 22.dp else 34.dp)
                             )
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(if (compact) 10.dp else 16.dp))
+                Spacer(modifier = Modifier.height(if (compact) 8.dp else 16.dp))
 
                 Text(
                     text = if (isLoading) {
