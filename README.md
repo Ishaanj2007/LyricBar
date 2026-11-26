@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Ishaanj2007/LyricBar/releases/latest"><img src="https://img.shields.io/badge/Release-v2.7.0-6C5CE7?style=flat-square&logo=android" alt="Latest Release" /></a>
+  <a href="https://github.com/Ishaanj2007/LyricBar/releases/latest"><img src="https://img.shields.io/github/v/release/Ishaanj2007/LyricBar?style=flat-square&logo=android&color=6C5CE7" alt="Latest Release" /></a>
   <a href="https://android.com"><img src="https://img.shields.io/badge/Platform-Android%207.0%2B%20(API%2024--35)-00B894?style=flat-square&logo=android" alt="Android Version" /></a>
   <a href="https://kotlinlang.org"><img src="https://img.shields.io/badge/Kotlin-2.0.21-7F52FF?style=flat-square&logo=kotlin" alt="Kotlin" /></a>
   <a href="https://developer.android.com/jetpack/compose"><img src="https://img.shields.io/badge/UI-Jetpack%20Compose%20%2B%20M3-4285F4?style=flat-square&logo=jetpackcompose" alt="Jetpack Compose" /></a>
@@ -17,12 +17,11 @@
 </p>
 
 <p align="center">
-  <b>LyricBar v2.7.0</b> — Synchronized Floating Lyrics for Android
+  <b>LyricBar</b> — Synchronized Floating Lyrics for Android
 </p>
 
 <p align="center">
   <a href="#screenshots-">Screenshots</a> •
-  <a href="#whats-new-in-v270-">What's New</a> •
   <a href="#features-">Features</a> •
   <a href="#multi-provider-lyrics-architecture-">Lyrics Providers</a> •
   <a href="#floating-hud--customization-">Floating HUD</a> •
@@ -47,18 +46,8 @@
 ## Demo 🎬
 
 <p align="center">
-  <img src="Screenshots/Showcase-vid.gif" width="320" alt="LyricBar v2.7.0 Demo" />
+  <img src="Screenshots/Showcase-vid.gif" width="320" alt="LyricBar Demo" />
 </p>
-
----
-
-## What's New in v2.7.0 🚀
-
-- **Permanent Application ID (`com.ishaan.lyricbar`) & Selective Backup/Restore** — Migrated to LyricBar's permanent package identifier (`versionCode` 11) with a portable `.zip` Backup & Restore system covering App Settings, HUD Configuration, Playback History, and Imported `.lrc` Lyrics, plus allowlist Android Auto Backup and Device-to-Device transfer rules.
-- **Dynamic HUD Accent Colour & Independent Alignment** — Optional Palette-based accent colour extraction from active album artwork (`ArtworkAccentExtractor`), a tap-to-cycle alignment toggle on the Lyrics screen, and separate alignment preferences for the Lyrics screen and floating HUD.
-- **In-App Feedback Centre & Modernized Update Dialog** — Added a dedicated Feedback Centre in **Settings → About & Developer** with structured diagnostics and templates, plus native Markdown release-notes rendering (`SimpleMarkdownView`) inside the Update Dialog.
-- **Artwork, Blur, Font & Provider Hardening** — Eliminated album artwork flickering, prevented stale async blur results from rendering over newly switched tracks, added LRU eviction to `ArtworkMemoryCache`, cached overlay `Typeface` resources process-wide, and hardened cancellation/response cleanup across all 7 lyrics providers.
-- **Release Optimization & Modularization** — Enabled R8 code minification and resource shrinking, configured permanent release signing, modularized `MinimalOverlayView`, and expanded the automated unit test suite to 438 tests.
 
 ---
 
@@ -66,20 +55,21 @@
 
 - **Multi-Provider Lyrics Engine** — Broad song coverage powered by seven synchronized providers (`LRCLIB`, `lrc.red`, `LyricsPlus`, `KuGou`, `Lyrica`, `LiriQo`, `Unison`) with priority fallback and safe TTML-to-line-synced conversion (`TtmlParser`).
 - **Synchronized Provider Selection** — Choose between `Automatic` and any individual provider directly from either the **Lyrics Screen** (frosted floating dropdown) or **Settings Screen**, sharing the same persistent DataStore preference.
-- **Responsive Portrait & Landscape UI** — Streamlined **Now Playing**, **Lyrics**, **History**, and **Settings** screens that adapt seamlessly between compact phones (`FloatingBottomNavPill`) and wide/landscape screens (`AdaptiveNavRail` + two-column layouts).
+- **Responsive Portrait & Landscape UI** — Streamlined **Now Playing**, **Lyrics**, **History**, and **Settings** screens that adapt cleanly between compact phones (`FloatingBottomNavPill`) and landscape/wide screens (`AdaptiveNavRail`, two-pane Lyrics, and two-column Settings).
+- **Smooth Live Lyrics & Active-Line Emphasis** — Fluid vertical rolling lyric transitions on Now Playing, smooth active-line auto-scrolling on the Lyrics screen (with pause-on-scroll and one-tap resume), and subtle accent-tinted active-line glow.
 - **Orientation-Aware Floating Lyrics Overlay** — Live synchronized lyrics rendered above any active music or media app (Spotify, YouTube Music, Apple Music, local players, etc.) with separate persistent **Portrait** and **Landscape** positioning profiles.
 - **Interactive HUD Gestures & Click-through Mode** — Short-tap the HUD to resync, triple-tap anywhere on the interactive HUD to open LyricBar, hold for `1000 ms` to reposition safely (with automatic rollback on cancellation), toggle 2D Drag & Resize handles, or enable **Click-through Overlay** to pass all touches to the app underneath.
-- **Dedicated HUD Backdrop & Independent Lyric Colours** — Configure a text-only HUD or crisp **Black** / **Grey** backdrops inside the dedicated **HUD Backdrop** section with live preview, opacity, corner radius, padding, independent **Active** and **Inactive** lyric colours, HSV/Hex picker, saved swatches, and contrast warnings.
+- **Dedicated HUD Backdrop & Independent Lyric Colours** — Configure a text-only HUD or crisp **Black** / **Grey** backdrops inside the dedicated **HUD Backdrop** section with live preview, opacity, corner radius, padding, independent **Active** and **Inactive** lyric colours, optional dynamic artwork-derived HUD accent colour, HSV/Hex picker, saved swatches, and contrast warnings.
 - **Cinematic Ambient Artwork Glow** — Dynamic diffused ambient illumination engine derived from active album artwork palettes for in-app frosted-glass surfaces.
-- **Intelligent Auto-Scroll with Reading Pause** — Smooth automatic lyric following that pauses instantly when the user scrolls manually and provides a one-tap resume affordance.
 - **Eligible MediaSession Detection** — Filters active `MediaSession` updates by app context, playback state, duration, and metadata signals (`MediaSessionEligibility`) to ignore non-music video/browser sessions and prevent stale lyrics or history pollution.
 - **Safe & Bounded Local LRC Import** — Bounded, memory-safe local `.lrc` import system with UTF-8/UTF-16/BOM auto-detection and file-size protection.
-- **Multiple Animation Styles** — Apple-style Karaoke glow sweeps, Smooth Line Transitions, Fade, Blur Reveal, Typewriter, and Instant animations synchronized to playback timing.
-- **Typography & Timing Precision** — Customize HUD text size, opacity, alignment, single-line mode, 12 bundled Google Fonts (`Inter`, `Poppins`, `Montserrat`, `Lora`, `Roboto Mono`, etc.), and per-track lyric offsets (`-0.5s`, `-0.1s`, `+0.1s`, `+0.5s`).
+- **Multiple Animation Styles & Apple Karaoke** — Apple-style Karaoke active-word highlighting with sweep-speed control and an optional **Enhanced Glow** toggle, plus Smooth Line Transitions, Fade, Blur Reveal, Typewriter, and Instant animations synchronized to playback timing.
+- **Typography & Timing Precision** — Customize HUD text size, opacity, optional **Bold Lyrics** HUD typography, separate Lyrics-screen and HUD alignment, single-line mode, 12 bundled Google Fonts (`Inter`, `Poppins`, `Montserrat`, `Lora`, `Roboto Mono`, etc.), and per-track lyric offsets (`-0.5s`, `-0.1s`, `+0.1s`, `+0.5s`).
+- **Portable Backup & Restore** — Export and restore App Settings, HUD Configuration, Playback History, and Imported `.lrc` Lyrics as a portable `.zip` archive, alongside Android Auto Backup and Device-to-Device transfer support.
 - **Curated & Dynamic Theming** — Follow System / Light / Dark modes, curated pastel palettes (*Rose Quartz*, *Lavender Mist*, *Peach Ember*, *Sage Serenity*), and Android 12+ Material You dynamic colors.
 - **Playback History** — Chronological timeline grouping (*Today*, *Yesterday*, *Earlier This Week*, *Previous Month*) stored locally with cached artwork thumbnails.
 - **Hardened & Automatic GitHub Updater** — Periodic 48-hour background checks with notification alerts, ETag caching, SHA-256 verification, package identity matching, downgrade prevention, and signing certificate lineage verification.
-- **Battery & Memory Optimized** — Zero-allocation hardware Canvas draw loops locked to display refresh rate, LRU artwork memory caching, and lifecycle-aware synchronization.
+- **Battery & Memory Optimized** — Zero-allocation hardware Canvas draw loops locked to display refresh rate, LRU artwork memory caching, cached overlay typefaces, and lifecycle-aware synchronization.
 
 ---
 
@@ -132,21 +122,12 @@ LyricBar uses a modular, 7-tier lyrics provider architecture to maximize regiona
 
 ## Download 📲
 
-> [!IMPORTANT]
-> **Upgrading from v2.6.x to v2.7.0+ (Package ID Migration):**  
-> In **v2.7.0**, LyricBar's official application ID transitioned to its permanent identifier `com.ishaan.lyricbar`. Because Android treats apps with different package IDs as separate applications, in-app auto-update cannot overwrite v2.6.x directly.  
-> **To migrate your data seamlessly:**
-> 1. In your existing v2.6.1 app, navigate to **Settings → Backup & Restore** and tap **Export Backup** to save a `.zip` archive to your device or Google Drive.
-> 2. Download and install `LyricBar-2.7.0.apk` from GitHub Releases. It will install alongside your existing app.
-> 3. Launch LyricBar v2.7.0, grant the required permissions (Overlay & Notification Listener), navigate to **Settings → Backup & Restore**, tap **Restore Backup**, and select your exported `.zip` file.
-> 4. Once your HUD customisation, history, and imported lyrics are restored, you can safely uninstall the old v2.6.x app.
-
 👉 **[Download the Latest Release](https://github.com/Ishaanj2007/LyricBar/releases/latest)**
 
-1. Download `LyricBar-2.7.0.apk` from the latest release assets.
+1. Download the release APK asset from the latest GitHub Release.
 2. Open the APK on your Android device.
 3. Allow installation from unknown sources if prompted.
-4. Launch LyricBar and grant the required permissions (Overlay & Notification Listener).
+4. Launch LyricBar and grant the required permissions (Display Over Other Apps & Notification Listener).
 
 *Automatic update checks run every 48 hours by default, and manual checks are always available under **Settings → About & Developer → Check for Updates**.*
 
@@ -211,7 +192,7 @@ chmod +x gradlew
 # Build Debug APK
 ./gradlew :app:assembleDebug
 
-# Run Unit Tests (438 tests across 47 suites)
+# Run Unit Tests
 ./gradlew :app:testDebugUnitTest
 
 # Compile Android Instrumented Tests
@@ -231,12 +212,10 @@ gradlew.bat :app:compileDebugAndroidTestKotlin
 
 LyricBar maintains automated test coverage across its data, parsing, HUD positioning/gesture/colour, synchronization, and updater layers:
 
-| Test Scope | Count | Status | Notes |
-| :--- | :---: | :---: | :--- |
-| **Local JVM Unit Tests** | 438 | **Passing (100%)** | 47 test suites in `app/src/test/java/` covering the 7-provider fallback chain (`LRCLIB`, `lrc.red`, `LyricsPlus`, `KuGou`, `Lyrica`, `LiriQo`, `Unison`), `TtmlParser`, LRC import bounds, portable `.zip` Backup & Restore, `MediaSession` eligibility & pipeline filtering, HUD orientation positioning & modular layout/gesture engines, 1s hold-to-reposition & drag rollback, Click-through overlay mode, Triple-tap HUD launch, Settings accordion state, HUD colour/contrast & dynamic accent system, Room migrations, and 48h WorkManager updater / notification deduplication. |
-| **Executed Test Cases** | 438 | **438 Passed (0 failed)** | Verified via `:app:testDebugUnitTest`. |
-| **Instrumented Tests** | 1 | **Configured & Compiles** | Located in `app/src/androidTest/java/` using AndroidX Test Runner and JUnit4. |
-| **Total Test Methods** | 439 | — | 438 local unit tests + 1 instrumented test. |
+| Test Scope | Status | Notes |
+| :--- | :---: | :--- |
+| **Local JVM Unit Tests** | **Passing** | Unit test suites in `app/src/test/java/` covering the 7-provider fallback chain (`LRCLIB`, `lrc.red`, `LyricsPlus`, `KuGou`, `Lyrica`, `LiriQo`, `Unison`), `TtmlParser`, LRC import bounds, portable `.zip` Backup & Restore, `MediaSession` eligibility & pipeline filtering, HUD orientation positioning & modular layout/gesture engines, 1s hold-to-reposition & drag rollback, Click-through overlay mode, Triple-tap HUD launch, Settings accordion state, HUD colour/contrast & dynamic accent system, Bold HUD typography, Apple Karaoke luminous glow, Room migrations, and 48h WorkManager updater / notification deduplication. Verified via `:app:testDebugUnitTest`. |
+| **Instrumented Tests** | **Configured & Compiles** | Located in `app/src/androidTest/java/` using AndroidX Test Runner and JUnit4 (`:app:compileDebugAndroidTestKotlin`). |
 
 ---
 
@@ -267,7 +246,7 @@ LyricBar maintains automated test coverage across its data, parsing, HUD positio
 │       │   │   ├── service/          # MediaListener, Eligibility Filter, Overlay Service & HudPositioningEngine
 │       │   │   └── ui/               # Responsive Compose Screens, MinimalOverlayView & Theme
 │       │   └── res/                  # Vector Assets, Bundled Google Fonts & XML Configs
-│       ├── test/                     # 438 Local Automated Unit Tests (47 test suites)
+│       ├── test/                     # Local Automated Unit Tests
 │       └── androidTest/              # Instrumented Android Tests
 ├── gradle/
 │   ├── libs.versions.toml            # Version Catalog
