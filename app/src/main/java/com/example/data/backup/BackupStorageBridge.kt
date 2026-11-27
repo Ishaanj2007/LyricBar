@@ -1,6 +1,7 @@
 package com.example.data.backup
 
 import androidx.room.withTransaction
+import com.example.data.fonts.CustomFontRepository
 import com.example.data.local.LyricBarDatabase
 import com.example.data.local.entity.LyricsEntity
 import com.example.data.local.entity.SongHistoryEntity
@@ -16,6 +17,16 @@ interface BackupPreferencesStore {
         appSettings: BackupAppSettingsData? = null,
         hudConfig: BackupHudConfigData? = null
     )
+}
+
+/**
+ * Storage abstraction over custom-font registry and app-private font binaries.
+ */
+interface BackupCustomFontStore {
+    suspend fun getFontsCount(): Int
+    suspend fun exportCustomFonts(): List<BackupCustomFontRecord>
+    suspend fun restoreCustomFonts(records: List<BackupCustomFontRecord>): CustomFontBackupRestoreSummary
+    suspend fun resolveValidFontId(fontId: String?): String?
 }
 
 /**
@@ -101,4 +112,21 @@ class RoomBackupDatabaseStore(
             tx.block()
         }
     }
+}
+
+class RepositoryBackupCustomFontStore(
+    private val customFontRepository: CustomFontRepository
+) : BackupCustomFontStore {
+
+    override suspend fun getFontsCount(): Int = customFontRepository.getFontsCount()
+
+    override suspend fun exportCustomFonts(): List<BackupCustomFontRecord> =
+        customFontRepository.exportFontsForBackup()
+
+    override suspend fun restoreCustomFonts(
+        records: List<BackupCustomFontRecord>
+    ): CustomFontBackupRestoreSummary = customFontRepository.restoreFontsFromBackup(records)
+
+    override suspend fun resolveValidFontId(fontId: String?): String? =
+        customFontRepository.resolveValidFontId(fontId)
 }

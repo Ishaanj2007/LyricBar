@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -150,6 +152,93 @@ fun SettingsScreen(
     var activeColorPickerTarget by remember { mutableStateOf<HudColorTarget?>(null) }
     var activeBackupSubScreen by rememberSaveable { mutableStateOf<BackupSubScreen?>(null) }
     var activeFeedbackSubScreen by rememberSaveable { mutableStateOf<FeedbackTab?>(null) }
+
+    val customFontRepo = remember(context) { com.example.data.fonts.CustomFontRepository.getInstance(context) }
+    val customFonts by customFontRepo.customFontsFlow.collectAsStateWithLifecycle()
+    val customFontZipImporter = remember(context, customFontRepo) {
+        com.example.data.fonts.CustomFontZipImporter(
+            repository = customFontRepo,
+            stagingRootDir = java.io.File(context.applicationContext.cacheDir, "custom_fonts_tmp")
+        )
+    }
+    var singleFontFeedback by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
+    var isSingleFontImporting by remember { mutableStateOf(false) }
+    var fontPendingDeletion by remember { mutableStateOf<com.example.data.fonts.CustomFontRecord?>(null) }
+    var isFontMultiSelectMode by remember { mutableStateOf(false) }
+    var selectedFontIdsForDeletion by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var fontsPendingBatchDeletion by remember { mutableStateOf<List<com.example.data.fonts.CustomFontRecord>>(emptyList()) }
+    var zipDialogState by remember { mutableStateOf<com.example.ui.components.ZipFontDialogUiState?>(null) }
+    var zipOperationJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+
+    LaunchedEffect(customFonts) {
+        val validIds = customFonts.mapTo(HashSet()) { it.id }
+        val pruned = selectedFontIdsForDeletion.intersect(validIds)
+        if (pruned != selectedFontIdsForDeletion) {
+            selectedFontIdsForDeletion = pruned
+        }
+        if (customFonts.isEmpty() && isFontMultiSelectMode) {
+            isFontMultiSelectMode = false
+        }
+    }
+
+    val singleFontPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        coroutineScope.launch {
+            isSingleFontImporting = true
+            singleFontFeedback = null
+            when (val res = customFontRepo.importFontFromUri(context, uri)) {
+                is com.example.data.fonts.SingleFontImportResult.Success -> {
+                    playbackManager.preferencesRepository.setSelectedCustomFontId(res.record.id)
+                    singleFontFeedback = "Imported & selected '${res.record.displayName}'" to false
+                }
+                is com.example.data.fonts.SingleFontImportResult.Duplicate -> {
+                    playbackManager.preferencesRepository.setSelectedCustomFontId(res.existingRecord.id)
+                    singleFontFeedback = "${res.message} Switched selection to it." to false
+                }
+                is com.example.data.fonts.SingleFontImportResult.Failure -> {
+                    singleFontFeedback = res.reason to true
+                }
+                com.example.data.fonts.SingleFontImportResult.Cancelled -> Unit
+            }
+            isSingleFontImporting = false
+        }
+    }
+
+    val zipFontPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        zipOperationJob?.cancel()
+        zipDialogState = com.example.ui.components.ZipFontDialogUiState.Scanning(progress = null)
+        zipOperationJob = coroutineScope.launch {
+            when (val scan = customFontZipImporter.scanZipFromUri(context, uri) { prog ->
+                zipDialogState = com.example.ui.components.ZipFontDialogUiState.Scanning(prog)
+            }) {
+                is com.example.data.fonts.ZipFontScanResult.Success -> {
+                    zipDialogState = com.example.ui.components.ZipFontDialogUiState.Selection(
+                        scanResult = scan,
+                        selectedEntryIds = emptySet()
+                    )
+                }
+                is com.example.data.fonts.ZipFontScanResult.NoFontsFound -> {
+                    zipDialogState = com.example.ui.components.ZipFontDialogUiState.EmptyOrError(
+                        title = "No Supported Fonts Found",
+                        message = scan.message,
+                        isError = false
+                    )
+                }
+                is com.example.data.fonts.ZipFontScanResult.Failure -> {
+                    zipDialogState = com.example.ui.components.ZipFontDialogUiState.EmptyOrError(
+                        title = "Unable to Scan ZIP",
+                        message = scan.reason,
+                        isError = true
+                    )
+                }
+            }
+        }
+    }
 
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, context) {
@@ -2737,12 +2826,19 @@ fun SettingsScreen(
 
     val sectionTypography: @Composable () -> Unit = {
         // SECTION 6: TYPOGRAPHY
+        val activeCustomRecord = remember(livePreferences.selectedCustomFontId, customFonts) {
+            val id = livePreferences.selectedCustomFontId
+            if (id != null && customFontRepo.resolveValidFontFile(id) != null) {
+                customFonts.firstOrNull { it.id == id }
+            } else null
+        }
+        val activeFontDisplayTitle = activeCustomRecord?.displayName ?: userPreferences.selectedFont.title
         SettingsAccordionCard(
             title = "Typography",
             subtitle = if (userPreferences.hudBoldLyrics) {
-                "${userPreferences.selectedFont.title} • Bold • ${userPreferences.overlayTextSizeSp.toInt()} sp"
+                "$activeFontDisplayTitle • Bold • ${userPreferences.overlayTextSizeSp.toInt()} sp"
             } else {
-                "${userPreferences.selectedFont.title} • ${userPreferences.overlayTextSizeSp.toInt()} sp"
+                "$activeFontDisplayTitle • ${userPreferences.overlayTextSizeSp.toInt()} sp"
             },
             icon = Icons.Default.FontDownload,
             isExpanded = SettingsAccordionState.SECTION_TYPOGRAPHY in expandedSections,
@@ -2940,16 +3036,391 @@ fun SettingsScreen(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "Choose from custom Google Fonts or System Default",
+                    text = "Choose from Google Fonts, System Default, or your imported TTF/OTF fonts",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(10.dp))
 
+                // Import Actions (Individual Font + ZIP Archive)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            singleFontPickerLauncher.launch(
+                                arrayOf(
+                                    "font/ttf",
+                                    "font/otf",
+                                    "application/x-font-ttf",
+                                    "application/vnd.ms-opentype",
+                                    "*/*"
+                                )
+                            )
+                        },
+                        enabled = !isSingleFontImporting,
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("settings_import_font_button"),
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
+                    ) {
+                        if (isSingleFontImporting) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.UploadFile,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Import Font",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            zipFontPickerLauncher.launch(
+                                arrayOf(
+                                    "application/zip",
+                                    "application/x-zip-compressed",
+                                    "application/octet-stream",
+                                    "*/*"
+                                )
+                            )
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("settings_import_zip_fonts_button"),
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.FolderZip,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Import ZIP",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                singleFontFeedback?.let { (message, isError) ->
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (isError) {
+                            MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.65f)
+                        } else {
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                        }
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = message,
+                                fontSize = 11.5.sp,
+                                color = if (isError) {
+                                    MaterialTheme.colorScheme.onErrorContainer
+                                } else {
+                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+                            IconButton(
+                                onClick = { singleFontFeedback = null },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Dismiss",
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (customFonts.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    val allCustomFontIds = remember(customFonts) { customFonts.mapTo(HashSet()) { it.id } }
+                    val allSelectedForDelete =
+                        customFonts.isNotEmpty() && selectedFontIdsForDeletion.size == allCustomFontIds.size
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (isFontMultiSelectMode) {
+                                "${selectedFontIdsForDeletion.size} of ${customFonts.size} selected"
+                            } else {
+                                "Imported Fonts (${customFonts.size})"
+                            },
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        TextButton(
+                            onClick = {
+                                if (isFontMultiSelectMode) {
+                                    isFontMultiSelectMode = false
+                                    selectedFontIdsForDeletion = emptySet()
+                                } else {
+                                    isFontMultiSelectMode = true
+                                    selectedFontIdsForDeletion = emptySet()
+                                }
+                            },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                            modifier = Modifier
+                                .heightIn(min = 28.dp)
+                                .testTag("custom_fonts_select_mode_btn")
+                        ) {
+                            Text(
+                                text = if (isFontMultiSelectMode) "Cancel" else "Select",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+
+                    if (isFontMultiSelectMode) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    selectedFontIdsForDeletion = if (allSelectedForDelete) {
+                                        emptySet()
+                                    } else {
+                                        allCustomFontIds
+                                    }
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(34.dp)
+                                    .testTag("custom_fonts_select_all_btn")
+                            ) {
+                                Text(
+                                    text = if (allSelectedForDelete) "Deselect All" else "Select All",
+                                    fontSize = 11.5.sp,
+                                    maxLines = 1
+                                )
+                            }
+                            Button(
+                                onClick = {
+                                    val targets = customFonts.filter { it.id in selectedFontIdsForDeletion }
+                                    if (targets.isNotEmpty()) {
+                                        fontsPendingBatchDeletion = targets
+                                    }
+                                },
+                                enabled = selectedFontIdsForDeletion.isNotEmpty(),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.error,
+                                    contentColor = MaterialTheme.colorScheme.onError
+                                ),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(34.dp)
+                                    .testTag("custom_fonts_delete_selected_btn")
+                            ) {
+                                Text(
+                                    text = if (allSelectedForDelete && customFonts.size > 1) {
+                                        "Delete All (${selectedFontIdsForDeletion.size})"
+                                    } else {
+                                        "Delete (${selectedFontIdsForDeletion.size})"
+                                    },
+                                    fontSize = 11.5.sp,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        customFonts.forEach { customRecord ->
+                            val isSelected = activeCustomRecord?.id == customRecord.id
+                            val isCheckedForDelete = customRecord.id in selectedFontIdsForDeletion
+                            val fontFile = customFontRepo.resolveFontFile(customRecord)
+                            val previewFamily = remember(customRecord.id, fontFile.absolutePath) {
+                                resolveLyricsFontFamily(
+                                    com.example.data.preferences.FontOption.POPPINS,
+                                    fontFile.absolutePath
+                                )
+                            }
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable {
+                                        if (isFontMultiSelectMode) {
+                                            selectedFontIdsForDeletion = if (isCheckedForDelete) {
+                                                selectedFontIdsForDeletion - customRecord.id
+                                            } else {
+                                                selectedFontIdsForDeletion + customRecord.id
+                                            }
+                                        } else {
+                                            coroutineScope.launch {
+                                                playbackManager.preferencesRepository.setSelectedCustomFontId(customRecord.id)
+                                            }
+                                        }
+                                    }
+                                    .border(
+                                        width = if (isFontMultiSelectMode && isCheckedForDelete) 2.dp else if (!isFontMultiSelectMode && isSelected) 2.dp else 1.dp,
+                                        color = when {
+                                            isFontMultiSelectMode && isCheckedForDelete -> MaterialTheme.colorScheme.error
+                                            !isFontMultiSelectMode && isSelected -> MaterialTheme.colorScheme.primary
+                                            else -> MaterialTheme.colorScheme.outlineVariant
+                                        },
+                                        shape = RoundedCornerShape(10.dp)
+                                    )
+                                    .testTag("custom_font_item_${customRecord.id}"),
+                                color = when {
+                                    isFontMultiSelectMode && isCheckedForDelete -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f)
+                                    isSelected -> MaterialTheme.colorScheme.surfaceVariant
+                                    else -> MaterialTheme.colorScheme.surfaceContainer
+                                },
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(
+                                            start = if (isFontMultiSelectMode) 4.dp else 14.dp,
+                                            end = 6.dp,
+                                            top = 8.dp,
+                                            bottom = 8.dp
+                                        ),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    if (isFontMultiSelectMode) {
+                                        Checkbox(
+                                            checked = isCheckedForDelete,
+                                            onCheckedChange = { checked ->
+                                                selectedFontIdsForDeletion = if (checked) {
+                                                    selectedFontIdsForDeletion + customRecord.id
+                                                } else {
+                                                    selectedFontIdsForDeletion - customRecord.id
+                                                }
+                                            },
+                                            modifier = Modifier.testTag("custom_font_checkbox_${customRecord.id}")
+                                        )
+                                    }
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Text(
+                                                text = customRecord.displayName,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 14.sp,
+                                                color = if (isSelected) MaterialTheme.colorScheme.primary else Color.White,
+                                                fontFamily = previewFamily,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f, fill = false)
+                                            )
+                                            Surface(
+                                                shape = RoundedCornerShape(6.dp),
+                                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                                            ) {
+                                                Text(
+                                                    text = "Custom • ${customRecord.extension.uppercase(java.util.Locale.US)}",
+                                                    fontSize = 9.5.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
+                                        Text(
+                                            text = "The quick brown fox jumps over the lazy dog",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            fontFamily = previewFamily,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    if (!isFontMultiSelectMode) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            if (isSelected) {
+                                                Icon(
+                                                    imageVector = Icons.Default.CheckCircle,
+                                                    contentDescription = "Selected",
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                            }
+                                            IconButton(
+                                                onClick = { fontPendingDeletion = customRecord },
+                                                modifier = Modifier.testTag("delete_custom_font_${customRecord.id}")
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.DeleteOutline,
+                                                    contentDescription = "Delete custom font",
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "Built-in Fonts",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                } else {
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
+
                 val allFonts = com.example.data.preferences.FontOption.entries
                 val visibleFonts = if (isFontListExpanded) allFonts else allFonts.take(4)
                 val selectedFont = userPreferences.selectedFont
-                val isSelectedFontHidden = !isFontListExpanded && selectedFont !in visibleFonts
+                val isSelectedFontHidden = activeCustomRecord == null && !isFontListExpanded && selectedFont !in visibleFonts
 
                 if (isSelectedFontHidden) {
                     Surface(
@@ -2991,7 +3462,7 @@ fun SettingsScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     visibleFonts.forEach { fontOption ->
-                        val isSelected = selectedFont == fontOption
+                        val isSelected = activeCustomRecord == null && selectedFont == fontOption
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -3562,6 +4033,177 @@ fun SettingsScreen(
             HudOrientationInfoDialog(
                 snapshot = orientationInfo,
                 onDismiss = { showOrientationInfoDialog = false }
+            )
+        }
+
+        fontPendingDeletion?.let { pending ->
+            val isCurrentlyActive = livePreferences.selectedCustomFontId == pending.id
+            AlertDialog(
+                onDismissRequest = { fontPendingDeletion = null },
+                title = { Text("Delete Custom Font?") },
+                text = {
+                    Text(
+                        if (isCurrentlyActive) {
+                            "'${pending.displayName}' is currently selected. Deleting it will remove the imported file and switch lyrics back to '${livePreferences.selectedFont.title}'."
+                        } else {
+                            "Delete '${pending.displayName}' (${pending.originalFileName}) from LyricBar?"
+                        }
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            val target = pending
+                            fontPendingDeletion = null
+                            coroutineScope.launch {
+                                val filePath = customFontRepo.resolveFontFile(target).absolutePath
+                                MinimalOverlayView.evictFileTypefaceCache(filePath)
+                                evictCustomFontFamilyCache(filePath)
+                                customFontRepo.deleteCustomFont(target.id)
+                            }
+                        }
+                    ) {
+                        Text("Delete", color = MaterialTheme.colorScheme.error)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { fontPendingDeletion = null }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
+        if (fontsPendingBatchDeletion.isNotEmpty()) {
+            val pendingTargets = fontsPendingBatchDeletion
+            val pendingIds = pendingTargets.mapTo(HashSet()) { it.id }
+            val includesActive = livePreferences.selectedCustomFontId in pendingIds
+            val previewNames = pendingTargets.take(5).joinToString(", ") { it.displayName }
+            val overflowSuffix = if (pendingTargets.size > 5) {
+                " and ${pendingTargets.size - 5} more"
+            } else {
+                ""
+            }
+            AlertDialog(
+                onDismissRequest = { fontsPendingBatchDeletion = emptyList() },
+                title = {
+                    Text(
+                        if (pendingTargets.size == 1) {
+                            "Delete Custom Font?"
+                        } else {
+                            "Delete ${pendingTargets.size} Custom Fonts?"
+                        }
+                    )
+                },
+                text = {
+                    Text(
+                        buildString {
+                            append("Delete $previewNames$overflowSuffix from LyricBar?")
+                            if (includesActive) {
+                                append(" Your currently selected custom font is included, so lyrics will switch back to '${livePreferences.selectedFont.title}'.")
+                            }
+                        }
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            val targets = pendingTargets
+                            fontsPendingBatchDeletion = emptyList()
+                            isFontMultiSelectMode = false
+                            selectedFontIdsForDeletion = emptySet()
+                            coroutineScope.launch {
+                                targets.forEach { target ->
+                                    val filePath = customFontRepo.resolveFontFile(target).absolutePath
+                                    MinimalOverlayView.evictFileTypefaceCache(filePath)
+                                    evictCustomFontFamilyCache(filePath)
+                                }
+                                val res = customFontRepo.deleteCustomFonts(targets.map { it.id })
+                                singleFontFeedback = if (res.deletedRecords.isNotEmpty()) {
+                                    "Deleted ${res.deletedRecords.size} custom font(s)." to false
+                                } else {
+                                    "Selected custom fonts were already removed." to false
+                                }
+                            }
+                        }
+                    ) {
+                        Text("Delete (${pendingTargets.size})", color = MaterialTheme.colorScheme.error)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { fontsPendingBatchDeletion = emptyList() }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
+        val currentZipState = zipDialogState
+        if (currentZipState != null) {
+            com.example.ui.components.CustomFontZipImportDialog(
+                uiState = currentZipState,
+                onToggleEntry = { entryId ->
+                    val sel = zipDialogState as? com.example.ui.components.ZipFontDialogUiState.Selection ?: return@CustomFontZipImportDialog
+                    val updatedIds = if (entryId in sel.selectedEntryIds) {
+                        sel.selectedEntryIds - entryId
+                    } else {
+                        sel.selectedEntryIds + entryId
+                    }
+                    zipDialogState = sel.copy(selectedEntryIds = updatedIds)
+                },
+                onSelectAll = {
+                    val sel = zipDialogState as? com.example.ui.components.ZipFontDialogUiState.Selection ?: return@CustomFontZipImportDialog
+                    val allSelectableIds = sel.scanResult.discoveredFonts
+                        .filter { it.isSelectable }
+                        .map { it.entryId }
+                        .toSet()
+                    zipDialogState = sel.copy(selectedEntryIds = allSelectableIds)
+                },
+                onDeselectAll = {
+                    val sel = zipDialogState as? com.example.ui.components.ZipFontDialogUiState.Selection ?: return@CustomFontZipImportDialog
+                    zipDialogState = sel.copy(selectedEntryIds = emptySet())
+                },
+                onImportSelected = {
+                    val sel = zipDialogState as? com.example.ui.components.ZipFontDialogUiState.Selection ?: return@CustomFontZipImportDialog
+                    val chosen = sel.scanResult.discoveredFonts.filter { it.entryId in sel.selectedEntryIds }
+                    if (chosen.isEmpty()) return@CustomFontZipImportDialog
+                    zipOperationJob?.cancel()
+                    zipDialogState = com.example.ui.components.ZipFontDialogUiState.Importing(
+                        archiveName = sel.scanResult.archiveName,
+                        progress = null
+                    )
+                    zipOperationJob = coroutineScope.launch {
+                        val batchResult = customFontZipImporter.importSelectedEntries(
+                            sessionId = sel.scanResult.sessionId,
+                            selectedEntries = chosen
+                        ) { prog ->
+                            zipDialogState = com.example.ui.components.ZipFontDialogUiState.Importing(
+                                archiveName = sel.scanResult.archiveName,
+                                progress = prog
+                            )
+                        }
+                        if (batchResult.imported.size == 1 && batchResult.failed.isEmpty()) {
+                            playbackManager.preferencesRepository.setSelectedCustomFontId(batchResult.imported.first().id)
+                        }
+                        zipDialogState = com.example.ui.components.ZipFontDialogUiState.ImportSummary(
+                            archiveName = sel.scanResult.archiveName,
+                            result = batchResult
+                        )
+                    }
+                },
+                onCancelOrDismiss = {
+                    zipOperationJob?.cancel()
+                    zipOperationJob = null
+                    val scanSessionId = (currentZipState as? com.example.ui.components.ZipFontDialogUiState.Selection)
+                        ?.scanResult
+                        ?.sessionId
+                    if (scanSessionId != null) {
+                        coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                            customFontZipImporter.cleanupSession(scanSessionId)
+                        }
+                    }
+                    zipDialogState = null
+                }
             )
         }
 

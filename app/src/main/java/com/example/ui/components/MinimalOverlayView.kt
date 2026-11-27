@@ -667,6 +667,16 @@ class MinimalOverlayView(
             }
         }
 
+    var customFontPath: String? = null
+        set(value) {
+            val normalized = value?.takeIf { it.isNotBlank() }
+            if (field != normalized) {
+                field = normalized
+                applyTypographyToPaints()
+                recalculateLayout()
+            }
+        }
+
     var boldLyricsEnabled: Boolean = false
         set(value) {
             if (field != value) {
@@ -677,9 +687,19 @@ class MinimalOverlayView(
         }
 
     private fun applyTypographyToPaints() {
+        val customPath = customFontPath
         val resId = fontResId
         val isBold = boldLyricsEnabled
-        val typeface = if (resId != null) {
+        val customTypeface = if (customPath != null) {
+            if (isBold) {
+                getCachedBoldFileTypeface(customPath)
+            } else {
+                getCachedFileTypeface(customPath)
+            }
+        } else {
+            null
+        }
+        val typeface = customTypeface ?: if (resId != null) {
             if (isBold) {
                 getCachedBoldTypeface(context, resId)
             } else {
@@ -2294,6 +2314,8 @@ class MinimalOverlayView(
     companion object {
         private val typefaceCache = java.util.concurrent.ConcurrentHashMap<Int, android.graphics.Typeface>()
         private val boldTypefaceCache = java.util.concurrent.ConcurrentHashMap<Int, android.graphics.Typeface>()
+        private val fileTypefaceCache = java.util.concurrent.ConcurrentHashMap<String, android.graphics.Typeface>()
+        private val boldFileTypefaceCache = java.util.concurrent.ConcurrentHashMap<String, android.graphics.Typeface>()
 
         /**
          * MED-03: Caches parsed font Typeface instances at process scope to prevent repeated
@@ -2326,9 +2348,46 @@ class MinimalOverlayView(
             }
         }
 
+        fun getCachedFileTypeface(filePath: String): android.graphics.Typeface? {
+            if (filePath.isBlank()) return null
+            val file = java.io.File(filePath)
+            if (!file.isFile || file.length() <= 0L) {
+                fileTypefaceCache.remove(filePath)
+                boldFileTypefaceCache.remove(filePath)
+                return null
+            }
+            return fileTypefaceCache.getOrPut(filePath) {
+                try {
+                    android.graphics.Typeface.createFromFile(file) ?: return null
+                } catch (_: Throwable) {
+                    return null
+                }
+            }
+        }
+
+        fun getCachedBoldFileTypeface(filePath: String): android.graphics.Typeface? {
+            val base = getCachedFileTypeface(filePath) ?: return null
+            return boldFileTypefaceCache.getOrPut(filePath) {
+                try {
+                    android.graphics.Typeface.create(base, android.graphics.Typeface.BOLD)
+                } catch (_: Throwable) {
+                    base
+                }
+            }
+        }
+
+        fun evictFileTypefaceCache(filePath: String?) {
+            if (!filePath.isNullOrBlank()) {
+                fileTypefaceCache.remove(filePath)
+                boldFileTypefaceCache.remove(filePath)
+            }
+        }
+
         fun clearTypefaceCache() {
             typefaceCache.clear()
             boldTypefaceCache.clear()
+            fileTypefaceCache.clear()
+            boldFileTypefaceCache.clear()
         }
 
         fun isTypefaceCached(@androidx.annotation.FontRes fontResId: Int): Boolean {

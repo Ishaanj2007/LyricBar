@@ -8,6 +8,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import com.example.R
 import com.example.data.preferences.FontOption
+import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 
 val InterFontFamily = FontFamily(Font(R.font.inter))
 val PoppinsFontFamily = FontFamily(Font(R.font.poppins))
@@ -46,6 +48,38 @@ fun getFontFamily(fontOption: FontOption): FontFamily {
 
 fun getLyricsFontFamily(fontOption: FontOption): FontFamily = getFontFamily(fontOption)
 
+private val customFontFamilyCache = ConcurrentHashMap<String, FontFamily>()
+
+/**
+ * Resolves the active Compose [FontFamily] for lyrics rendering.
+ * Uses a cached file-backed [FontFamily] when [customFontPath] points to an existing file,
+ * falling back cleanly to [getFontFamily(fontOption)] when unset or unavailable.
+ */
+fun resolveLyricsFontFamily(fontOption: FontOption, customFontPath: String?): FontFamily {
+    val cleanPath = customFontPath?.trim()?.takeIf { it.isNotEmpty() } ?: return getFontFamily(fontOption)
+    val file = File(cleanPath)
+    if (!file.isFile || file.length() <= 0L) {
+        return getFontFamily(fontOption)
+    }
+    return customFontFamilyCache.getOrPut(cleanPath) {
+        try {
+            FontFamily(Font(file))
+        } catch (_: Throwable) {
+            getFontFamily(fontOption)
+        }
+    }
+}
+
+fun evictCustomFontFamilyCache(customFontPath: String?) {
+    if (!customFontPath.isNullOrBlank()) {
+        customFontFamilyCache.remove(customFontPath)
+    }
+}
+
+fun clearCustomFontFamilyCache() {
+    customFontFamilyCache.clear()
+}
+
 /**
  * Dedicated LyricBar typography system providing clear visual hierarchy
  * between synchronized lyrics and standard application UI controls.
@@ -55,9 +89,10 @@ object LyricBarTypography {
         fontOption: FontOption,
         fontSize: androidx.compose.ui.unit.TextUnit = 18.sp,
         fontWeight: FontWeight = FontWeight.Bold,
-        color: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Unspecified
+        color: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Unspecified,
+        customFontFamily: FontFamily? = null
     ): TextStyle = TextStyle(
-        fontFamily = getFontFamily(fontOption),
+        fontFamily = customFontFamily ?: getFontFamily(fontOption),
         fontWeight = fontWeight,
         fontSize = fontSize,
         lineHeight = (fontSize.value * 1.32f).sp,
@@ -69,9 +104,10 @@ object LyricBarTypography {
         fontOption: FontOption,
         fontSize: androidx.compose.ui.unit.TextUnit = 16.sp,
         fontWeight: FontWeight = FontWeight.SemiBold,
-        color: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Unspecified
+        color: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Unspecified,
+        customFontFamily: FontFamily? = null
     ): TextStyle = TextStyle(
-        fontFamily = getFontFamily(fontOption),
+        fontFamily = customFontFamily ?: getFontFamily(fontOption),
         fontWeight = fontWeight,
         fontSize = fontSize,
         lineHeight = (fontSize.value * 1.30f).sp,
@@ -83,9 +119,10 @@ object LyricBarTypography {
         fontOption: FontOption,
         fontSize: androidx.compose.ui.unit.TextUnit = 13.sp,
         fontWeight: FontWeight = FontWeight.Normal,
-        color: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Unspecified
+        color: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Unspecified,
+        customFontFamily: FontFamily? = null
     ): TextStyle = TextStyle(
-        fontFamily = getFontFamily(fontOption),
+        fontFamily = customFontFamily ?: getFontFamily(fontOption),
         fontWeight = fontWeight,
         fontSize = fontSize,
         lineHeight = (fontSize.value * 1.28f).sp,

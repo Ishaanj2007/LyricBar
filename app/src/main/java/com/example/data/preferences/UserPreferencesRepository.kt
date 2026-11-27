@@ -221,6 +221,7 @@ data class UserPreferences(
     val themeMode: ThemeMode = ThemeMode.FOLLOW_SYSTEM,
     val themePreset: ThemePreset = ThemePreset.ROSE_QUARTZ,
     val selectedFont: FontOption = FontOption.POPPINS,
+    val selectedCustomFontId: String? = null,
     val hudBoldLyrics: Boolean = false,
     val appleMusicStyle: Boolean = true,
     val singleLineLyrics: Boolean = false,
@@ -334,6 +335,7 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val THEME_PRESET = stringPreferencesKey("theme_preset")
         val SELECTED_FONT = stringPreferencesKey("selected_font")
+        val SELECTED_CUSTOM_FONT_ID = stringPreferencesKey("selected_custom_font_id")
         val HUD_BOLD_LYRICS = booleanPreferencesKey("hud_bold_lyrics")
         val APPLE_MUSIC_STYLE = booleanPreferencesKey("apple_music_style")
         val SINGLE_LINE_LYRICS = booleanPreferencesKey("single_line_lyrics")
@@ -481,6 +483,7 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
                 themeMode = themeMode,
                 themePreset = preset,
                 selectedFont = font,
+                selectedCustomFontId = preferences[PreferencesKeys.SELECTED_CUSTOM_FONT_ID]?.takeIf { it.isNotBlank() },
                 hudBoldLyrics = preferences[PreferencesKeys.HUD_BOLD_LYRICS] ?: false,
                 appleMusicStyle = preferences[PreferencesKeys.APPLE_MUSIC_STYLE] ?: true,
                 singleLineLyrics = preferences[PreferencesKeys.SINGLE_LINE_LYRICS] ?: false,
@@ -945,7 +948,38 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
     }
 
     suspend fun setSelectedFont(font: FontOption) {
-        dataStore.edit { it[PreferencesKeys.SELECTED_FONT] = font.name }
+        dataStore.edit {
+            it[PreferencesKeys.SELECTED_FONT] = font.name
+            it.remove(PreferencesKeys.SELECTED_CUSTOM_FONT_ID)
+        }
+    }
+
+    suspend fun setSelectedCustomFontId(fontId: String?) {
+        dataStore.edit {
+            val cleaned = fontId?.trim()?.takeIf { id -> id.isNotEmpty() }
+            if (cleaned != null) {
+                it[PreferencesKeys.SELECTED_CUSTOM_FONT_ID] = cleaned
+            } else {
+                it.remove(PreferencesKeys.SELECTED_CUSTOM_FONT_ID)
+            }
+        }
+    }
+
+    suspend fun clearCustomFontIfSelected(fontId: String): Boolean {
+        return clearCustomFontsIfSelected(setOf(fontId))
+    }
+
+    suspend fun clearCustomFontsIfSelected(fontIds: Set<String>): Boolean {
+        if (fontIds.isEmpty()) return false
+        var reset = false
+        dataStore.edit { prefs ->
+            val current = prefs[PreferencesKeys.SELECTED_CUSTOM_FONT_ID]
+            if (current != null && current in fontIds) {
+                prefs.remove(PreferencesKeys.SELECTED_CUSTOM_FONT_ID)
+                reset = true
+            }
+        }
+        return reset
     }
 
     suspend fun setHudBoldLyrics(enabled: Boolean) {
@@ -1126,6 +1160,12 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
                 prefs[PreferencesKeys.THEME_PRESET] = safeThemePreset.name
                 prefs[PreferencesKeys.USE_WALLPAPER_DYNAMIC_COLOR] = appSettings.useWallpaperDynamicColor
                 prefs[PreferencesKeys.SELECTED_FONT] = safeFont.name
+                val customFontId = appSettings.selectedCustomFontId?.trim()?.takeIf { it.isNotEmpty() }
+                if (customFontId != null) {
+                    prefs[PreferencesKeys.SELECTED_CUSTOM_FONT_ID] = customFontId
+                } else {
+                    prefs.remove(PreferencesKeys.SELECTED_CUSTOM_FONT_ID)
+                }
                 prefs[PreferencesKeys.LYRICS_PROVIDER] = safeProvider.name
                 prefs[PreferencesKeys.AUTO_SHOW_ON_PLAYBACK] = appSettings.autoShowOnPlayback
                 prefs[PreferencesKeys.AUTO_FETCH_LYRICS] = appSettings.autoFetchLyrics
@@ -1288,6 +1328,7 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
             themePreset = preset.name,
             useWallpaperDynamicColor = raw[PreferencesKeys.USE_WALLPAPER_DYNAMIC_COLOR] ?: false,
             selectedFont = font.name,
+            selectedCustomFontId = raw[PreferencesKeys.SELECTED_CUSTOM_FONT_ID]?.takeIf { it.isNotBlank() },
             lyricsProvider = provider.name,
             autoShowOnPlayback = raw[PreferencesKeys.AUTO_SHOW_ON_PLAYBACK] ?: true,
             autoFetchLyrics = raw[PreferencesKeys.AUTO_FETCH_LYRICS] ?: true,

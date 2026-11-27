@@ -37,10 +37,12 @@ object BackupZipCodec {
     const val HISTORY_PATH = "lyrics/history.json"
     const val IMPORTED_INDEX_PATH = "imported_lyrics/index.json"
     const val IMPORTED_DIR_PREFIX = "imported_lyrics/"
+    const val CUSTOM_FONTS_INDEX_PATH = "custom_fonts/index.json"
+    const val CUSTOM_FONTS_DIR_PREFIX = "custom_fonts/"
 
     const val MAX_ZIP_ENTRIES = 500
-    const val MAX_SINGLE_ENTRY_UNCOMPRESSED_BYTES = 5L * 1024L * 1024L // 5 MB
-    const val MAX_TOTAL_UNCOMPRESSED_BYTES = 25L * 1024L * 1024L // 25 MB
+    const val MAX_SINGLE_ENTRY_UNCOMPRESSED_BYTES = 10L * 1024L * 1024L // 10 MB
+    const val MAX_TOTAL_UNCOMPRESSED_BYTES = 65L * 1024L * 1024L // 65 MB
 
     private val gson: Gson = GsonBuilder()
         .setPrettyPrinting()
@@ -115,7 +117,8 @@ object BackupZipCodec {
         appSettings: BackupAppSettingsData? = null,
         hudConfig: BackupHudConfigData? = null,
         lyricsHistory: BackupHistoryPayload? = null,
-        importedLyrics: List<BackupImportedLyricRecord>? = null
+        importedLyrics: List<BackupImportedLyricRecord>? = null,
+        customFonts: List<BackupCustomFontRecord>? = null
     ): BackupManifest {
         if (selectedCategories.isEmpty()) {
             throw BackupException(
@@ -138,9 +141,47 @@ object BackupZipCodec {
             entriesToWrite[SETTINGS_PATH] = bytes
             checksums[SETTINGS_PATH] = sha256Hex(bytes)
             summaries[BackupCategory.APP_SETTINGS.id] = CategorySummary(
-                itemCount = APP_SETTINGS_BASE_FIELD_COUNT + data.trackOffsets.size,
+                itemCount = APP_SETTINGS_BASE_FIELD_COUNT + data.trackOffsets.size + (customFonts?.size ?: 0),
                 schemaVersion = data.schemaVersion
             )
+
+            if (!customFonts.isNullOrEmpty()) {
+                val usedFontNames = mutableSetOf<String>()
+                val fontIndexEntries = mutableListOf<BackupCustomFontMeta>()
+
+                for (record in customFonts) {
+                    val ext = record.meta.extension.lowercase(Locale.US)
+                        .takeIf { it == "ttf" || it == "otf" } ?: "ttf"
+                    val safeFileName = buildSafeUniqueFontFileName(
+                        preferredName = record.meta.storedFileName.ifBlank { record.meta.id },
+                        extension = ext,
+                        usedLowercaseNames = usedFontNames
+                    )
+                    val entryPath = "$CUSTOM_FONTS_DIR_PREFIX$safeFileName"
+                    validateEntryPathForWrite(entryPath)
+
+                    val fileSha = sha256Hex(record.fontBytes)
+                    entriesToWrite[entryPath] = record.fontBytes
+                    checksums[entryPath] = fileSha
+
+                    fontIndexEntries.add(
+                        record.meta.copy(
+                            extension = ext,
+                            storedFileName = safeFileName,
+                            sha256 = fileSha,
+                            fileSizeBytes = record.fontBytes.size.toLong()
+                        )
+                    )
+                }
+
+                val fontsIndexPayload = BackupCustomFontsIndex(
+                    schemaVersion = 1,
+                    fonts = fontIndexEntries
+                )
+                val indexBytes = gson.toJson(fontsIndexPayload).toByteArray(StandardCharsets.UTF_8)
+                entriesToWrite[CUSTOM_FONTS_INDEX_PATH] = indexBytes
+                checksums[CUSTOM_FONTS_INDEX_PATH] = sha256Hex(indexBytes)
+            }
         }
 
         if (BackupCategory.HUD_CONFIGURATION in orderedCategories) {
@@ -522,12 +563,47 @@ object BackupZipCodec {
             records
         } else null
 
+        val customFonts: List<BackupCustomFontRecord>? = if (BackupCategory.APP_SETTINGS in availableCategories) {
+            val indexBytes = rawFiles[CUSTOM_FONTS_INDEX_PATH]
+            if (indexBytes != null) {
+                val fontsIndex = parseJsonStrict<BackupCustomFontsIndex>(indexBytes, CUSTOM_FONTS_INDEX_PATH)
+                val fontRecords = mutableListOf<BackupCustomFontRecord>()
+                val seenFontPaths = mutableSetOf<String>()
+
+                for (meta in fontsIndex.fonts) {
+                    if (meta.storedFileName.isBlank() || !isSafeSingleFontFilename(meta.storedFileName)) {
+                        continue
+                    }
+                    val entryPath = "$CUSTOM_FONTS_DIR_PREFIX${meta.storedFileName}"
+                    if (!seenFontPaths.add(entryPath.lowercase(Locale.US))) {
+                        continue
+                    }
+                    val fontBytes = rawFiles[entryPath] ?: continue
+                    if (fontBytes.isEmpty()) continue
+                    if (meta.sha256.isNotBlank()) {
+                        val actualSha = sha256Hex(fontBytes)
+                        if (!actualSha.equals(meta.sha256.trim(), ignoreCase = true)) {
+                            throw BackupException(
+                                BackupErrorCode.CHECKSUM_MISMATCH,
+                                "Checksum mismatch for custom font file: ${meta.storedFileName}"
+                            )
+                        }
+                    }
+                    fontRecords.add(BackupCustomFontRecord(meta = meta, fontBytes = fontBytes))
+                }
+                fontRecords
+            } else {
+                null
+            }
+        } else null
+
         val payload = BackupArchivePayload(
             manifest = manifest,
             appSettings = appSettings,
             hudConfig = hudConfig,
             lyricsHistory = lyricsHistory,
-            importedLyrics = importedLyrics
+            importedLyrics = importedLyrics,
+            customFonts = customFonts
         )
 
         return BackupArchiveInspection(
@@ -577,7 +653,7 @@ object BackupZipCodec {
         }
         val normalized = name.trimEnd('/')
         if (isDirectory) {
-            val allowedDirs = setOf("settings", "hud", "lyrics", "imported_lyrics")
+            val allowedDirs = setOf("settings", "hud", "lyrics", "imported_lyrics", "custom_fonts")
             if (normalized !in allowedDirs) {
                 throw BackupException(
                     BackupErrorCode.INVALID_BACKUP,
@@ -599,7 +675,8 @@ object BackupZipCodec {
             path == SETTINGS_PATH ||
             path == HUD_PATH ||
             path == HISTORY_PATH ||
-            path == IMPORTED_INDEX_PATH
+            path == IMPORTED_INDEX_PATH ||
+            path == CUSTOM_FONTS_INDEX_PATH
         ) {
             return true
         }
@@ -607,7 +684,39 @@ object BackupZipCodec {
             val leaf = path.removePrefix(IMPORTED_DIR_PREFIX)
             return isSafeSingleLrcFilename(leaf)
         }
+        if (path.startsWith(CUSTOM_FONTS_DIR_PREFIX)) {
+            val leaf = path.removePrefix(CUSTOM_FONTS_DIR_PREFIX)
+            return isSafeSingleFontFilename(leaf)
+        }
         return false
+    }
+
+    private fun isSafeSingleFontFilename(fileName: String): Boolean {
+        if (fileName.isBlank() || fileName.length > 128) return false
+        if (fileName.contains("/") || fileName.contains("\\") || fileName.contains("..") || fileName.contains('\u0000')) {
+            return false
+        }
+        if (fileName.startsWith(".")) return false
+        return fileName.endsWith(".ttf", ignoreCase = true) || fileName.endsWith(".otf", ignoreCase = true)
+    }
+
+    private fun buildSafeUniqueFontFileName(
+        preferredName: String,
+        extension: String,
+        usedLowercaseNames: MutableSet<String>
+    ): String {
+        val rawBase = preferredName.substringBeforeLast('.')
+            .replace(Regex("[^A-Za-z0-9._-]"), "_")
+            .trim('_', '.')
+            .ifBlank { "custom_font" }
+            .take(80)
+        var candidate = "$rawBase.$extension"
+        var suffix = 2
+        while (!usedLowercaseNames.add(candidate.lowercase(Locale.US))) {
+            candidate = "${rawBase}_$suffix.$extension"
+            suffix++
+        }
+        return candidate
     }
 
     private fun isSafeSingleLrcFilename(fileName: String): Boolean {
@@ -680,6 +789,6 @@ object BackupZipCodec {
         }
     }
 
-    private const val APP_SETTINGS_BASE_FIELD_COUNT = 22
+    private const val APP_SETTINGS_BASE_FIELD_COUNT = 23
     private const val HUD_CONFIG_BASE_FIELD_COUNT = 20
 }

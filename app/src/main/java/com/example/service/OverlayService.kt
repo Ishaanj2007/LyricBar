@@ -38,6 +38,7 @@ class OverlayService : Service() {
     private var layoutParams: WindowManager.LayoutParams? = null
 
     private lateinit var playbackManager: MediaPlaybackManager
+    private lateinit var customFontRepository: com.example.data.fonts.CustomFontRepository
 
     private var displayManager: DisplayManager? = null
     private lateinit var displayGeometryFlow: MutableStateFlow<HudDisplayGeometry>
@@ -112,6 +113,7 @@ class OverlayService : Service() {
     override fun onCreate() {
         super.onCreate()
         playbackManager = MediaPlaybackManager.getInstance(this)
+        customFontRepository = com.example.data.fonts.CustomFontRepository.getInstance(this)
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         displayManager = getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
         displayGeometryFlow = MutableStateFlow(readCurrentDisplayGeometry(null))
@@ -441,13 +443,19 @@ class OverlayService : Service() {
             var lastAppliedLyricsKey: String? = null
             var lastAppliedTrackKey: String? = null
             var lastAppliedPrefs: com.example.data.preferences.UserPreferences? = null
+            var lastAppliedCustomFontPath: String? = null
             var lastAppliedGeometry: HudDisplayGeometry? = null
+
+            val prefsWithFontsFlow = combine(
+                playbackManager.preferencesRepository.userPreferencesFlow,
+                customFontRepository.customFontsFlow
+            ) { prefs, _ -> prefs }
 
             combine(
                 playbackManager.activeLyricObject,
                 playbackManager.currentLyrics,
                 playbackManager.playbackState,
-                playbackManager.preferencesRepository.userPreferencesFlow,
+                prefsWithFontsFlow,
                 displayGeometryFlow
             ) { lineObj, lyrics, playbackState, prefs, geometry ->
                 OverlayStateBundle(lineObj, lyrics, playbackState, prefs, geometry)
@@ -553,9 +561,15 @@ class OverlayService : Service() {
                 }
 
                 // 3. Update styling properties, primary color, and orientation-aware bounds when preferences or display geometry change
+                val resolvedCustomFontPath = customFontRepository.resolveValidFontFile(prefs.selectedCustomFontId)?.absolutePath
+                val customFontChanged = resolvedCustomFontPath != lastAppliedCustomFontPath
                 val prefsChanged = prefs != lastAppliedPrefs
                 val geometryChanged = geometry != lastAppliedGeometry
-                if (prefsChanged || geometryChanged || !hasAppliedInitialPrefs) {
+                if (prefsChanged || customFontChanged || geometryChanged || !hasAppliedInitialPrefs) {
+                    if (customFontChanged) {
+                        lastAppliedCustomFontPath = resolvedCustomFontPath
+                        view.customFontPath = resolvedCustomFontPath
+                    }
                     if (prefsChanged) {
                         lastAppliedPrefs = prefs
 
@@ -588,6 +602,7 @@ class OverlayService : Service() {
                         view.adaptiveScrollingEnabled = prefs.adaptiveLyricScrolling
                         view.scrollSpeedMultiplier = prefs.lyricScrollSpeedMultiplier
                         view.fontResId = prefs.selectedFont.fontResId
+                        view.customFontPath = resolvedCustomFontPath
                         view.boldLyricsEnabled = prefs.hudBoldLyrics
 
                         val resolvedPrimary = if (prefs.useWallpaperDynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {

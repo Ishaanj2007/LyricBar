@@ -58,6 +58,19 @@
 }
 
 # ------------------------------------------------------------------------------
+# Custom Font Registry Models
+# CustomFontRepository serializes/deserializes registry.json via Gson.
+# ------------------------------------------------------------------------------
+-keepclassmembers class com.example.data.fonts.CustomFontRecord {
+    <fields>;
+    <init>(...);
+}
+-keepclassmembers class com.example.data.fonts.CustomFontRegistryPayload {
+    <fields>;
+    <init>(...);
+}
+
+# ------------------------------------------------------------------------------
 # OkHttp
 # ------------------------------------------------------------------------------
 -dontwarn okhttp3.**

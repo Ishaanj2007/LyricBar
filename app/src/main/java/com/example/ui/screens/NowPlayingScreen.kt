@@ -562,6 +562,14 @@ fun NowPlayingScreen(
     val currentLyrics by playbackManager.currentLyrics.collectAsStateWithLifecycle()
     val isLoadingLyrics by playbackManager.isLoadingLyrics.collectAsStateWithLifecycle()
     val track = state.track
+    val customFontRepo = remember(context) { com.example.data.fonts.CustomFontRepository.getInstance(context) }
+    val customFonts by customFontRepo.customFontsFlow.collectAsStateWithLifecycle()
+    val activeCustomFontPath = remember(userPreferences.selectedCustomFontId, customFonts) {
+        customFontRepo.resolveValidFontFile(userPreferences.selectedCustomFontId)?.absolutePath
+    }
+    val activeLyricsFontFamily = remember(userPreferences.selectedFont, activeCustomFontPath) {
+        com.example.ui.theme.resolveLyricsFontFamily(userPreferences.selectedFont, activeCustomFontPath)
+    }
 
     val activeIdx = remember(activeIndex, currentLyrics) {
         val lines = currentLyrics?.lines
@@ -919,6 +927,7 @@ fun NowPlayingScreen(
                                 NowPlayingLiveLyricsPanel(
                                     cardState = lyricsCardState,
                                     userPreferences = userPreferences,
+                                    customFontFamily = activeLyricsFontFamily,
                                     activeLyricFontSizeSp = metrics.activeLyricFontSizeSp,
                                     isCompact = isCompactBadgeLandscape,
                                     primaryColor = primaryColor,
@@ -1031,6 +1040,7 @@ fun NowPlayingScreen(
                         NowPlayingLiveLyricsPanel(
                             cardState = lyricsCardState,
                             userPreferences = userPreferences,
+                            customFontFamily = activeLyricsFontFamily,
                             activeLyricFontSizeSp = metrics.activeLyricFontSizeSp,
                             isCompact = true,
                             primaryColor = primaryColor,
@@ -1152,6 +1162,7 @@ fun NowPlayingScreen(
                         NowPlayingLiveLyricsPanel(
                             cardState = lyricsCardState,
                             userPreferences = userPreferences,
+                            customFontFamily = activeLyricsFontFamily,
                             activeLyricFontSizeSp = metrics.activeLyricFontSizeSp,
                             isCompact = metrics.isShortHeight,
                             primaryColor = primaryColor,
@@ -1548,6 +1559,7 @@ private data class LiveLyricsReelTarget(
 private fun NowPlayingLiveLyricsPanel(
     cardState: NowPlayingLyricsCardState,
     userPreferences: UserPreferences,
+    customFontFamily: androidx.compose.ui.text.font.FontFamily? = null,
     activeLyricFontSizeSp: Float,
     isCompact: Boolean,
     primaryColor: Color,
@@ -1714,7 +1726,8 @@ private fun NowPlayingLiveLyricsPanel(
                             style = LyricBarTypography.contextualLyricStyle(
                                 fontOption = userPreferences.selectedFont,
                                 fontSize = 12.5.sp,
-                                color = Color.White.copy(alpha = 0.50f)
+                                color = Color.White.copy(alpha = 0.50f),
+                                customFontFamily = customFontFamily
                             ),
                             textAlign = TextAlign.Center,
                             maxLines = 1,
@@ -1730,7 +1743,8 @@ private fun NowPlayingLiveLyricsPanel(
                         style = LyricBarTypography.activeLyricStyle(
                             fontOption = userPreferences.selectedFont,
                             fontSize = activeLyricFontSizeSp.sp,
-                            color = Color.White
+                            color = Color.White,
+                            customFontFamily = customFontFamily
                         ),
                         fontWeight = FontWeight.Bold,
                         textAlign = TextAlign.Center,
@@ -1749,7 +1763,8 @@ private fun NowPlayingLiveLyricsPanel(
                             style = LyricBarTypography.contextualLyricStyle(
                                 fontOption = userPreferences.selectedFont,
                                 fontSize = 13.sp,
-                                color = Color.White.copy(alpha = 0.68f)
+                                color = Color.White.copy(alpha = 0.68f),
+                                customFontFamily = customFontFamily
                             ),
                             textAlign = TextAlign.Center,
                             maxLines = 1,

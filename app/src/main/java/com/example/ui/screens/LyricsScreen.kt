@@ -116,6 +116,11 @@ fun LyricsScreen(
     val isLoading by playbackManager.isLoadingLyrics.collectAsStateWithLifecycle()
     val livePreferences by playbackManager.preferencesRepository.userPreferencesFlow
         .collectAsStateWithLifecycle(initialValue = userPreferences)
+    val customFontRepo = remember(context) { com.example.data.fonts.CustomFontRepository.getInstance(context) }
+    val customFonts by customFontRepo.customFontsFlow.collectAsStateWithLifecycle()
+    val activeCustomFontPath = remember(livePreferences.selectedCustomFontId, customFonts) {
+        customFontRepo.resolveValidFontFile(livePreferences.selectedCustomFontId)?.absolutePath
+    }
     val selectedProvider = livePreferences.lyricsProvider
 
     val currentLyricsAlignment = livePreferences.lyricsScreenAlignment
@@ -498,6 +503,7 @@ fun LyricsScreen(
                                         playbackState = playbackState,
                                         trackOffset = trackOffset,
                                         userPreferences = livePreferences,
+                                        customFontPath = activeCustomFontPath,
                                         themePrimary = themePrimary,
                                         textAlign = currentLyricsTextAlign,
                                         contentPadding = PaddingValues(top = 4.dp, bottom = 14.dp),
@@ -619,6 +625,7 @@ fun LyricsScreen(
                                     playbackState = playbackState,
                                     trackOffset = trackOffset,
                                     userPreferences = livePreferences,
+                                    customFontPath = activeCustomFontPath,
                                     themePrimary = themePrimary,
                                     textAlign = currentLyricsTextAlign,
                                     contentPadding = PaddingValues(top = 4.dp, bottom = 12.dp),
@@ -737,6 +744,7 @@ fun LyricsScreen(
                                         playbackState = playbackState,
                                         trackOffset = trackOffset,
                                         userPreferences = livePreferences,
+                                        customFontPath = activeCustomFontPath,
                                         themePrimary = themePrimary,
                                         textAlign = currentLyricsTextAlign,
                                         contentPadding = PaddingValues(
@@ -1747,6 +1755,7 @@ private fun LyricsLinesLazyColumn(
     playbackState: com.example.data.model.PlaybackStateInfo,
     trackOffset: Long,
     userPreferences: com.example.data.preferences.UserPreferences,
+    customFontPath: String? = null,
     themePrimary: Color,
     textAlign: TextAlign,
     contentPadding: PaddingValues,
@@ -1762,8 +1771,8 @@ private fun LyricsLinesLazyColumn(
         TextAlign.End, TextAlign.Right -> Arrangement.End
         else -> Arrangement.Center
     }
-    val resolvedFontFamily = remember(userPreferences.selectedFont) {
-        com.example.ui.theme.getFontFamily(userPreferences.selectedFont)
+    val resolvedFontFamily = remember(userPreferences.selectedFont, customFontPath) {
+        com.example.ui.theme.resolveLyricsFontFamily(userPreferences.selectedFont, customFontPath)
     }
     val glowColor = remember(themePrimary) {
         resolveActiveLyricGlowColor(themePrimary)

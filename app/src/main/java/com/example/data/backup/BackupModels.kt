@@ -120,6 +120,7 @@ data class BackupAppSettingsData(
     val themePreset: String = ThemePreset.ROSE_QUARTZ.name,
     val useWallpaperDynamicColor: Boolean = false,
     val selectedFont: String = FontOption.POPPINS.name,
+    val selectedCustomFontId: String? = null,
     val lyricsProvider: String = LyricsProviderPreference.AUTO.name,
     val autoShowOnPlayback: Boolean = true,
     val autoFetchLyrics: Boolean = true,
@@ -219,6 +220,38 @@ data class BackupImportedLyricRecord(
 )
 
 /**
+ * Custom fonts index (`custom_fonts/index.json`).
+ * Maps each exported custom `.ttf` / `.otf` font file inside `custom_fonts/` to its metadata.
+ */
+data class BackupCustomFontsIndex(
+    val schemaVersion: Int = 1,
+    val fonts: List<BackupCustomFontMeta> = emptyList()
+)
+
+data class BackupCustomFontMeta(
+    val id: String = "",
+    val displayName: String = "",
+    val originalFileName: String = "",
+    val extension: String = "ttf",
+    val storedFileName: String = "",
+    val sha256: String = "",
+    val fileSizeBytes: Long = 0L,
+    val importedAtMs: Long = 0L
+)
+
+data class BackupCustomFontRecord(
+    val meta: BackupCustomFontMeta,
+    val fontBytes: ByteArray
+)
+
+data class CustomFontBackupRestoreSummary(
+    val restoredCount: Int = 0,
+    val skippedDuplicates: Int = 0,
+    val skippedInvalid: Int = 0,
+    val idMapping: Map<String, String> = emptyMap()
+)
+
+/**
  * Complete validated payload extracted from (or prepared for) a backup ZIP.
  * Only selected/present categories are non-null.
  */
@@ -227,7 +260,8 @@ data class BackupArchivePayload(
     val appSettings: BackupAppSettingsData? = null,
     val hudConfig: BackupHudConfigData? = null,
     val lyricsHistory: BackupHistoryPayload? = null,
-    val importedLyrics: List<BackupImportedLyricRecord>? = null
+    val importedLyrics: List<BackupImportedLyricRecord>? = null,
+    val customFonts: List<BackupCustomFontRecord>? = null
 )
 
 /**
@@ -235,7 +269,8 @@ data class BackupArchivePayload(
  */
 data class LocalBackupDataCounts(
     val historyCount: Int = 0,
-    val importedLyricsCount: Int = 0
+    val importedLyricsCount: Int = 0,
+    val customFontsCount: Int = 0
 )
 
 /**

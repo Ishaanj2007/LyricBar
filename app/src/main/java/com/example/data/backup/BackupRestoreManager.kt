@@ -6,6 +6,7 @@ import android.os.StatFs
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import com.example.BuildConfig
+import com.example.data.fonts.CustomFontRepository
 import com.example.data.local.LyricBarDatabase
 import com.example.data.local.entity.LyricsEntity
 import com.example.data.local.entity.SongHistoryEntity
@@ -42,7 +43,8 @@ class BackupRestoreManager(
     private val appVersion: String = BuildConfig.VERSION_NAME,
     private val appVersionCode: Int = BuildConfig.VERSION_CODE,
     private val nowProvider: () -> Long = { System.currentTimeMillis() },
-    private val freeSpaceBytesProvider: (() -> Long)? = null
+    private val freeSpaceBytesProvider: (() -> Long)? = null,
+    private val customFontStore: BackupCustomFontStore? = null
 ) {
 
     constructor(
@@ -61,15 +63,18 @@ class BackupRestoreManager(
             } catch (_: Exception) {
                 Long.MAX_VALUE
             }
-        }
+        },
+        customFontStore = RepositoryBackupCustomFontStore(CustomFontRepository.getInstance(context))
     )
 
     suspend fun getLocalDataCounts(): LocalBackupDataCounts = withContext(Dispatchers.IO) {
         val history = deduplicateHistoryEntities(databaseStore.getAllHistory())
         val imported = filterPortableImportedLyrics(databaseStore.getAllLyrics())
+        val customFontsCount = customFontStore?.getFontsCount() ?: 0
         LocalBackupDataCounts(
             historyCount = history.size,
-            importedLyricsCount = imported.size
+            importedLyricsCount = imported.size,
+            customFontsCount = customFontsCount
         )
     }
 
@@ -213,7 +218,8 @@ class BackupRestoreManager(
                     appSettings = gathered.appSettings,
                     hudConfig = gathered.hudConfig,
                     lyricsHistory = gathered.lyricsHistory,
-                    importedLyrics = gathered.importedLyrics
+                    importedLyrics = gathered.importedLyrics,
+                    customFonts = gathered.customFonts
                 )
                 // Note: BackupZipCodec.writeBackupZip finishes, flushes, and closes ZipOutputStream
                 // (and underlying FileOutputStream). Do NOT call fos.fd.sync() after close().
@@ -633,15 +639,41 @@ class BackupRestoreManager(
         // Step 2: Atomic DataStore selective restore (only for selected preference categories)
         if (prefCategories.isNotEmpty()) {
             try {
+                var fontRestoreSummary: CustomFontBackupRestoreSummary? = null
+                val effectiveAppSettings: BackupAppSettingsData? = if (restoreAppSettings != null) {
+                    val incomingFonts = inspection.payload.customFonts
+                    if (!incomingFonts.isNullOrEmpty() && customFontStore != null) {
+                        fontRestoreSummary = customFontStore.restoreCustomFonts(incomingFonts)
+                    }
+                    val incomingFontId = restoreAppSettings.selectedCustomFontId?.takeIf { it.isNotBlank() }
+                    val resolvedFontId = if (incomingFontId != null) {
+                        fontRestoreSummary?.idMapping?.get(incomingFontId)
+                            ?: customFontStore?.resolveValidFontId(incomingFontId)
+                    } else {
+                        null
+                    }
+                    restoreAppSettings.copy(selectedCustomFontId = resolvedFontId)
+                } else null
+
                 preferencesStore.applySelective(
-                    appSettings = restoreAppSettings,
+                    appSettings = effectiveAppSettings,
                     hudConfig = restoreHudConfig
                 )
-                if (restoreAppSettings != null) {
+                if (effectiveAppSettings != null) {
+                    val fontSummarySuffix = when {
+                        fontRestoreSummary == null -> ""
+                        fontRestoreSummary.restoredCount > 0 && fontRestoreSummary.skippedInvalid > 0 ->
+                            ", restored ${fontRestoreSummary.restoredCount} custom font(s) (skipped ${fontRestoreSummary.skippedInvalid} invalid)"
+                        fontRestoreSummary.restoredCount > 0 ->
+                            ", restored ${fontRestoreSummary.restoredCount} custom font(s)"
+                        fontRestoreSummary.skippedDuplicates > 0 ->
+                            ", kept ${fontRestoreSummary.skippedDuplicates} existing custom font(s)"
+                        else -> ""
+                    }
                     details.add(
                         CategoryRestoreDetail(
                             BackupCategory.APP_SETTINGS,
-                            "Restored themes, fonts, provider and display preferences"
+                            "Restored themes, fonts, provider and display preferences$fontSummarySuffix"
                         )
                     )
                 }
@@ -727,7 +759,8 @@ class BackupRestoreManager(
             appSettings = gathered.appSettings,
             hudConfig = gathered.hudConfig,
             lyricsHistory = gathered.lyricsHistory,
-            importedLyrics = gathered.importedLyrics
+            importedLyrics = gathered.importedLyrics,
+            customFonts = gathered.customFonts
         )
         val bytes = out.toByteArray()
         // Integrity self-check before reporting success or writing to final target
@@ -742,12 +775,17 @@ class BackupRestoreManager(
         val appSettings: BackupAppSettingsData? = null,
         val hudConfig: BackupHudConfigData? = null,
         val lyricsHistory: BackupHistoryPayload? = null,
-        val importedLyrics: List<BackupImportedLyricRecord>? = null
+        val importedLyrics: List<BackupImportedLyricRecord>? = null,
+        val customFonts: List<BackupCustomFontRecord>? = null
     )
 
     private suspend fun gatherSelectedData(selectedCategories: Set<BackupCategory>): GatheredBackupData {
         val appSettings = if (BackupCategory.APP_SETTINGS in selectedCategories) {
             preferencesStore.readAppSettings()
+        } else null
+
+        val customFonts = if (BackupCategory.APP_SETTINGS in selectedCategories) {
+            customFontStore?.exportCustomFonts()?.takeIf { it.isNotEmpty() }
         } else null
 
         val hudConfig = if (BackupCategory.HUD_CONFIGURATION in selectedCategories) {
@@ -800,7 +838,8 @@ class BackupRestoreManager(
             appSettings = appSettings,
             hudConfig = hudConfig,
             lyricsHistory = lyricsHistory,
-            importedLyrics = importedLyrics
+            importedLyrics = importedLyrics,
+            customFonts = customFonts
         )
     }
 
