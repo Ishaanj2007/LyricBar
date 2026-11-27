@@ -7,11 +7,18 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -29,10 +36,21 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventTimeoutCancellationException
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -47,6 +65,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.zIndex
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import com.example.data.preferences.HudBackdropStyle
@@ -71,6 +90,8 @@ import com.example.ui.components.HudColorTarget
 import com.example.ui.components.HudHoldGestureController
 import com.example.ui.components.LocalHazeState
 import com.example.ui.components.MinimalOverlayView
+import com.example.ui.components.ProviderReorderLogic
+import com.example.ui.components.ProviderSlotBounds
 import com.example.ui.theme.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.lifecycle.Lifecycle
@@ -78,6 +99,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.chrisbanes.haze.HazeState
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
@@ -137,6 +160,8 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    val settingsScrollState = rememberScrollState()
+    var viewportBoundsInRoot by remember { mutableStateOf<Pair<Float, Float>?>(null) }
     val livePreferences by playbackManager.preferencesRepository.userPreferencesFlow
         .collectAsStateWithLifecycle(initialValue = userPreferences)
     val selectedProvider = livePreferences.lyricsProvider
@@ -3557,80 +3582,60 @@ fun SettingsScreen(
             modifier = Modifier.testTag("settings_lyrics_provider_section")
         ) {
             Column(modifier = Modifier.padding(18.dp)) {
+                val savedProviderOrder = remember(livePreferences.lyricsProviderOrder) {
+                    LyricsProviderPreference.normalizeProviderOrderEntries(livePreferences.lyricsProviderOrder)
+                }
+                val isDefaultProviderOrder =
+                    savedProviderOrder == LyricsProviderPreference.DEFAULT_PROVIDER_ORDER
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Default Lyrics Provider",
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (!isDefaultProviderOrder) {
+                        TextButton(
+                            onClick = {
+                                playbackManager.setLyricsProviderOrder(LyricsProviderPreference.DEFAULT_PROVIDER_ORDER)
+                            },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                            modifier = Modifier
+                                .heightIn(min = 28.dp)
+                                .testTag("settings_provider_restore_default_btn")
+                        ) {
+                            Text(
+                                text = "Restore Default",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
                 Text(
-                    text = "Default Lyrics Provider",
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    text = "Choose how LyricBar searches for synchronized lyrics across online catalogs",
+                    text = "Tap to choose a source, or long-press and drag providers to set Automatic search priority (#1 first)",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(14.dp))
 
-                LyricsProviderPreference.entries.forEach { option ->
-                    val isSelected = selectedProvider == option
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp)
-                            .clickable {
-                                playbackManager.setLyricsProvider(option)
-                            }
-                            .testTag("settings_provider_option_${option.name.lowercase()}"),
-                        shape = RoundedCornerShape(12.dp),
-                        color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                        border = if (isSelected) androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            RadioButton(
-                                selected = isSelected,
-                                onClick = {
-                                    playbackManager.setLyricsProvider(option)
-                                }
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Text(
-                                        text = option.displayName,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                        fontSize = 13.sp,
-                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
-                                    )
-                                    if (option == LyricsProviderPreference.AUTO) {
-                                        Surface(
-                                            shape = RoundedCornerShape(6.dp),
-                                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
-                                        ) {
-                                            Text(
-                                                text = "Default",
-                                                fontSize = 10.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                            )
-                                        }
-                                    }
-                                }
-                                Text(
-                                    text = option.description,
-                                    fontSize = 11.sp,
-                                    color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
+                UnifiedLyricsProviderList(
+                    selectedProvider = selectedProvider,
+                    savedOrder = savedProviderOrder,
+                    scrollState = settingsScrollState,
+                    viewportBoundsInRoot = viewportBoundsInRoot,
+                    onSelectProvider = { option ->
+                        playbackManager.setLyricsProvider(option)
+                    },
+                    onCommitOrder = { updatedOrder ->
+                        playbackManager.setLyricsProviderOrder(updatedOrder)
                     }
-                }
+                )
             }
         }
     }
@@ -3875,8 +3880,12 @@ fun SettingsScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .onGloballyPositioned { coords ->
+                    val top = coords.positionInRoot().y
+                    viewportBoundsInRoot = top to (top + coords.size.height.toFloat())
+                }
                 .then(if (hasBottomNavPill) Modifier.windowInsetsPadding(WindowInsets.statusBars) else Modifier)
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(settingsScrollState)
                 .padding(
                     horizontal = when {
                         isWideTwoColumn -> 24.dp
@@ -4994,5 +5003,351 @@ private fun OrientationSnapshotRow(
             color = MaterialTheme.colorScheme.onSurface,
             textAlign = TextAlign.End
         )
+    }
+}
+
+@Composable
+private fun UnifiedLyricsProviderList(
+    selectedProvider: LyricsProviderPreference,
+    savedOrder: List<LyricsProviderPreference>,
+    scrollState: ScrollState,
+    viewportBoundsInRoot: Pair<Float, Float>?,
+    onSelectProvider: (LyricsProviderPreference) -> Unit,
+    onCommitOrder: (List<LyricsProviderPreference>) -> Unit
+) {
+    val haptic = LocalHapticFeedback.current
+    val density = LocalDensity.current
+    val autoScrollEdgePx = remember(density) { with(density) { 56.dp.toPx() } }
+    val autoScrollMaxStepPx = remember(density) { with(density) { 12.dp.toPx() } }
+
+    val normalizedSaved = remember(savedOrder) {
+        LyricsProviderPreference.normalizeProviderOrderEntries(savedOrder)
+    }
+    var pendingCommittedOrder by remember { mutableStateOf<List<LyricsProviderPreference>?>(null) }
+    LaunchedEffect(normalizedSaved) {
+        if (pendingCommittedOrder == normalizedSaved) {
+            pendingCommittedOrder = null
+        }
+    }
+
+    var draggedProvider by remember { mutableStateOf<LyricsProviderPreference?>(null) }
+    var temporaryDragOrder by remember { mutableStateOf<List<LyricsProviderPreference>?>(null) }
+    var dragDesiredTopY by remember { mutableFloatStateOf(0f) }
+    var grabOffsetInRowPx by remember { mutableFloatStateOf(0f) }
+    var latestPointerRootY by remember { mutableStateOf<Float?>(null) }
+    var listCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    val slotBounds = remember { mutableStateMapOf<LyricsProviderPreference, ProviderSlotBounds>() }
+
+    val displayedOrder = temporaryDragOrder ?: pendingCommittedOrder ?: normalizedSaved
+    val currentDisplayedState by rememberUpdatedState(displayedOrder)
+    val currentViewportBoundsState by rememberUpdatedState(viewportBoundsInRoot)
+    val isDraggingAny = draggedProvider != null
+
+    fun updateDragPosition(activeOption: LyricsProviderPreference, pointerLocalY: Float) {
+        val currentList = temporaryDragOrder ?: currentDisplayedState
+        val currentIdx = currentList.indexOf(activeOption)
+        val activeSlot = slotBounds[activeOption] ?: return
+        val firstTop = slotBounds[currentList.first()]?.topPx ?: 0f
+        val lastBottom = slotBounds[currentList.last()]?.bottomPx ?: Float.MAX_VALUE
+        val clampedTop = (pointerLocalY - grabOffsetInRowPx).coerceIn(
+            minimumValue = firstTop - 12f,
+            maximumValue = (lastBottom - activeSlot.heightPx).coerceAtLeast(firstTop) + 12f
+        )
+        dragDesiredTopY = clampedTop
+        val desiredCenterY = clampedTop + (activeSlot.heightPx * 0.5f)
+        val targetIdx = ProviderReorderLogic.computeSwapTargetIndex(
+            order = currentList,
+            currentIndex = currentIdx,
+            draggedCenterY = desiredCenterY,
+            slotBounds = slotBounds,
+            hysteresisPx = 6f
+        )
+        if (targetIdx != currentIdx) {
+            temporaryDragOrder = ProviderReorderLogic.moveItem(currentList, currentIdx, targetIdx)
+        }
+    }
+
+    LaunchedEffect(draggedProvider) {
+        val activeOption = draggedProvider ?: return@LaunchedEffect
+        while (isActive && draggedProvider == activeOption) {
+            withFrameMillis {
+                val rootY = latestPointerRootY ?: return@withFrameMillis
+                val bounds = currentViewportBoundsState ?: return@withFrameMillis
+                val deltaPx = ProviderReorderLogic.computeAutoScrollDeltaPx(
+                    pointerRootY = rootY,
+                    viewportTopRootY = bounds.first,
+                    viewportBottomRootY = bounds.second,
+                    edgeZonePx = autoScrollEdgePx,
+                    maxStepPx = autoScrollMaxStepPx
+                )
+                if (abs(deltaPx) > 0.5f) {
+                    val scrolled = scrollState.dispatchRawDelta(deltaPx)
+                    if (abs(scrolled) > 0.1f) {
+                        val coords = listCoords
+                        if (coords != null && coords.isAttached) {
+                            val localY = rootY - coords.positionInRoot().y
+                            updateDragPosition(activeOption, localY)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        // Pinned AUTO option (not draggable)
+        ProviderRadioRowCard(
+            option = LyricsProviderPreference.AUTO,
+            isSelected = selectedProvider == LyricsProviderPreference.AUTO,
+            priorityIndex = null,
+            isDragging = false,
+            clickEnabled = !isDraggingAny,
+            onSelect = { onSelectProvider(LyricsProviderPreference.AUTO) }
+        )
+
+        // Draggable selectable providers in current priority order inside the same list
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .onGloballyPositioned { coords ->
+                    listCoords = coords
+                }
+                .pointerInput(Unit) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        val startOrder = currentDisplayedState
+                        val hitOption = startOrder.firstOrNull { opt ->
+                            val bounds = slotBounds[opt]
+                            bounds != null && down.position.y in bounds.topPx..bounds.bottomPx
+                        } ?: return@awaitEachGesture
+
+                        var abortedBeforeLongPress = false
+                        var latestLocalY = down.position.y
+                        var latestRootY = listCoords?.takeIf { it.isAttached }?.localToRoot(down.position)?.y
+
+                        val longPressTriggered = try {
+                            withTimeout(viewConfiguration.longPressTimeoutMillis) {
+                                while (true) {
+                                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                                    val change = event.changes.firstOrNull { it.id == down.id }
+                                    if (change == null || !change.pressed) {
+                                        abortedBeforeLongPress = true
+                                        break
+                                    }
+                                    if ((change.position - down.position).getDistance() > viewConfiguration.touchSlop) {
+                                        abortedBeforeLongPress = true
+                                        break
+                                    }
+                                    latestLocalY = change.position.y
+                                    latestRootY = listCoords?.takeIf { it.isAttached }?.localToRoot(change.position)?.y
+                                }
+                            }
+                            false
+                        } catch (_: PointerEventTimeoutCancellationException) {
+                            true
+                        }
+
+                        if (!longPressTriggered || abortedBeforeLongPress) {
+                            return@awaitEachGesture
+                        }
+
+                        val startSlot = slotBounds[hitOption] ?: return@awaitEachGesture
+                        val snapshotOrder = currentDisplayedState
+                        grabOffsetInRowPx = latestLocalY - startSlot.topPx
+                        dragDesiredTopY = startSlot.topPx
+                        temporaryDragOrder = snapshotOrder
+                        draggedProvider = hitOption
+                        latestPointerRootY = latestRootY
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+
+                        try {
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                val change = event.changes.firstOrNull { it.id == down.id }
+                                if (change == null) {
+                                    // Stream interrupted/cancelled: restore original snapshot without persisting
+                                    draggedProvider = null
+                                    temporaryDragOrder = null
+                                    latestPointerRootY = null
+                                    break
+                                }
+                                change.consume()
+                                if (!change.pressed) {
+                                    val committedOrder = temporaryDragOrder ?: snapshotOrder
+                                    if (committedOrder != snapshotOrder) {
+                                        pendingCommittedOrder = committedOrder
+                                        onCommitOrder(committedOrder)
+                                    }
+                                    draggedProvider = null
+                                    temporaryDragOrder = null
+                                    latestPointerRootY = null
+                                    break
+                                }
+                                latestPointerRootY = listCoords?.takeIf { it.isAttached }?.localToRoot(change.position)?.y
+                                updateDragPosition(hitOption, change.position.y)
+                            }
+                        } catch (ce: CancellationException) {
+                            draggedProvider = null
+                            temporaryDragOrder = null
+                            latestPointerRootY = null
+                            throw ce
+                        }
+                    }
+                }
+        ) {
+            displayedOrder.forEachIndexed { idx, option ->
+                key(option) {
+                    val isDragging = draggedProvider == option
+                    val currentSlotTop = slotBounds[option]?.topPx
+                    var previousSlotTop by remember { mutableStateOf<Float?>(null) }
+                    val neighborDisplacementAnim = remember { Animatable(0f) }
+
+                    LaunchedEffect(currentSlotTop, isDragging) {
+                        val newTop = currentSlotTop ?: return@LaunchedEffect
+                        if (isDragging) {
+                            previousSlotTop = newTop
+                            neighborDisplacementAnim.snapTo(0f)
+                            return@LaunchedEffect
+                        }
+                        val oldTop = previousSlotTop
+                        previousSlotTop = newTop
+                        if (oldTop != null && oldTop != newTop && isDraggingAny) {
+                            val delta = oldTop - newTop
+                            neighborDisplacementAnim.snapTo(neighborDisplacementAnim.value + delta)
+                            neighborDisplacementAnim.animateTo(
+                                targetValue = 0f,
+                                animationSpec = tween(durationMillis = 160, easing = FastOutSlowInEasing)
+                            )
+                        }
+                    }
+
+                    val dragScale by animateFloatAsState(
+                        targetValue = if (isDragging) 1.02f else 1f,
+                        animationSpec = tween(durationMillis = 120),
+                        label = "provider_drag_scale"
+                    )
+                    val dragTranslationY = if (isDragging) {
+                        dragDesiredTopY - (currentSlotTop ?: dragDesiredTopY)
+                    } else {
+                        neighborDisplacementAnim.value
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .zIndex(if (isDragging) 2f else 0f)
+                            .onGloballyPositioned { coords ->
+                                slotBounds[option] = ProviderSlotBounds(
+                                    topPx = coords.positionInParent().y,
+                                    heightPx = coords.size.height.toFloat()
+                                )
+                            }
+                    ) {
+                        ProviderRadioRowCard(
+                            option = option,
+                            isSelected = selectedProvider == option,
+                            priorityIndex = idx,
+                            isDragging = isDragging,
+                            clickEnabled = !isDraggingAny,
+                            onSelect = { onSelectProvider(option) },
+                            modifier = Modifier.graphicsLayer {
+                                translationY = dragTranslationY
+                                scaleX = dragScale
+                                scaleY = dragScale
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProviderRadioRowCard(
+    option: LyricsProviderPreference,
+    isSelected: Boolean,
+    priorityIndex: Int?,
+    isDragging: Boolean,
+    clickEnabled: Boolean,
+    onSelect: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+            .clickable(enabled = clickEnabled) {
+                onSelect()
+            }
+            .testTag("settings_provider_option_${option.name.lowercase()}"),
+        shape = RoundedCornerShape(12.dp),
+        shadowElevation = if (isDragging) 8.dp else 0.dp,
+        color = when {
+            isDragging -> MaterialTheme.colorScheme.secondaryContainer
+            isSelected -> MaterialTheme.colorScheme.primaryContainer
+            else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        },
+        border = when {
+            isDragging -> BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
+            isSelected -> BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary)
+            else -> null
+        }
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            RadioButton(
+                selected = isSelected,
+                onClick = if (clickEnabled) onSelect else null
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = option.displayName,
+                        fontWeight = if (isSelected || isDragging) FontWeight.Bold else FontWeight.Medium,
+                        fontSize = 13.sp,
+                        color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                    )
+                    if (option == LyricsProviderPreference.AUTO) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                        ) {
+                            Text(
+                                text = "Default",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    } else if (priorityIndex != null) {
+                        Text(
+                            text = if (priorityIndex == 0) "#1 • Priority" else "#${priorityIndex + 1}",
+                            fontSize = 10.sp,
+                            fontWeight = if (priorityIndex == 0) FontWeight.SemiBold else FontWeight.Medium,
+                            color = if (priorityIndex == 0) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f)
+                            }
+                        )
+                    }
+                }
+                Text(
+                    text = option.description,
+                    fontSize = 11.sp,
+                    color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
     }
 }

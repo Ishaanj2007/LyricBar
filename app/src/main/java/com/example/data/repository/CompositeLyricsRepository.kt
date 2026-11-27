@@ -108,7 +108,8 @@ class CompositeLyricsRepository internal constructor(
         track: TrackMetadata,
         forceNetwork: Boolean = false,
         allowNetwork: Boolean = true,
-        providerPreference: LyricsProviderPreference = LyricsProviderPreference.AUTO
+        providerPreference: LyricsProviderPreference = LyricsProviderPreference.AUTO,
+        providerOrder: List<LyricsProviderPreference> = LyricsProviderPreference.DEFAULT_PROVIDER_ORDER
     ): Result<ParsedLyrics> = withContext(Dispatchers.IO) {
         val identityKey = track.identityKey
         val lookupKey = track.lookupKey
@@ -200,7 +201,7 @@ class CompositeLyricsRepository internal constructor(
         val cleanArtist = TrackMetadata.cleanForLookup(track.artist)
 
         val candidateProviders: List<LyricsProvider> = when (providerPreference) {
-            LyricsProviderPreference.AUTO -> providers
+            LyricsProviderPreference.AUTO -> orderProvidersForAuto(providers, providerOrder)
             else -> {
                 val targetName = providerPreference.providerName
                 providers.filter { it.name.equals(targetName, ignoreCase = true) }
@@ -603,6 +604,33 @@ class CompositeLyricsRepository internal constructor(
             val requiredProvider = preference.providerName ?: return false
             val cleanSource = cachedSource.removeSuffix("(Cached)").trim()
             return cleanSource.equals(requiredProvider, ignoreCase = true)
+        }
+
+        internal fun orderProvidersForAuto(
+            providers: List<LyricsProvider>,
+            providerOrder: List<LyricsProviderPreference>
+        ): List<LyricsProvider> {
+            if (providers.size <= 1) return providers
+            val normalizedOrder = LyricsProviderPreference.normalizeProviderOrderEntries(providerOrder)
+            if (normalizedOrder == LyricsProviderPreference.DEFAULT_PROVIDER_ORDER) {
+                return providers
+            }
+            val ordered = ArrayList<LyricsProvider>(providers.size)
+            val remaining = providers.toMutableList()
+            for (pref in normalizedOrder) {
+                val targetName = pref.providerName ?: continue
+                val iterator = remaining.iterator()
+                while (iterator.hasNext()) {
+                    val candidate = iterator.next()
+                    if (candidate.name.equals(targetName, ignoreCase = true)) {
+                        ordered.add(candidate)
+                        iterator.remove()
+                    }
+                }
+            }
+            // Preserve any injected or test-only providers safely in their original relative order
+            ordered.addAll(remaining)
+            return ordered
         }
 
         internal fun createDefaultProviders(

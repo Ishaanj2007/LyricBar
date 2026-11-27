@@ -72,6 +72,16 @@ enum class LyricsProviderPreference(
     );
 
     companion object {
+        val DEFAULT_PROVIDER_ORDER: List<LyricsProviderPreference> = listOf(
+            LRCLIB,
+            LRC_RED,
+            LYRICS_PLUS,
+            KUGOU,
+            LYRICA,
+            LIRIQO,
+            UNISON
+        )
+
         fun fromPersistedValue(value: String?): LyricsProviderPreference {
             if (value.isNullOrBlank()) return AUTO
             val trimmed = value.trim()
@@ -80,6 +90,55 @@ enum class LyricsProviderPreference(
                     option.displayName.equals(trimmed, ignoreCase = true) ||
                     (option.providerName != null && option.providerName.equals(trimmed, ignoreCase = true))
             } ?: AUTO
+        }
+
+        private fun resolveSelectableProviderOrNull(token: String?): LyricsProviderPreference? {
+            if (token.isNullOrBlank()) return null
+            val cleaned = token.trim().trim('"', '\'', '[', ']')
+            if (cleaned.isBlank() || cleaned.equals(AUTO.name, ignoreCase = true)) return null
+            val resolved = entries.firstOrNull { option ->
+                option != AUTO && (
+                    option.name.equals(cleaned, ignoreCase = true) ||
+                        option.displayName.equals(cleaned, ignoreCase = true) ||
+                        (option.providerName != null && option.providerName.equals(cleaned, ignoreCase = true))
+                    )
+            }
+            return resolved
+        }
+
+        fun normalizeProviderOrder(rawIds: Iterable<String>): List<LyricsProviderPreference> {
+            val ordered = LinkedHashSet<LyricsProviderPreference>(DEFAULT_PROVIDER_ORDER.size)
+            for (raw in rawIds) {
+                val resolved = resolveSelectableProviderOrNull(raw) ?: continue
+                ordered.add(resolved)
+            }
+            for (fallback in DEFAULT_PROVIDER_ORDER) {
+                ordered.add(fallback)
+            }
+            return ordered.toList()
+        }
+
+        fun normalizeProviderOrderEntries(entries: List<LyricsProviderPreference>): List<LyricsProviderPreference> {
+            val ordered = LinkedHashSet<LyricsProviderPreference>(DEFAULT_PROVIDER_ORDER.size)
+            for (entry in entries) {
+                if (entry != AUTO) {
+                    ordered.add(entry)
+                }
+            }
+            for (fallback in DEFAULT_PROVIDER_ORDER) {
+                ordered.add(fallback)
+            }
+            return ordered.toList()
+        }
+
+        fun parseProviderOrder(rawSavedValue: String?): List<LyricsProviderPreference> {
+            if (rawSavedValue.isNullOrBlank()) return DEFAULT_PROVIDER_ORDER
+            val tokens = rawSavedValue.split(',', ';', '|', '\n')
+            return normalizeProviderOrder(tokens)
+        }
+
+        fun serializeProviderOrder(order: List<LyricsProviderPreference>): String {
+            return normalizeProviderOrderEntries(order).joinToString(",") { it.name }
         }
     }
 }
@@ -217,6 +276,7 @@ data class UserPreferences(
     val autoShowOnPlayback: Boolean = true,
     val autoFetchLyrics: Boolean = true,
     val lyricsProvider: LyricsProviderPreference = LyricsProviderPreference.AUTO,
+    val lyricsProviderOrder: List<LyricsProviderPreference> = LyricsProviderPreference.DEFAULT_PROVIDER_ORDER,
     val useWallpaperDynamicColor: Boolean = false,
     val themeMode: ThemeMode = ThemeMode.FOLLOW_SYSTEM,
     val themePreset: ThemePreset = ThemePreset.ROSE_QUARTZ,
@@ -331,6 +391,7 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
         val AUTO_SHOW_ON_PLAYBACK = booleanPreferencesKey("auto_show_on_playback")
         val AUTO_FETCH_LYRICS = booleanPreferencesKey("auto_fetch_lyrics")
         val LYRICS_PROVIDER = stringPreferencesKey("lyrics_provider")
+        val LYRICS_PROVIDER_ORDER = stringPreferencesKey("lyrics_provider_order")
         val USE_WALLPAPER_DYNAMIC_COLOR = booleanPreferencesKey("use_wallpaper_dynamic_color")
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val THEME_PRESET = stringPreferencesKey("theme_preset")
@@ -479,6 +540,9 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
                 autoShowOnPlayback = preferences[PreferencesKeys.AUTO_SHOW_ON_PLAYBACK] ?: true,
                 autoFetchLyrics = preferences[PreferencesKeys.AUTO_FETCH_LYRICS] ?: true,
                 lyricsProvider = lyricsProvider,
+                lyricsProviderOrder = LyricsProviderPreference.parseProviderOrder(
+                    preferences[PreferencesKeys.LYRICS_PROVIDER_ORDER]
+                ),
                 useWallpaperDynamicColor = preferences[PreferencesKeys.USE_WALLPAPER_DYNAMIC_COLOR] ?: false,
                 themeMode = themeMode,
                 themePreset = preset,
@@ -510,6 +574,15 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
     suspend fun setLyricsProvider(rawProvider: String?) {
         val resolved = LyricsProviderPreference.fromPersistedValue(rawProvider)
         setLyricsProvider(resolved)
+    }
+
+    val lyricsProviderOrderFlow: Flow<List<LyricsProviderPreference>> = userPreferencesFlow
+        .map { it.lyricsProviderOrder }
+        .distinctUntilChanged()
+
+    suspend fun setLyricsProviderOrder(order: List<LyricsProviderPreference>) {
+        val serialized = LyricsProviderPreference.serializeProviderOrder(order)
+        dataStore.edit { it[PreferencesKeys.LYRICS_PROVIDER_ORDER] = serialized }
     }
 
     suspend fun setAnimationStyle(style: String) {
@@ -1167,6 +1240,14 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
                     prefs.remove(PreferencesKeys.SELECTED_CUSTOM_FONT_ID)
                 }
                 prefs[PreferencesKeys.LYRICS_PROVIDER] = safeProvider.name
+                val incomingOrder = appSettings.lyricsProviderOrder
+                if (incomingOrder != null) {
+                    val normalizedOrder = LyricsProviderPreference.normalizeProviderOrder(incomingOrder)
+                    prefs[PreferencesKeys.LYRICS_PROVIDER_ORDER] =
+                        LyricsProviderPreference.serializeProviderOrder(normalizedOrder)
+                } else {
+                    prefs.remove(PreferencesKeys.LYRICS_PROVIDER_ORDER)
+                }
                 prefs[PreferencesKeys.AUTO_SHOW_ON_PLAYBACK] = appSettings.autoShowOnPlayback
                 prefs[PreferencesKeys.AUTO_FETCH_LYRICS] = appSettings.autoFetchLyrics
                 prefs[PreferencesKeys.AUTO_UPDATE_CHECKS_ENABLED] = appSettings.autoUpdateChecksEnabled
@@ -1330,6 +1411,9 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
             selectedFont = font.name,
             selectedCustomFontId = raw[PreferencesKeys.SELECTED_CUSTOM_FONT_ID]?.takeIf { it.isNotBlank() },
             lyricsProvider = provider.name,
+            lyricsProviderOrder = LyricsProviderPreference.parseProviderOrder(
+                raw[PreferencesKeys.LYRICS_PROVIDER_ORDER]
+            ).map { it.name },
             autoShowOnPlayback = raw[PreferencesKeys.AUTO_SHOW_ON_PLAYBACK] ?: true,
             autoFetchLyrics = raw[PreferencesKeys.AUTO_FETCH_LYRICS] ?: true,
             autoUpdateChecksEnabled = raw[PreferencesKeys.AUTO_UPDATE_CHECKS_ENABLED] ?: true,

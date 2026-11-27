@@ -94,7 +94,8 @@ class MediaPlaybackManager private constructor(private val context: Context) {
             preferencesRepository.userPreferencesFlow.collect { prefs ->
                 pipeline.onPreferencesChanged(
                     newAutoFetch = prefs.autoFetchLyrics,
-                    newProvider = prefs.lyricsProvider
+                    newProvider = prefs.lyricsProvider,
+                    newProviderOrder = prefs.lyricsProviderOrder
                 )
             }
         }
@@ -103,6 +104,12 @@ class MediaPlaybackManager private constructor(private val context: Context) {
     fun setLyricsProvider(provider: LyricsProviderPreference) {
         scope.launch {
             preferencesRepository.setLyricsProvider(provider)
+        }
+    }
+
+    fun setLyricsProviderOrder(order: List<LyricsProviderPreference>) {
+        scope.launch {
+            preferencesRepository.setLyricsProviderOrder(order)
         }
     }
 

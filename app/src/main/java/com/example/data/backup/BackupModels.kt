@@ -122,6 +122,7 @@ data class BackupAppSettingsData(
     val selectedFont: String = FontOption.POPPINS.name,
     val selectedCustomFontId: String? = null,
     val lyricsProvider: String = LyricsProviderPreference.AUTO.name,
+    val lyricsProviderOrder: List<String>? = null,
     val autoShowOnPlayback: Boolean = true,
     val autoFetchLyrics: Boolean = true,
     val autoUpdateChecksEnabled: Boolean = true,

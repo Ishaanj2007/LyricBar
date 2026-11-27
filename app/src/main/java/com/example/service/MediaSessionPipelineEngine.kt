@@ -23,7 +23,8 @@ interface LyricsPipelineRepository {
         track: TrackMetadata,
         forceNetwork: Boolean = false,
         allowNetwork: Boolean = true,
-        providerPreference: LyricsProviderPreference = LyricsProviderPreference.AUTO
+        providerPreference: LyricsProviderPreference = LyricsProviderPreference.AUTO,
+        providerOrder: List<LyricsProviderPreference> = LyricsProviderPreference.DEFAULT_PROVIDER_ORDER
     ): Result<ParsedLyrics>
 
     suspend fun saveImportedLyrics(
@@ -42,12 +43,14 @@ class CompositeLyricsPipelineRepository(
         track: TrackMetadata,
         forceNetwork: Boolean,
         allowNetwork: Boolean,
-        providerPreference: LyricsProviderPreference
+        providerPreference: LyricsProviderPreference,
+        providerOrder: List<LyricsProviderPreference>
     ): Result<ParsedLyrics> = repository.getOrFetchLyrics(
         track = track,
         forceNetwork = forceNetwork,
         allowNetwork = allowNetwork,
-        providerPreference = providerPreference
+        providerPreference = providerPreference,
+        providerOrder = providerOrder
     )
 
     override suspend fun saveImportedLyrics(
@@ -126,6 +129,9 @@ class MediaSessionPipelineEngine(
         private set
 
     var selectedLyricsProvider: LyricsProviderPreference = LyricsProviderPreference.AUTO
+        private set
+
+    var lyricsProviderOrder: List<LyricsProviderPreference> = LyricsProviderPreference.DEFAULT_PROVIDER_ORDER
         private set
 
     private var fetchJob: Job? = null
@@ -343,12 +349,14 @@ class MediaSessionPipelineEngine(
 
     fun onPreferencesChanged(
         newAutoFetch: Boolean,
-        newProvider: LyricsProviderPreference
+        newProvider: LyricsProviderPreference,
+        newProviderOrder: List<LyricsProviderPreference> = lyricsProviderOrder
     ) {
         val previousAutoFetch = autoFetchLyrics
         val previousProvider = selectedLyricsProvider
         autoFetchLyrics = newAutoFetch
         selectedLyricsProvider = newProvider
+        lyricsProviderOrder = LyricsProviderPreference.normalizeProviderOrderEntries(newProviderOrder)
 
         val currentTrack = _playbackState.value.track
         val eligibleTrack = currentTrack?.takeIf {
@@ -472,7 +480,8 @@ class MediaSessionPipelineEngine(
                         track = track,
                         forceNetwork = true,
                         allowNetwork = true,
-                        providerPreference = selectedLyricsProvider
+                        providerPreference = selectedLyricsProvider,
+                        providerOrder = lyricsProviderOrder
                     )
                 } catch (ce: CancellationException) {
                     throw ce
@@ -617,7 +626,8 @@ class MediaSessionPipelineEngine(
                     track = track,
                     forceNetwork = forceNetwork,
                     allowNetwork = autoFetchLyrics || forceNetwork,
-                    providerPreference = selectedLyricsProvider
+                    providerPreference = selectedLyricsProvider,
+                    providerOrder = lyricsProviderOrder
                 )
             } catch (ce: CancellationException) {
                 throw ce
