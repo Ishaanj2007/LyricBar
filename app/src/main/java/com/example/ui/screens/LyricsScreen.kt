@@ -821,6 +821,7 @@ fun LyricsScreen(
         ProviderFloatingGlassMenu(
             expanded = isProviderMenuExpanded,
             selectedProvider = selectedProvider,
+            providerOrder = livePreferences.lyricsProviderOrder,
             onSelectProvider = { option ->
                 isProviderMenuExpanded = false
                 playbackManager.setLyricsProvider(option)
@@ -2341,6 +2342,7 @@ private fun com.example.data.preferences.LyricsProviderPreference.compactMenuDes
 private fun ProviderFloatingGlassMenu(
     expanded: Boolean,
     selectedProvider: com.example.data.preferences.LyricsProviderPreference,
+    providerOrder: List<com.example.data.preferences.LyricsProviderPreference>,
     onSelectProvider: (com.example.data.preferences.LyricsProviderPreference) -> Unit,
     rootPositionInWindow: Offset,
     rootSizePx: IntSize,
@@ -2451,6 +2453,10 @@ private fun ProviderFloatingGlassMenu(
                             )
                         )
                 ) {
+                    val orderedMenuOptions = remember(providerOrder) {
+                        listOf(com.example.data.preferences.LyricsProviderPreference.AUTO) +
+                            com.example.data.preferences.LyricsProviderPreference.normalizeProviderOrderEntries(providerOrder)
+                    }
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -2458,7 +2464,7 @@ private fun ProviderFloatingGlassMenu(
                             .padding(horizontal = 6.dp, vertical = 6.dp),
                         verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
-                        com.example.data.preferences.LyricsProviderPreference.entries.forEach { option ->
+                        orderedMenuOptions.forEach { option ->
                             val isSelected = option == selectedProvider
                             val rowShape = RoundedCornerShape(10.dp)
                             val rowBackground = if (isSelected) {
