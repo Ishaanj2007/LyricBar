@@ -275,6 +275,7 @@ data class UserPreferences(
     val clickThroughOverlay: Boolean = false,
     val autoShowOnPlayback: Boolean = true,
     val autoFetchLyrics: Boolean = true,
+    val playbackHistoryEnabled: Boolean = true,
     val lyricsProvider: LyricsProviderPreference = LyricsProviderPreference.AUTO,
     val lyricsProviderOrder: List<LyricsProviderPreference> = LyricsProviderPreference.DEFAULT_PROVIDER_ORDER,
     val useWallpaperDynamicColor: Boolean = false,
@@ -390,6 +391,7 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
         val CLICK_THROUGH_OVERLAY = booleanPreferencesKey("click_through_overlay")
         val AUTO_SHOW_ON_PLAYBACK = booleanPreferencesKey("auto_show_on_playback")
         val AUTO_FETCH_LYRICS = booleanPreferencesKey("auto_fetch_lyrics")
+        val PLAYBACK_HISTORY_ENABLED = booleanPreferencesKey("playback_history_enabled")
         val LYRICS_PROVIDER = stringPreferencesKey("lyrics_provider")
         val LYRICS_PROVIDER_ORDER = stringPreferencesKey("lyrics_provider_order")
         val USE_WALLPAPER_DYNAMIC_COLOR = booleanPreferencesKey("use_wallpaper_dynamic_color")
@@ -539,6 +541,7 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
                 clickThroughOverlay = preferences[PreferencesKeys.CLICK_THROUGH_OVERLAY] ?: false,
                 autoShowOnPlayback = preferences[PreferencesKeys.AUTO_SHOW_ON_PLAYBACK] ?: true,
                 autoFetchLyrics = preferences[PreferencesKeys.AUTO_FETCH_LYRICS] ?: true,
+                playbackHistoryEnabled = preferences[PreferencesKeys.PLAYBACK_HISTORY_ENABLED] ?: true,
                 lyricsProvider = lyricsProvider,
                 lyricsProviderOrder = LyricsProviderPreference.parseProviderOrder(
                     preferences[PreferencesKeys.LYRICS_PROVIDER_ORDER]
@@ -1008,6 +1011,10 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
         dataStore.edit { it[PreferencesKeys.AUTO_FETCH_LYRICS] = enabled }
     }
 
+    suspend fun setPlaybackHistoryEnabled(enabled: Boolean) {
+        dataStore.edit { it[PreferencesKeys.PLAYBACK_HISTORY_ENABLED] = enabled }
+    }
+
     suspend fun setUseWallpaperDynamicColor(enabled: Boolean) {
         dataStore.edit { it[PreferencesKeys.USE_WALLPAPER_DYNAMIC_COLOR] = enabled }
     }
@@ -1250,6 +1257,7 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
                 }
                 prefs[PreferencesKeys.AUTO_SHOW_ON_PLAYBACK] = appSettings.autoShowOnPlayback
                 prefs[PreferencesKeys.AUTO_FETCH_LYRICS] = appSettings.autoFetchLyrics
+                prefs[PreferencesKeys.PLAYBACK_HISTORY_ENABLED] = appSettings.playbackHistoryEnabled
                 prefs[PreferencesKeys.AUTO_UPDATE_CHECKS_ENABLED] = appSettings.autoUpdateChecksEnabled
                 prefs[PreferencesKeys.ANIMATION_STYLE] = safeAnimStyle
                 prefs[PreferencesKeys.UPWARD_ANIMATION] = appSettings.upwardAnimationEnabled
@@ -1416,6 +1424,7 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
             ).map { it.name },
             autoShowOnPlayback = raw[PreferencesKeys.AUTO_SHOW_ON_PLAYBACK] ?: true,
             autoFetchLyrics = raw[PreferencesKeys.AUTO_FETCH_LYRICS] ?: true,
+            playbackHistoryEnabled = raw[PreferencesKeys.PLAYBACK_HISTORY_ENABLED] ?: true,
             autoUpdateChecksEnabled = raw[PreferencesKeys.AUTO_UPDATE_CHECKS_ENABLED] ?: true,
             animationStyle = animStyle,
             upwardAnimationEnabled = raw[PreferencesKeys.UPWARD_ANIMATION] ?: true,

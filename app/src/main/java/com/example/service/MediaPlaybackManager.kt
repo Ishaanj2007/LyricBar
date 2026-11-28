@@ -95,7 +95,8 @@ class MediaPlaybackManager private constructor(private val context: Context) {
                 pipeline.onPreferencesChanged(
                     newAutoFetch = prefs.autoFetchLyrics,
                     newProvider = prefs.lyricsProvider,
-                    newProviderOrder = prefs.lyricsProviderOrder
+                    newProviderOrder = prefs.lyricsProviderOrder,
+                    newPlaybackHistoryEnabled = prefs.playbackHistoryEnabled
                 )
             }
         }

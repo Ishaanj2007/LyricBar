@@ -128,6 +128,9 @@ class MediaSessionPipelineEngine(
     var autoFetchLyrics: Boolean = true
         private set
 
+    var playbackHistoryEnabled: Boolean = true
+        private set
+
     var selectedLyricsProvider: LyricsProviderPreference = LyricsProviderPreference.AUTO
         private set
 
@@ -350,13 +353,16 @@ class MediaSessionPipelineEngine(
     fun onPreferencesChanged(
         newAutoFetch: Boolean,
         newProvider: LyricsProviderPreference,
-        newProviderOrder: List<LyricsProviderPreference> = lyricsProviderOrder
+        newProviderOrder: List<LyricsProviderPreference> = lyricsProviderOrder,
+        newPlaybackHistoryEnabled: Boolean = playbackHistoryEnabled
     ) {
         val previousAutoFetch = autoFetchLyrics
         val previousProvider = selectedLyricsProvider
+        val previousHistoryEnabled = playbackHistoryEnabled
         autoFetchLyrics = newAutoFetch
         selectedLyricsProvider = newProvider
         lyricsProviderOrder = LyricsProviderPreference.normalizeProviderOrderEntries(newProviderOrder)
+        playbackHistoryEnabled = newPlaybackHistoryEnabled
 
         val currentTrack = _playbackState.value.track
         val eligibleTrack = currentTrack?.takeIf {
@@ -364,6 +370,16 @@ class MediaSessionPipelineEngine(
                 _playbackState.value.hasActiveSession &&
                 it.isValidTrack &&
                 it.hasRealMusicAttribution
+        }
+
+        if (previousHistoryEnabled && !newPlaybackHistoryEnabled) {
+            historyJob?.cancel()
+            historyJob = null
+        } else if (!previousHistoryEnabled && newPlaybackHistoryEnabled) {
+            lastRecordedTrackKey = null
+            if (eligibleTrack != null && _playbackState.value.isPlaying) {
+                recordSessionIfPlaying(eligibleTrack)
+            }
         }
 
         if (previousProvider != newProvider) {
@@ -664,6 +680,7 @@ class MediaSessionPipelineEngine(
     }
 
     private fun recordSessionIfPlaying(track: TrackMetadata?) {
+        if (!playbackHistoryEnabled) return
         if (track == null || !track.isValidTrack || !track.hasRealMusicAttribution) return
         val state = _playbackState.value
         val expectedToken = currentSessionToken ?: return
@@ -677,6 +694,7 @@ class MediaSessionPipelineEngine(
         historyJob?.cancel()
         historyJob = scope.launch {
             if (!isActive ||
+                !playbackHistoryEnabled ||
                 sessionGeneration != expectedGen ||
                 currentSessionToken != expectedToken ||
                 !_playbackState.value.isPlaying ||

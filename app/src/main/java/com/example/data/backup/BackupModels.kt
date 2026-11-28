@@ -125,6 +125,7 @@ data class BackupAppSettingsData(
     val lyricsProviderOrder: List<String>? = null,
     val autoShowOnPlayback: Boolean = true,
     val autoFetchLyrics: Boolean = true,
+    val playbackHistoryEnabled: Boolean = true,
     val autoUpdateChecksEnabled: Boolean = true,
     val animationStyle: String = OverlayAnimationStyle.KARAOKE.name,
     val upwardAnimationEnabled: Boolean = true,
