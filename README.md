@@ -53,21 +53,21 @@
 
 ## Features ✨
 
-- **Multi-Provider Lyrics Engine** — Broad song coverage powered by seven synchronized providers (`LRCLIB`, `lrc.red`, `LyricsPlus`, `KuGou`, `Lyrica`, `LiriQo`, `Unison`) with priority fallback and safe TTML-to-line-synced conversion (`TtmlParser`).
-- **Synchronized Provider Selection** — Choose between `Automatic` and any individual provider directly from either the **Lyrics Screen** (frosted floating dropdown) or **Settings Screen**, sharing the same persistent DataStore preference.
+- **Multi-Provider Lyrics Engine & Custom Priority** — Broad song coverage powered by seven synchronized providers (`LRCLIB`, `lrc.red`, `LyricsPlus`, `KuGou`, `Lyrica`, `LiriQo`, `Unison`) with safe TTML-to-line-synced conversion (`TtmlParser`) and long-press drag-and-drop `AUTO` priority ordering in **Settings → Lyrics Provider**.
+- **Synchronized Provider Selection** — Choose between `Automatic` and any individual provider directly from either the **Lyrics Screen** (priority-ordered frosted floating dropdown) or **Settings Screen**, sharing the same persistent DataStore preference.
 - **Responsive Portrait & Landscape UI** — Streamlined **Now Playing**, **Lyrics**, **History**, and **Settings** screens that adapt cleanly between compact phones (`FloatingBottomNavPill`) and landscape/wide screens (`AdaptiveNavRail`, two-pane Lyrics, and two-column Settings).
-- **Smooth Live Lyrics & Active-Line Emphasis** — Fluid vertical rolling lyric transitions on Now Playing, smooth active-line auto-scrolling on the Lyrics screen (with pause-on-scroll and one-tap resume), and subtle accent-tinted active-line glow.
+- **Smooth Live Lyrics & Dynamic Loading Messages** — Fluid vertical rolling lyric transitions on Now Playing, smooth active-line auto-scrolling on the Lyrics screen (with pause-on-scroll and one-tap resume), subtle accent-tinted active-line glow, and calm rotating loading messages while searching for lyrics.
 - **Orientation-Aware Floating Lyrics Overlay** — Live synchronized lyrics rendered above any active music or media app (Spotify, YouTube Music, Apple Music, local players, etc.) with separate persistent **Portrait** and **Landscape** positioning profiles.
 - **Interactive HUD Gestures & Click-through Mode** — Short-tap the HUD to resync, triple-tap anywhere on the interactive HUD to open LyricBar, hold for `1000 ms` to reposition safely (with automatic rollback on cancellation), toggle 2D Drag & Resize handles, or enable **Click-through Overlay** to pass all touches to the app underneath.
-- **Dedicated HUD Backdrop & Independent Lyric Colours** — Configure a text-only HUD or crisp **Black** / **Grey** backdrops inside the dedicated **HUD Backdrop** section with live preview, opacity, corner radius, padding, independent **Active** and **Inactive** lyric colours, optional dynamic artwork-derived HUD accent colour, HSV/Hex picker, saved swatches, and contrast warnings.
+- **Dedicated HUD Backdrop & OKLCH Dynamic Accent Glow** — Configure a text-only HUD or crisp **Black** / **Grey** backdrops inside **HUD Backdrop** with live preview, opacity, corner radius, padding, independent **Active** and **Inactive** lyric colours, OKLCH-normalized dynamic artwork accent & glow (filtering neutral/washed-out colours and preserving hue on dark chromatic artwork), HSV/Hex picker, saved swatches, and contrast warnings.
 - **Cinematic Ambient Artwork Glow** — Dynamic diffused ambient illumination engine derived from active album artwork palettes for in-app frosted-glass surfaces.
 - **Eligible MediaSession Detection** — Filters active `MediaSession` updates by app context, playback state, duration, and metadata signals (`MediaSessionEligibility`) to ignore non-music video/browser sessions and prevent stale lyrics or history pollution.
 - **Safe & Bounded Local LRC Import** — Bounded, memory-safe local `.lrc` import system with UTF-8/UTF-16/BOM auto-detection and file-size protection.
 - **Multiple Animation Styles & Apple Karaoke** — Apple-style Karaoke active-word highlighting with sweep-speed control and an optional **Enhanced Glow** toggle, plus Smooth Line Transitions, Fade, Blur Reveal, Typewriter, and Instant animations synchronized to playback timing.
-- **Typography & Timing Precision** — Customize HUD text size, opacity, optional **Bold Lyrics** HUD typography, separate Lyrics-screen and HUD alignment, single-line mode, 12 bundled Google Fonts (`Inter`, `Poppins`, `Montserrat`, `Lora`, `Roboto Mono`, etc.), and per-track lyric offsets (`-0.5s`, `-0.1s`, `+0.1s`, `+0.5s`).
-- **Portable Backup & Restore** — Export and restore App Settings, HUD Configuration, Playback History, and Imported `.lrc` Lyrics as a portable `.zip` archive, alongside Android Auto Backup and Device-to-Device transfer support.
-- **Curated & Dynamic Theming** — Follow System / Light / Dark modes, curated pastel palettes (*Rose Quartz*, *Lavender Mist*, *Peach Ember*, *Sage Serenity*), and Android 12+ Material You dynamic colors.
-- **Playback History** — Chronological timeline grouping (*Today*, *Yesterday*, *Earlier This Week*, *Previous Month*) stored locally with cached artwork thumbnails.
+- **Typography, Custom Fonts & Timing Precision** — Customize HUD text size, opacity, optional **Bold Lyrics** HUD typography, separate Lyrics-screen and HUD alignment, single-line mode, 12 bundled Google Fonts (`Inter`, `Poppins`, `Montserrat`, `Lora`, `Roboto Mono`, etc.), a **Custom Font Manager** (single `.ttf`/`.otf` & `.zip` batch import with SHA-256 deduplication, multi-select delete, and backup support), and per-track lyric offsets (`-0.5s`, `-0.1s`, `+0.1s`, `+0.5s`).
+- **Portable Backup & Restore** — Export and restore App Settings (including custom fonts), HUD Configuration, Playback History, and Imported `.lrc` Lyrics as a portable `.zip` archive, alongside Android Auto Backup and Device-to-Device transfer support.
+- **Curated & Dynamic Dark Theming** — Dark-only Material 3 experience with curated pastel palettes (*Rose Quartz*, *Lavender Mist*, *Peach Ember*, *Sage Serenity*) and Android 12+ Material You dynamic colors.
+- **Playback History & Recording Toggle** — Chronological timeline grouping (*Today*, *Yesterday*, *Earlier This Week*, *Earlier This Month*, *Older*) with 12h/24h & timezone-aware timestamps, cached artwork thumbnails, and a **Playback History** toggle under **Settings → Automation & Cache**.
 - **Hardened & Automatic GitHub Updater** — Periodic 48-hour background checks with notification alerts, ETag caching, SHA-256 verification, package identity matching, downgrade prevention, and signing certificate lineage verification.
 - **Battery & Memory Optimized** — Zero-allocation hardware Canvas draw loops locked to display refresh rate, LRU artwork memory caching, cached overlay typefaces, and lifecycle-aware synchronization.
 
@@ -182,7 +182,7 @@ cd LyricBar
 
 ### 2. Build via Gradle
 
-The repository includes an automatic debug keystore restoration hook in `build.gradle.kts` so fresh clones can assemble debug builds immediately without developer-specific machine setup.
+Debug builds use the standard Android debug keystore (or `${rootDir}/debug.keystore` if provided); release builds use `keystore.properties` or `LYRICBAR_*` signing environment/Gradle properties.
 
 **Linux / macOS**
 ```bash
@@ -253,9 +253,9 @@ LyricBar maintains automated test coverage across its data, parsing, HUD positio
 │   └── wrapper/
 │       ├── gradle-wrapper.jar
 │       └── gradle-wrapper.properties
-├── build.gradle.kts                  # Root buildscript with clean-clone key restoration
+├── build.gradle.kts                  # Root Gradle plugin configuration
 ├── settings.gradle.kts
-├── debug.keystore.base64             # Base64-encoded debug keystore for clean-clone reproducibility
+├── LYRICBAR_CONTEXT.md               # Master architecture & AI context reference
 ├── LICENSE
 └── README.md
 ```
