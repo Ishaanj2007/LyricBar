@@ -166,6 +166,8 @@ fun SettingsScreen(
         .collectAsStateWithLifecycle(initialValue = userPreferences)
     val selectedProvider = livePreferences.lyricsProvider
     var showCacheClearedToast by remember { mutableStateOf(false) }
+    var showDynamicAccentInfoDialog by remember { mutableStateOf(false) }
+    var dynamicAccentInfoJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     val updateManager = remember { com.example.data.updater.UpdateManager.getInstance(context) }
     val cachedAvailableRelease by updateManager.cachedAvailableRelease.collectAsStateWithLifecycle()
     var showUpdateDialog by remember { mutableStateOf(false) }
@@ -713,6 +715,18 @@ fun SettingsScreen(
                         onCheckedChange = { enabled ->
                             coroutineScope.launch {
                                 playbackManager.preferencesRepository.setHudDynamicAccentEnabled(enabled)
+                            }
+                            if (enabled) {
+                                dynamicAccentInfoJob?.cancel()
+                                showDynamicAccentInfoDialog = true
+                                dynamicAccentInfoJob = coroutineScope.launch {
+                                    kotlinx.coroutines.delay(DYNAMIC_ACCENT_SNACKBAR_DURATION_MS)
+                                    showDynamicAccentInfoDialog = false
+                                }
+                            } else {
+                                dynamicAccentInfoJob?.cancel()
+                                dynamicAccentInfoJob = null
+                                showDynamicAccentInfoDialog = false
                             }
                         },
                         modifier = Modifier.testTag("settings_dynamic_accent_switch")
@@ -4271,8 +4285,72 @@ fun SettingsScreen(
                 }
             )
         }
+
+        if (showDynamicAccentInfoDialog) {
+            Dialog(
+                onDismissRequest = {
+                    dynamicAccentInfoJob?.cancel()
+                    dynamicAccentInfoJob = null
+                    showDynamicAccentInfoDialog = false
+                },
+                properties = DialogProperties(usePlatformDefaultWidth = false)
+            ) {
+                FrostedCard(
+                    modifier = Modifier
+                        .fillMaxWidth(0.86f)
+                        .widthIn(max = 360.dp)
+                        .testTag("settings_dynamic_accent_info_dialog"),
+                    shape = RoundedCornerShape(20.dp),
+                    backgroundAlpha = 0.90f,
+                    borderAlpha = 0.35f
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 18.dp, vertical = 16.dp),
+                        verticalAlignment = Alignment.Top,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Info,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = "Dynamic Accent Colour",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = DYNAMIC_ACCENT_INFO_MESSAGE,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
+
+internal const val DYNAMIC_ACCENT_INFO_MESSAGE: String =
+    "Dynamic colours are extracted from album artwork. Results may vary between songs, and some artwork may not provide a perfect colour."
+internal const val DYNAMIC_ACCENT_SNACKBAR_DURATION_MS: Long = 3000L
 
 @Composable
 private fun AnimationStylePreview(
