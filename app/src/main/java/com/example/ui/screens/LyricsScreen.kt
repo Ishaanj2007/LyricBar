@@ -487,6 +487,7 @@ fun LyricsScreen(
                                     LyricsEmptyOrLoadingState(
                                         hasTrack = playbackState.track != null,
                                         isLoading = isLoading,
+                                        trackKey = currentTrackKey,
                                         compact = isShortHeight,
                                         bottomPadding = 0.dp,
                                         themePrimary = themePrimary,
@@ -609,6 +610,7 @@ fun LyricsScreen(
                                 LyricsEmptyOrLoadingState(
                                     hasTrack = playbackState.track != null,
                                     isLoading = isLoading,
+                                    trackKey = currentTrackKey,
                                     compact = true,
                                     bottomPadding = 0.dp,
                                     themePrimary = themePrimary,
@@ -728,6 +730,7 @@ fun LyricsScreen(
                                     LyricsEmptyOrLoadingState(
                                         hasTrack = playbackState.track != null,
                                         isLoading = isLoading,
+                                        trackKey = currentTrackKey,
                                         compact = false,
                                         bottomPadding = if (hasBottomNavPill) 140.dp else 76.dp,
                                         themePrimary = themePrimary,
@@ -1516,6 +1519,7 @@ private fun LyricsDelayAdjustmentBar(
 private fun LyricsEmptyOrLoadingState(
     hasTrack: Boolean,
     isLoading: Boolean,
+    trackKey: String,
     compact: Boolean,
     bottomPadding: androidx.compose.ui.unit.Dp,
     themePrimary: Color,
@@ -1524,6 +1528,10 @@ private fun LyricsEmptyOrLoadingState(
     onSearch: () -> Unit,
     onImport: () -> Unit
 ) {
+    val loadingMessage = com.example.domain.lyricsengine.rememberRotatingLoadingMessage(
+        isLoading = isLoading,
+        trackKey = trackKey
+    )
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -1597,17 +1605,35 @@ private fun LyricsEmptyOrLoadingState(
 
                 Spacer(modifier = Modifier.height(4.dp))
 
-                Text(
-                    text = if (isLoading) {
-                        "Checking online providers for synchronized lyrics…"
-                    } else {
-                        "Search for matching lyrics online or select an LRC file manually"
-                    },
-                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = if (compact) 12.sp else 13.sp),
-                    color = Color.White.copy(alpha = 0.72f),
-                    textAlign = TextAlign.Center,
-                    lineHeight = if (compact) 16.sp else 18.sp
-                )
+                if (isLoading) {
+                    androidx.compose.animation.AnimatedContent(
+                        targetState = loadingMessage,
+                        transitionSpec = {
+                            androidx.compose.animation.ContentTransform(
+                                targetContentEnter = fadeIn(animationSpec = tween(240)),
+                                initialContentExit = fadeOut(animationSpec = tween(180))
+                            )
+                        },
+                        label = "lyrics_loading_message"
+                    ) { currentMessage ->
+                        Text(
+                            text = currentMessage,
+                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = if (compact) 12.sp else 13.sp),
+                            color = Color.White.copy(alpha = 0.72f),
+                            textAlign = TextAlign.Center,
+                            lineHeight = if (compact) 16.sp else 18.sp,
+                            modifier = Modifier.testTag("lyrics_loading_dynamic_message")
+                        )
+                    }
+                } else {
+                    Text(
+                        text = "Search for matching lyrics online or select an LRC file manually",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = if (compact) 12.sp else 13.sp),
+                        color = Color.White.copy(alpha = 0.72f),
+                        textAlign = TextAlign.Center,
+                        lineHeight = if (compact) 16.sp else 18.sp
+                    )
+                }
 
                 if (!isLoading) {
                     Spacer(modifier = Modifier.height(if (compact) 14.dp else 20.dp))

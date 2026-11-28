@@ -358,7 +358,8 @@ internal fun resolveNowPlayingLyricsCardState(
     prevLyric: String?,
     nextLyric: String?,
     trackKey: String = track?.identityKey ?: track?.key.orEmpty(),
-    activeLineIndex: Int = -1
+    activeLineIndex: Int = -1,
+    loadingMessage: String? = null
 ): NowPlayingLyricsCardState {
     return when {
         !hasSession && track == null -> {
@@ -392,7 +393,7 @@ internal fun resolveNowPlayingLyricsCardState(
                 badgeText = "SEARCHING LYRICS",
                 isBadgeAccent = true,
                 prevLine = null,
-                primaryLine = "Finding synchronized lyrics…",
+                primaryLine = loadingMessage?.takeIf { it.isNotBlank() } ?: "Finding synchronized lyrics…",
                 secondaryLine = listOfNotNull(track?.artist, track?.title)
                     .filter { it.isNotBlank() }
                     .joinToString(" — ")
@@ -719,12 +720,17 @@ fun NowPlayingScreen(
     }
 
     val trackKey = track?.identityKey ?: track?.key.orEmpty()
+    val loadingMessage = com.example.domain.lyricsengine.rememberRotatingLoadingMessage(
+        isLoading = isLoadingLyrics && hasSession,
+        trackKey = trackKey
+    )
     val lyricsCardState = remember(
         hasSession,
         isPlaying,
         trackKey,
         track,
         isLoadingLyrics,
+        loadingMessage,
         lyrics,
         hasValidLyrics,
         isSynced,
@@ -745,7 +751,8 @@ fun NowPlayingScreen(
             prevLyric = prevLyric,
             nextLyric = nextLyric,
             trackKey = trackKey,
-            activeLineIndex = activeIdx
+            activeLineIndex = activeIdx,
+            loadingMessage = loadingMessage
         )
     }
 

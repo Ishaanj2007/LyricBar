@@ -405,4 +405,39 @@ class NowPlayingScreenStateAndResponsiveTest {
             )
         )
     }
+
+    @Test
+    fun `resolveNowPlayingLyricsCardState uses provided loadingMessage and preserves default fallback`() {
+        val track = TrackMetadata(title = "From The Start", artist = "Laufey")
+
+        val customLoadingState = resolveNowPlayingLyricsCardState(
+            hasSession = true,
+            isPlaying = true,
+            track = track,
+            isLoadingLyrics = true,
+            lyrics = null,
+            hasValidLyrics = false,
+            isSynced = false,
+            activeLyric = null,
+            prevLyric = null,
+            nextLyric = null,
+            loadingMessage = "Brewing your lyrics…"
+        )
+        assertEquals("SEARCHING LYRICS", customLoadingState.badgeText)
+        assertEquals("Brewing your lyrics…", customLoadingState.primaryLine)
+
+        val defaultLoadingState = resolveNowPlayingLyricsCardState(
+            hasSession = true,
+            isPlaying = true,
+            track = track,
+            isLoadingLyrics = true,
+            lyrics = null,
+            hasValidLyrics = false,
+            isSynced = false,
+            activeLyric = null,
+            prevLyric = null,
+            nextLyric = null
+        )
+        assertEquals("Finding synchronized lyrics…", defaultLoadingState.primaryLine)
+    }
 }
