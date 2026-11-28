@@ -85,9 +85,24 @@ fun HistoryScreen(
     val repository = remember { CompositeLyricsRepository.getInstance(context) }
     val historyList by repository.songHistory.collectAsStateWithLifecycle(initialValue = emptyList())
 
-    val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
-    val dayTimeFormat = remember { SimpleDateFormat("EEE, HH:mm", Locale.getDefault()) }
-    val fullDateFormat = remember { SimpleDateFormat("MMM d, HH:mm", Locale.getDefault()) }
+    val is24Hour = android.text.format.DateFormat.is24HourFormat(context)
+    val currentLocale = Locale.getDefault()
+    val currentTimeZone = java.util.TimeZone.getDefault()
+    val timeFormat = remember(is24Hour, currentLocale, currentTimeZone) {
+        SimpleDateFormat(if (is24Hour) "HH:mm" else "h:mm a", currentLocale).apply {
+            timeZone = currentTimeZone
+        }
+    }
+    val dayTimeFormat = remember(is24Hour, currentLocale, currentTimeZone) {
+        SimpleDateFormat(if (is24Hour) "EEE, HH:mm" else "EEE, h:mm a", currentLocale).apply {
+            timeZone = currentTimeZone
+        }
+    }
+    val fullDateFormat = remember(is24Hour, currentLocale, currentTimeZone) {
+        SimpleDateFormat(if (is24Hour) "MMM d, HH:mm" else "MMM d, h:mm a", currentLocale).apply {
+            timeZone = currentTimeZone
+        }
+    }
 
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var isSearchVisible by rememberSaveable { mutableStateOf(false) }
@@ -622,7 +637,7 @@ private fun HistoryTrackRow(
         Spacer(modifier = Modifier.width(8.dp))
 
         // Timestamp
-        val formattedTime = remember(entry.playedAt, group) {
+        val formattedTime = remember(entry.playedAt, group, timeFormat, dayTimeFormat, fullDateFormat) {
             val date = Date(entry.playedAt)
             when (group) {
                 HistoryTimeGroup.TODAY, HistoryTimeGroup.YESTERDAY -> timeFormat.format(date)

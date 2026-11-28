@@ -1,6 +1,9 @@
 package com.example.ui.screens
 
+import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 import java.util.TimeZone
 
 /**
@@ -65,4 +68,24 @@ fun getHistoryGroup(
         isSameMonthAndYear -> HistoryTimeGroup.THIS_MONTH
         else -> HistoryTimeGroup.OLDER
     }
+}
+
+/**
+ * Formats a playback history timestamp according to [group], [is24Hour], [locale], and [timeZone].
+ */
+fun formatHistoryTimestamp(
+    playedAtMs: Long,
+    group: HistoryTimeGroup,
+    is24Hour: Boolean,
+    locale: Locale = Locale.getDefault(),
+    timeZone: TimeZone = TimeZone.getDefault()
+): String {
+    val pattern = when (group) {
+        HistoryTimeGroup.TODAY, HistoryTimeGroup.YESTERDAY -> if (is24Hour) "HH:mm" else "h:mm a"
+        HistoryTimeGroup.THIS_WEEK -> if (is24Hour) "EEE, HH:mm" else "EEE, h:mm a"
+        HistoryTimeGroup.THIS_MONTH, HistoryTimeGroup.OLDER -> if (is24Hour) "MMM d, HH:mm" else "MMM d, h:mm a"
+    }
+    return SimpleDateFormat(pattern, locale).apply {
+        this.timeZone = timeZone
+    }.format(Date(playedAtMs))
 }

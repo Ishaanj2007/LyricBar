@@ -211,4 +211,35 @@ class HistoryDateGroupingTest {
             getHistoryGroup(itemCal.timeInMillis, nowCal.timeInMillis, tz)
         )
     }
+
+    @Test
+    fun testFormatHistoryTimestamp_12HourAnd24Hour() {
+        val cal = createCalendar(2026, Calendar.MAY, 14, 18, 52) // Thursday May 14, 2026 18:52 UTC
+        val ms = cal.timeInMillis
+        val usLocale = java.util.Locale.US
+
+        assertEquals("18:52", formatHistoryTimestamp(ms, HistoryTimeGroup.TODAY, is24Hour = true, locale = usLocale, timeZone = utcZone))
+        assertEquals("6:52 PM", formatHistoryTimestamp(ms, HistoryTimeGroup.TODAY, is24Hour = false, locale = usLocale, timeZone = utcZone))
+        assertEquals("6:52 PM", formatHistoryTimestamp(ms, HistoryTimeGroup.YESTERDAY, is24Hour = false, locale = usLocale, timeZone = utcZone))
+
+        assertEquals("Thu, 18:52", formatHistoryTimestamp(ms, HistoryTimeGroup.THIS_WEEK, is24Hour = true, locale = usLocale, timeZone = utcZone))
+        assertEquals("Thu, 6:52 PM", formatHistoryTimestamp(ms, HistoryTimeGroup.THIS_WEEK, is24Hour = false, locale = usLocale, timeZone = utcZone))
+
+        assertEquals("May 14, 18:52", formatHistoryTimestamp(ms, HistoryTimeGroup.THIS_MONTH, is24Hour = true, locale = usLocale, timeZone = utcZone))
+        assertEquals("May 14, 6:52 PM", formatHistoryTimestamp(ms, HistoryTimeGroup.OLDER, is24Hour = false, locale = usLocale, timeZone = utcZone))
+    }
+
+    @Test
+    fun testFormatHistoryTimestamp_respectsTimeZone() {
+        val cal = createCalendar(2026, Calendar.MAY, 14, 13, 0) // 13:00 UTC = 18:30 IST (+05:30)
+        val istZone = TimeZone.getTimeZone("Asia/Kolkata")
+        assertEquals(
+            "18:30",
+            formatHistoryTimestamp(cal.timeInMillis, HistoryTimeGroup.TODAY, is24Hour = true, locale = java.util.Locale.US, timeZone = istZone)
+        )
+        assertEquals(
+            "6:30 PM",
+            formatHistoryTimestamp(cal.timeInMillis, HistoryTimeGroup.TODAY, is24Hour = false, locale = java.util.Locale.US, timeZone = istZone)
+        )
+    }
 }
