@@ -14,6 +14,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -21,6 +22,7 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import kotlin.math.abs
 
 class DynamicHudAccentTest {
 
@@ -55,11 +57,9 @@ class DynamicHudAccentTest {
         )
         val repository = UserPreferencesRepository(dataStore)
 
-        // Initial default state
         val initialPrefs = repository.userPreferencesFlow.first()
         assertFalse(initialPrefs.hudDynamicAccentEnabled)
 
-        // Enable dynamic accent
         repository.setHudDynamicAccentEnabled(true)
         val enabledPrefs = repository.userPreferencesFlow.first()
         assertTrue(enabledPrefs.hudDynamicAccentEnabled)
@@ -67,7 +67,6 @@ class DynamicHudAccentTest {
         val rawData = dataStore.data.first()
         assertEquals(true, rawData[booleanPreferencesKey("hud_dynamic_accent_enabled")])
 
-        // Disable dynamic accent
         repository.setHudDynamicAccentEnabled(false)
         val disabledPrefs = repository.userPreferencesFlow.first()
         assertFalse(disabledPrefs.hudDynamicAccentEnabled)
@@ -75,13 +74,14 @@ class DynamicHudAccentTest {
 
     @Test
     fun `extraction falls back cleanly to null when artwork or track key is missing`() = runBlocking {
-        // Missing track key
         val resultEmptyKey = ArtworkAccentExtractor.extractAccentColor("", null)
         assertNull("Missing track key must return null", resultEmptyKey)
 
-        // Missing bitmap
         val resultNullBitmap = ArtworkAccentExtractor.extractAccentColor("artist - title", null)
         assertNull("Missing artwork bitmap must return null fallback", resultNullBitmap)
+
+        val resultNullAccent = ArtworkAccentExtractor.extractAccent("artist - title", null)
+        assertNull("Missing artwork bitmap must return null DynamicAccentResult", resultNullAccent)
     }
 
     @Test
@@ -89,31 +89,32 @@ class DynamicHudAccentTest {
         val trackKey = "daft punk - get lucky"
         val expectedColor = 0xFFFF4081.toInt()
 
-        // Seed cache
         ArtworkAccentExtractor.putCachedAccent(trackKey, expectedColor)
 
-        // Immediate cache retrieval
         val cached = ArtworkAccentExtractor.getCachedAccent(trackKey)
         assertNotNull(cached)
         assertEquals(expectedColor, cached)
 
-        // extractAccentColor returns cached colour without needing bitmap
+        val cachedResult = ArtworkAccentExtractor.getCachedAccentResult(trackKey)
+        assertNotNull(cachedResult)
+        assertEquals(expectedColor, cachedResult!!.sourceAccentColor)
+        assertTrue(
+            "Glow colour luminance must meet minimum glow luminance",
+            ArtworkAccentExtractor.calculateLuminance(cachedResult.glowColor) >= ArtworkAccentExtractor.MIN_GLOW_LUMINANCE
+        )
+
         val extractedWithoutBitmap = ArtworkAccentExtractor.extractAccentColor(trackKey, null)
         assertEquals(expectedColor, extractedWithoutBitmap)
     }
 
     @Test
     fun `cache LRU eviction respects bounded capacity`() {
-        // Populate cache beyond MAX_CACHE_ENTRIES (32)
         for (i in 1..40) {
             ArtworkAccentExtractor.putCachedAccent("track_$i", 0xFF000000.toInt() or i)
         }
 
-        // Oldest entries (1..8) should be evicted
         assertNull("Oldest entries must be evicted by LRU capacity bound", ArtworkAccentExtractor.getCachedAccent("track_1"))
         assertNull(ArtworkAccentExtractor.getCachedAccent("track_5"))
-
-        // Recent entries should remain
         assertNotNull(ArtworkAccentExtractor.getCachedAccent("track_35"))
         assertNotNull(ArtworkAccentExtractor.getCachedAccent("track_40"))
     }
@@ -123,14 +124,11 @@ class DynamicHudAccentTest {
         var currentTrackKey = "track_initial"
         var appliedColor: Int? = null
 
-        // Simulate async extraction started for track_A
         val targetTrackKeyA = "track_A"
         val extractedColorA = 0xFFFF5722.toInt()
 
-        // User skips rapidly to track_B before track_A finishes
         currentTrackKey = "track_B"
 
-        // Simulated late callback from track_A
         val isStale = (targetTrackKeyA != currentTrackKey)
         assertTrue("Callback with mismatched trackKey must be recognized as stale", isStale)
 
@@ -140,7 +138,6 @@ class DynamicHudAccentTest {
 
         assertNull("Stale result from previous track must never be applied to HUD", appliedColor)
 
-        // When track_B finishes
         val targetTrackKeyB = "track_B"
         val extractedColorB = 0xFF4CAF50.toInt()
         val isStaleB = (targetTrackKeyB != currentTrackKey)
@@ -154,61 +151,247 @@ class DynamicHudAccentTest {
     @Test
     fun `immediate restoration of manual accent colour when toggled OFF`() {
         val manualActiveColor = 0xFFE91E63.toInt()
-        val dynamicColor = 0xFF00BCD4.toInt()
+        val dynamicResult = ArtworkAccentExtractor.buildAccentResult(0xFF00BCD4.toInt())
 
-        // When dynamic accent is enabled and dynamic colour exists
-        val effectiveWhenEnabled = resolveEffectiveActiveColor(
+        val effectiveWhenEnabled = resolveEffectiveState(
             dynamicEnabled = true,
-            dynamicColor = dynamicColor,
+            dynamicResult = dynamicResult,
             manualColor = manualActiveColor
         )
-        assertEquals(dynamicColor, effectiveWhenEnabled)
+        assertEquals(dynamicResult.activeTextColor, effectiveWhenEnabled.first)
+        assertEquals(dynamicResult.glowColor, effectiveWhenEnabled.second)
 
-        // When dynamic accent is disabled, revert immediately to manual accent
-        val effectiveWhenDisabled = resolveEffectiveActiveColor(
+        val effectiveWhenDisabled = resolveEffectiveState(
             dynamicEnabled = false,
-            dynamicColor = dynamicColor,
+            dynamicResult = dynamicResult,
             manualColor = manualActiveColor
         )
-        assertEquals("Must immediately revert to manual accent colour when disabled", manualActiveColor, effectiveWhenDisabled)
+        assertEquals(manualActiveColor, effectiveWhenDisabled.first)
+        assertNull("Manual mode must clear dynamicGlowColor override", effectiveWhenDisabled.second)
 
-        // When dynamic accent is enabled but extraction returned null (fallback)
-        val effectiveFallback = resolveEffectiveActiveColor(
+        val effectiveFallback = resolveEffectiveState(
             dynamicEnabled = true,
-            dynamicColor = null,
+            dynamicResult = null,
             manualColor = manualActiveColor
         )
-        assertEquals("Must fall back cleanly to manual colour when extraction returns null", manualActiveColor, effectiveFallback)
+        assertEquals(manualActiveColor, effectiveFallback.first)
+        assertNull("Null extraction fallback must clear dynamicGlowColor override", effectiveFallback.second)
     }
 
     @Test
-    fun `colour suitability filter rejects near-black, washed-out and pure white colours`() {
-        // Pure black and near-black
-        assertFalse("Pure black must be rejected as unreadable on dark HUD", ArtworkAccentExtractor.isSuitableForHudAccent(0xFF000000.toInt()))
-        assertFalse("Near-black must be rejected", ArtworkAccentExtractor.isSuitableForHudAccent(0xFF0A0A0A.toInt()))
-
-        // Pure white
-        assertFalse("Pure white must be rejected as uncolored/washed out", ArtworkAccentExtractor.isSuitableForHudAccent(0xFFFFFFFF.toInt()))
-
-        // Washed-out light gray
-        assertFalse("Washed-out gray must be rejected", ArtworkAccentExtractor.isSuitableForHudAccent(0xFFDDDDDD.toInt()))
-
-        // Legible vibrant accent colours
-        assertTrue("Vibrant pink should pass", ArtworkAccentExtractor.isSuitableForHudAccent(0xFFE91E63.toInt()))
-        assertTrue("Vibrant cyan should pass", ArtworkAccentExtractor.isSuitableForHudAccent(0xFF00E5FF.toInt()))
-        assertTrue("Vibrant amber should pass", ArtworkAccentExtractor.isSuitableForHudAccent(0xFFFF9800.toInt()))
-        assertTrue("Vibrant purple should pass", ArtworkAccentExtractor.isSuitableForHudAccent(0xFF9C27B0.toInt()))
+    fun `colour suitability filter rejects black, all grey levels, and pure white`() {
+        val rejectedNeutrals = listOf(
+            0xFF000000.toInt() to "#000000",
+            0xFF101010.toInt() to "#101010",
+            0xFF404040.toInt() to "#404040",
+            0xFF808080.toInt() to "#808080",
+            0xFFBFBFBF.toInt() to "#BFBFBF",
+            0xFFDDDDDD.toInt() to "#DDDDDD",
+            0xFFFFFFFF.toInt() to "#FFFFFF"
+        )
+        for ((argb, label) in rejectedNeutrals) {
+            assertFalse("$label must be rejected as neutral/unusable", ArtworkAccentExtractor.isSuitableForHudAccent(argb))
+        }
     }
 
-    private fun resolveEffectiveActiveColor(
+    @Test
+    fun `colour suitability filter accepts dark chromatic and vibrant colours across hues`() {
+        val acceptedColours = listOf(
+            0xFF142459.toInt() to "Dark Navy",
+            0xFF4A148C.toInt() to "Dark Purple",
+            0xFF6B1028.toInt() to "Dark Burgundy",
+            0xFF1B5E20.toInt() to "Dark Forest Green",
+            0xFFE91E63.toInt() to "Vibrant Pink",
+            0xFF00E5FF.toInt() to "Vibrant Cyan",
+            0xFF2979FF.toInt() to "Vibrant Blue",
+            0xFFFF9800.toInt() to "Vibrant Amber",
+            0xFFFFF59D.toInt() to "Pale Yellow"
+        )
+        for ((argb, label) in acceptedColours) {
+            assertTrue("$label must be accepted as a valid chromatic candidate", ArtworkAccentExtractor.isSuitableForHudAccent(argb))
+        }
+    }
+
+    @Test
+    fun `dark chromatic colours produce hue-preserving luminous glow and legible active text`() {
+        val darkChromatics = listOf(
+            0xFF142459.toInt() to "Dark Navy",
+            0xFF4A148C.toInt() to "Dark Purple",
+            0xFF6B1028.toInt() to "Dark Burgundy",
+            0xFF1B5E20.toInt() to "Dark Forest Green"
+        )
+
+        for ((sourceColor, label) in darkChromatics) {
+            val result = ArtworkAccentExtractor.buildAccentResult(sourceColor)
+            assertEquals("$label sourceAccentColor must preserve original RGB", sourceColor, result.sourceAccentColor)
+            assertNotEquals("$label glowColor must be brightened beyond dark source RGB", sourceColor, result.glowColor)
+
+            val glowLum = ArtworkAccentExtractor.calculateLuminance(result.glowColor)
+            assertTrue(
+                "$label glowColor luminance ($glowLum) must meet >= ${ArtworkAccentExtractor.MIN_GLOW_LUMINANCE}",
+                glowLum >= ArtworkAccentExtractor.MIN_GLOW_LUMINANCE
+            )
+            assertFalse(
+                "$label glowColor must not be flagged as dark by HudColorSystem",
+                HudColorSystem.isDarkColor(result.glowColor)
+            )
+
+            val srcHue = ArtworkAccentExtractor.srgbToOklch(sourceColor)[2]
+            val glowHue = ArtworkAccentExtractor.srgbToOklch(result.glowColor)[2]
+            val hueDiff = minOf(abs(srcHue - glowHue), 360f - abs(srcHue - glowHue))
+            assertTrue("$label hue drift ($hueDiff deg) must remain tightly bounded", hueDiff <= 18f)
+
+            val textContrast = HudColorSystem.contrastRatio(result.activeTextColor, HudColorSystem.BLACK_BACKDROP_COLOR)
+            assertTrue(
+                "$label activeTextColor contrast ($textContrast) must be readable on dark backdrop",
+                textContrast >= ArtworkAccentExtractor.MIN_ACTIVE_TEXT_CONTRAST - 0.1
+            )
+        }
+    }
+
+    @Test
+    fun `already legible vibrant colours preserve sourceAccentColor as activeTextColor`() {
+        val legibleVibrant = listOf(
+            0xFF00E5FF.toInt() to "Vibrant Cyan",
+            0xFFFF9800.toInt() to "Vibrant Amber",
+            0xFFFFF59D.toInt() to "Pale Yellow"
+        )
+
+        for ((color, label) in legibleVibrant) {
+            val result = ArtworkAccentExtractor.buildAccentResult(color)
+            assertEquals("$label should keep sourceAccentColor verbatim for active text", color, result.activeTextColor)
+            assertTrue(
+                "$label glowColor must remain luminous",
+                ArtworkAccentExtractor.calculateLuminance(result.glowColor) >= ArtworkAccentExtractor.MIN_GLOW_LUMINANCE
+            )
+        }
+    }
+
+    @Test
+    fun `palette selection rejects high-population greys and returns null for neutral-only artwork`() {
+        val bwSwatches = listOf(
+            AccentSwatchCandidate(0xFF000000.toInt(), 5000),
+            AccentSwatchCandidate(0xFF404040.toInt(), 4000),
+            AccentSwatchCandidate(0xFF808080.toInt(), 3000),
+            AccentSwatchCandidate(0xFFBFBFBF.toInt(), 2000),
+            AccentSwatchCandidate(0xFFFFFFFF.toInt(), 1000)
+        )
+        val bwSelected = ArtworkAccentExtractor.pickSuitableAccentFromCandidates(
+            dominant = bwSwatches[1],
+            muted = bwSwatches[2],
+            lightMuted = bwSwatches[3],
+            allSwatches = bwSwatches
+        )
+        assertNull("Black-and-white / neutral artwork must return null fallback", bwSelected)
+
+        val emptySelected = ArtworkAccentExtractor.pickSuitableAccentFromCandidates(allSwatches = emptyList())
+        assertNull("Empty palette must return null fallback", emptySelected)
+    }
+
+    @Test
+    fun `palette selection prioritizes dark chromatic swatch over dominant grey`() {
+        val greyDominant = AccentSwatchCandidate(0xFF404040.toInt(), 9000)
+        val greyMuted = AccentSwatchCandidate(0xFF808080.toInt(), 5000)
+        val darkPurple = AccentSwatchCandidate(0xFF4A148C.toInt(), 450)
+
+        val selectedSource = ArtworkAccentExtractor.pickSuitableAccentFromCandidates(
+            darkVibrant = darkPurple,
+            muted = greyMuted,
+            dominant = greyDominant,
+            allSwatches = listOf(greyDominant, greyMuted, darkPurple)
+        )
+        assertNotNull("Chromatic dark purple must be extracted despite high-population greys", selectedSource)
+        val result = ArtworkAccentExtractor.buildAccentResult(selectedSource!!)
+        assertEquals(0xFF4A148C.toInt(), result.sourceAccentColor)
+        assertTrue(ArtworkAccentExtractor.calculateLuminance(result.glowColor) >= ArtworkAccentExtractor.MIN_GLOW_LUMINANCE)
+    }
+
+    @Test
+    fun `same colour input produces deterministic accent and glow output`() {
+        val input = 0xFF6B1028.toInt()
+        val first = ArtworkAccentExtractor.buildAccentResult(input)
+        val second = ArtworkAccentExtractor.buildAccentResult(input)
+        assertEquals(first, second)
+    }
+
+    @Test
+    fun `washed-out pastel, dull slate, and near-white low-chroma colours are rejected`() {
+        val washedOutOrDull = listOf(
+            0xFF788A96.toInt() to "Dull Slate Blue",
+            0xFF94A8B8.toInt() to "Washed-out Steel Blue",
+            0xFFB89098.toInt() to "Faded Dusty Pink",
+            0xFFD4B8BD.toInt() to "Pale Dusty Rose",
+            0xFFC5CAE9.toInt() to "Washed-out Lavender Grey",
+            0xFFCFD8DC.toInt() to "Blue Grey Mist",
+            0xFFFFFDE7.toInt() to "Near-white Cream",
+            0xFFF3E5F5.toInt() to "Near-white Lavender",
+            0xFFE8F5E9.toInt() to "Near-white Mint"
+        )
+        for ((argb, label) in washedOutOrDull) {
+            assertFalse("$label must be rejected as washed-out/low-chroma", ArtworkAccentExtractor.isSuitableForHudAccent(argb))
+        }
+    }
+
+    @Test
+    fun `bright chromatic colours across red, green, yellow, blue, cyan, pink remain usable`() {
+        val brightChromatics = listOf(
+            0xFFF44336.toInt() to "Vibrant Red",
+            0xFF4CAF50.toInt() to "Vibrant Green",
+            0xFFFFE066.toInt() to "Bright Yellow",
+            0xFF2979FF.toInt() to "Vibrant Blue",
+            0xFF00E5FF.toInt() to "Vibrant Cyan",
+            0xFFE91E63.toInt() to "Vibrant Pink"
+        )
+        for ((argb, label) in brightChromatics) {
+            assertTrue("$label must remain accepted", ArtworkAccentExtractor.isSuitableForHudAccent(argb))
+            val result = ArtworkAccentExtractor.buildAccentResult(argb)
+            assertTrue(
+                "$label glow must be luminous",
+                ArtworkAccentExtractor.calculateLuminance(result.glowColor) >= ArtworkAccentExtractor.MIN_GLOW_LUMINANCE
+            )
+            assertTrue(
+                "$label active text must be readable",
+                HudColorSystem.contrastRatio(result.activeTextColor, HudColorSystem.BLACK_BACKDROP_COLOR) >= ArtworkAccentExtractor.MIN_ACTIVE_TEXT_CONTRAST - 0.1
+            )
+        }
+    }
+
+    @Test
+    fun `palette selection strongly prefers vibrant candidates over muted and dominant swatches`() {
+        val dullMuted = AccentSwatchCandidate(0xFF8C7A7E.toInt(), 8000)
+        val dullDominant = AccentSwatchCandidate(0xFF708090.toInt(), 9500)
+        val vibrantCoral = AccentSwatchCandidate(0xFFFF5252.toInt(), 600)
+        val vibrantCyan = AccentSwatchCandidate(0xFF00E5FF.toInt(), 450)
+
+        val selected = ArtworkAccentExtractor.pickSuitableAccentFromCandidates(
+            vibrant = vibrantCoral,
+            lightVibrant = vibrantCyan,
+            muted = dullMuted,
+            dominant = dullDominant,
+            allSwatches = listOf(dullDominant, dullMuted, vibrantCoral, vibrantCyan)
+        )
+        assertNotNull(selected)
+        assertTrue(
+            "Vibrant candidate must win over muted/dominant swatches",
+            selected == 0xFFFF5252.toInt() || selected == 0xFF00E5FF.toInt()
+        )
+    }
+
+    @Test
+    fun `dynamic accent snackbar message and 3-second duration are configured`() {
+        assertEquals(3000L, com.example.ui.screens.DYNAMIC_ACCENT_SNACKBAR_DURATION_MS)
+        assertTrue(com.example.ui.screens.DYNAMIC_ACCENT_INFO_MESSAGE.contains("album artwork", ignoreCase = true))
+    }
+
+    private fun resolveEffectiveState(
         dynamicEnabled: Boolean,
-        dynamicColor: Int?,
+        dynamicResult: DynamicAccentResult?,
         manualColor: Int
-    ): Int {
-        return if (dynamicEnabled && dynamicColor != null) {
-            dynamicColor
+    ): Pair<Int, Int?> {
+        return if (dynamicEnabled && dynamicResult != null) {
+            dynamicResult.activeTextColor to dynamicResult.glowColor
         } else {
-            manualColor
+            manualColor to null
         }
     }
 }

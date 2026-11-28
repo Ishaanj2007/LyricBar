@@ -50,7 +50,7 @@ class OverlayService : Service() {
     private var hasAppliedInitialPrefs = false
     private var isInitializingLandscapeProfile = false
     private var currentPrefs = com.example.data.preferences.UserPreferences()
-    private var dynamicAccentCurrentColor: Int? = null
+    private var dynamicAccentResult: DynamicAccentResult? = null
     private var dynamicAccentExtractionJob: Job? = null
 
     private val displayListener = object : DisplayManager.DisplayListener {
@@ -509,9 +509,10 @@ class OverlayService : Service() {
                 if (!prefs.hudDynamicAccentEnabled) {
                     dynamicAccentExtractionJob?.cancel()
                     dynamicAccentExtractionJob = null
-                    if (dynamicAccentCurrentColor != null) {
-                        dynamicAccentCurrentColor = null
+                    if (dynamicAccentResult != null) {
+                        dynamicAccentResult = null
                         view.activeLyricColor = prefs.hudActiveLyricColor
+                        view.dynamicGlowColor = null
                     }
                 } else {
                     val track = playbackState.track
@@ -519,22 +520,25 @@ class OverlayService : Service() {
                     if (currentTrackKey.isNullOrBlank()) {
                         dynamicAccentExtractionJob?.cancel()
                         dynamicAccentExtractionJob = null
-                        if (dynamicAccentCurrentColor != null) {
-                            dynamicAccentCurrentColor = null
+                        if (dynamicAccentResult != null) {
+                            dynamicAccentResult = null
                             view.activeLyricColor = prefs.hudActiveLyricColor
+                            view.dynamicGlowColor = null
                         }
-                    } else if (trackChanged || dynamicAccentCurrentColor == null) {
-                        val cached = ArtworkAccentExtractor.getCachedAccent(currentTrackKey)
+                    } else if (trackChanged || dynamicAccentResult == null) {
+                        val cached = ArtworkAccentExtractor.getCachedAccentResult(currentTrackKey)
                         if (cached != null) {
                             dynamicAccentExtractionJob?.cancel()
                             dynamicAccentExtractionJob = null
-                            dynamicAccentCurrentColor = cached
-                            view.activeLyricColor = cached
+                            dynamicAccentResult = cached
+                            view.activeLyricColor = cached.activeTextColor
+                            view.dynamicGlowColor = cached.glowColor
                         } else {
                             dynamicAccentExtractionJob?.cancel()
                             if (trackChanged) {
-                                dynamicAccentCurrentColor = null
+                                dynamicAccentResult = null
                                 view.activeLyricColor = prefs.hudActiveLyricColor
+                                view.dynamicGlowColor = null
                             }
                             val embeddedBitmap = track.albumArtBitmap
                             val artUri = track.albumArtUri
@@ -548,11 +552,12 @@ class OverlayService : Service() {
                                     loadArtworkBitmapSafely(applicationContext, artUri, reqSize = 512)
                                 } else null
 
-                                val extracted = ArtworkAccentExtractor.extractAccentColor(currentTrackKey, bitmapToUse)
+                                val extracted = ArtworkAccentExtractor.extractAccent(currentTrackKey, bitmapToUse)
                                 withContext(Dispatchers.Main) {
                                     if (isActive && lastAppliedTrackKey == currentTrackKey && currentPrefs.hudDynamicAccentEnabled) {
-                                        dynamicAccentCurrentColor = extracted
-                                        overlayView?.activeLyricColor = extracted ?: currentPrefs.hudActiveLyricColor
+                                        dynamicAccentResult = extracted
+                                        overlayView?.activeLyricColor = extracted?.activeTextColor ?: currentPrefs.hudActiveLyricColor
+                                        overlayView?.dynamicGlowColor = extracted?.glowColor
                                     }
                                 }
                             }
@@ -581,12 +586,9 @@ class OverlayService : Service() {
                         view.hudBackdropCornerRadiusDp = prefs.hudBackdropCornerRadiusDp.toFloat()
                         view.hudBackdropHorizontalPaddingDp = prefs.hudBackdropHorizontalPaddingDp.toFloat()
                         view.hudBackdropVerticalPaddingDp = prefs.hudBackdropVerticalPaddingDp.toFloat()
-                        val effectiveActiveColor = if (prefs.hudDynamicAccentEnabled && dynamicAccentCurrentColor != null) {
-                            dynamicAccentCurrentColor!!
-                        } else {
-                            prefs.hudActiveLyricColor
-                        }
-                        view.activeLyricColor = effectiveActiveColor
+                        val activeAccent = if (prefs.hudDynamicAccentEnabled) dynamicAccentResult else null
+                        view.activeLyricColor = activeAccent?.activeTextColor ?: prefs.hudActiveLyricColor
+                        view.dynamicGlowColor = activeAccent?.glowColor
                         view.inactiveLyricColor = prefs.hudInactiveLyricColor
                         view.typewriterSpeed = prefs.typewriterSpeed
                         view.smoothTransitionSpeed = prefs.smoothTransitionSpeed
@@ -793,7 +795,7 @@ class OverlayService : Service() {
         cancelVisibilityAnimation()
         dynamicAccentExtractionJob?.cancel()
         dynamicAccentExtractionJob = null
-        dynamicAccentCurrentColor = null
+        dynamicAccentResult = null
         serviceScope.cancel()
         try {
             displayManager?.unregisterDisplayListener(displayListener)

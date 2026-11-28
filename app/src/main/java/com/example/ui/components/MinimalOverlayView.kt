@@ -175,11 +175,19 @@ class MinimalOverlayView(
                 field = safe
                 wordActivePaint.color = safe
                 wordKaraokeCrispPaint.color = safe
-                wordGlowPaint.color = safe
-                wordPeakGlowPaint.color = safe
                 blurRevealPaint.color = safe
                 updateShadow(wordActivePaint, textShadowEnabled, isSubordinate = false, inkColor = safe)
-                updateWordGlowLayer(safe)
+                updateWordGlowLayer()
+                invalidate()
+            }
+        }
+
+    var dynamicGlowColor: Int? = null
+        set(value) {
+            val safe = value?.let { HudColorSystem.sanitizeOpaqueColor(it, HudColorSystem.DEFAULT_ACTIVE_LYRIC_COLOR) }
+            if (field != safe) {
+                field = safe
+                updateWordGlowLayer()
                 invalidate()
             }
         }
@@ -573,7 +581,7 @@ class MinimalOverlayView(
                 wordGlowPaint.textSize = px
                 wordPeakGlowPaint.textSize = px
                 blurRevealPaint.textSize = px
-                updateWordGlowLayer(activeLyricColor)
+                updateWordGlowLayer()
                 recalculateLayout()
             }
         }
@@ -931,7 +939,7 @@ class MinimalOverlayView(
         updateShadow(wordActivePaint, textShadowEnabled, isSubordinate = false, inkColor = activeLyricColor)
         updateShadow(wordInactivePaint, textShadowEnabled, isSubordinate = true, inkColor = inactiveLyricColor)
         updateShadow(previousTextPaint, textShadowEnabled, isSubordinate = true, inkColor = inactiveLyricColor)
-        updateWordGlowLayer(activeLyricColor)
+        updateWordGlowLayer()
     }
 
     private fun updateShadow(
@@ -954,11 +962,20 @@ class MinimalOverlayView(
         }
     }
 
-    private fun updateWordGlowLayer(inkColor: Int = activeLyricColor) {
-        if (HudColorSystem.isDarkColor(inkColor)) {
+    private fun resolveEffectiveGlowColor(): Int? {
+        val override = dynamicGlowColor
+        if (override != null) return override
+        return if (HudColorSystem.isDarkColor(activeLyricColor)) null else activeLyricColor
+    }
+
+    private fun updateWordGlowLayer() {
+        val glowInk = resolveEffectiveGlowColor()
+        if (glowInk == null) {
             wordGlowPaint.clearShadowLayer()
             wordPeakGlowPaint.clearShadowLayer()
         } else {
+            wordGlowPaint.color = glowInk
+            wordPeakGlowPaint.color = glowInk
             val textPx = wordActivePaint.textSize.coerceAtLeast(24f)
             val restingRadius = HudVisualSpecs.computeRestingGlowRadiusPx(textPx)
             val peakRadius = HudVisualSpecs.computePeakGlowRadiusPx(textPx)
@@ -966,13 +983,13 @@ class MinimalOverlayView(
                 restingRadius,
                 0f,
                 0f,
-                androidx.core.graphics.ColorUtils.setAlphaComponent(inkColor, ACTIVE_GLOW_ALPHA)
+                androidx.core.graphics.ColorUtils.setAlphaComponent(glowInk, ACTIVE_GLOW_ALPHA)
             )
             wordPeakGlowPaint.setShadowLayer(
                 peakRadius,
                 0f,
                 0f,
-                androidx.core.graphics.ColorUtils.setAlphaComponent(inkColor, HudVisualSpecs.PEAK_GLOW_ALPHA)
+                androidx.core.graphics.ColorUtils.setAlphaComponent(glowInk, HudVisualSpecs.PEAK_GLOW_ALPHA)
             )
         }
     }
@@ -1458,7 +1475,9 @@ class MinimalOverlayView(
             canvas.translate(-currentScrollX, 0f)
         }
 
-        val isDarkActiveInk = HudColorSystem.isDarkColor(hierarchy.activeColor)
+        val effectiveGlowColor = dynamicGlowColor
+        val canDrawGlow = effectiveGlowColor != null || !HudColorSystem.isDarkColor(hierarchy.activeColor)
+        val activeGlowColor = effectiveGlowColor ?: hierarchy.activeColor
 
         when (currentStyle) {
             "KARAOKE" -> {
@@ -1470,10 +1489,10 @@ class MinimalOverlayView(
                     wordActivePaint.alpha = incomingAlpha
                     wordKaraokeCrispPaint.color = hierarchy.activeColor
                     wordKaraokeCrispPaint.alpha = incomingAlpha
-                    wordGlowPaint.color = hierarchy.activeColor
+                    wordGlowPaint.color = activeGlowColor
                     wordGlowPaint.alpha = incomingAlpha
-                    wordPeakGlowPaint.color = hierarchy.activeColor
-                    val useEnhancedGlow = karaokeEnhancedGlow && !isDarkActiveInk
+                    wordPeakGlowPaint.color = activeGlowColor
+                    val useEnhancedGlow = karaokeEnhancedGlow && canDrawGlow
                     val activeGlyphPaint = if (useEnhancedGlow) wordKaraokeCrispPaint else wordActivePaint
 
                     // Determine the single active visual line index
@@ -1501,7 +1520,7 @@ class MinimalOverlayView(
                                     canvas.drawText(w.word, w.x, drawY, wordInactivePaint)
                                 } else if (posMs >= w.endMs) {
                                     // Word fully sung on active line: resting glow + optional enhanced settle + crisp active glyph
-                                    if (!isDarkActiveInk) {
+                                    if (canDrawGlow) {
                                         canvas.drawText(w.word, w.x, drawY, wordGlowPaint)
                                         if (useEnhancedGlow) {
                                             val settleEnv = HudVisualSpecs.computeWordLuminousEnvelope(
@@ -1538,7 +1557,7 @@ class MinimalOverlayView(
                                     if (progress > 0f) {
                                         canvas.save()
                                         canvas.clipRect(w.x - 42f, 0f, splitX, height.toFloat())
-                                        if (!isDarkActiveInk) {
+                                        if (canDrawGlow) {
                                             canvas.drawText(w.word, w.x, drawY, wordGlowPaint)
                                             if (useEnhancedGlow) {
                                                 val peakEnv = HudVisualSpecs.computeWordLuminousEnvelope(
@@ -1564,9 +1583,16 @@ class MinimalOverlayView(
                     // 2. Untimed / plain lyrics fallback: display clearly as readable static text without fake karaoke sweep
                     wordActivePaint.color = hierarchy.activeColor
                     wordActivePaint.alpha = incomingAlpha
+                    if (effectiveGlowColor != null) {
+                        wordGlowPaint.color = activeGlowColor
+                        wordGlowPaint.alpha = incomingAlpha
+                    }
                     for (line in currentLayoutLines) {
                         val drawY = line.baselineY - currentScrollY + incomingOffsetY
                         for (w in line.words) {
+                            if (effectiveGlowColor != null) {
+                                canvas.drawText(w.word, w.x, drawY, wordGlowPaint)
+                            }
                             canvas.drawText(w.word, w.x, drawY, wordActivePaint)
                         }
                     }
@@ -1616,10 +1642,10 @@ class MinimalOverlayView(
                     wordActivePaint.alpha = incomingAlpha
                     wordKaraokeCrispPaint.color = hierarchy.activeColor
                     wordKaraokeCrispPaint.alpha = incomingAlpha
-                    wordGlowPaint.color = hierarchy.activeColor
+                    wordGlowPaint.color = activeGlowColor
                     wordGlowPaint.alpha = incomingAlpha
-                    wordPeakGlowPaint.color = hierarchy.activeColor
-                    val useEnhancedGlow = karaokeEnhancedGlow && !isDarkActiveInk
+                    wordPeakGlowPaint.color = activeGlowColor
+                    val useEnhancedGlow = karaokeEnhancedGlow && canDrawGlow
                     val activeGlyphPaint = if (useEnhancedGlow) wordKaraokeCrispPaint else wordActivePaint
 
                     // Draw prior completed visual lines (0 until activeLineIdx) fully highlighted
@@ -1628,7 +1654,7 @@ class MinimalOverlayView(
                         val drawY = prevLine.baselineY - currentScrollY + incomingOffsetY
                         for (wIdx in 0 until prevLine.words.size) {
                             val w = prevLine.words[wIdx]
-                            if (!isDarkActiveInk) {
+                            if (canDrawGlow) {
                                 canvas.drawText(w.word, w.x, drawY, wordGlowPaint)
                             }
                             canvas.drawText(w.word, w.x, drawY, activeGlyphPaint)
@@ -1670,7 +1696,7 @@ class MinimalOverlayView(
                         lineProgress >= 1f -> {
                             for (wIdx in 0 until activeLine.words.size) {
                                 val w = activeLine.words[wIdx]
-                                if (!isDarkActiveInk) {
+                                if (canDrawGlow) {
                                     canvas.drawText(w.word, w.x, activeDrawY, wordGlowPaint)
                                     if (linePeakEnv > 0.01f) {
                                         wordPeakGlowPaint.alpha = HudVisualSpecs.computeGlowAlpha(incomingAlpha, linePeakEnv)
@@ -1699,7 +1725,7 @@ class MinimalOverlayView(
                             canvas.clipRect(lineLeft - 64f, 0f, sweepX, height.toFloat())
                             for (wIdx in 0 until activeLine.words.size) {
                                 val w = activeLine.words[wIdx]
-                                if (!isDarkActiveInk) {
+                                if (canDrawGlow) {
                                     canvas.drawText(w.word, w.x, activeDrawY, wordGlowPaint)
                                     if (linePeakEnv > 0.01f) {
                                         wordPeakGlowPaint.alpha = HudVisualSpecs.computeGlowAlpha(incomingAlpha, linePeakEnv)
@@ -1726,9 +1752,16 @@ class MinimalOverlayView(
             "SMOOTH_SLIDE" -> {
                 wordActivePaint.color = hierarchy.activeColor
                 wordActivePaint.alpha = incomingAlpha
+                if (effectiveGlowColor != null) {
+                    wordGlowPaint.color = activeGlowColor
+                    wordGlowPaint.alpha = incomingAlpha
+                }
                 for (line in currentLayoutLines) {
                     val drawY = line.baselineY - currentScrollY + incomingOffsetY
                     for (w in line.words) {
+                        if (effectiveGlowColor != null) {
+                            canvas.drawText(w.word, w.x, drawY, wordGlowPaint)
+                        }
                         canvas.drawText(w.word, w.x, drawY, wordActivePaint)
                     }
                 }
@@ -1736,9 +1769,16 @@ class MinimalOverlayView(
             "FADE" -> {
                 wordActivePaint.color = hierarchy.activeColor
                 wordActivePaint.alpha = incomingAlpha
+                if (effectiveGlowColor != null) {
+                    wordGlowPaint.color = activeGlowColor
+                    wordGlowPaint.alpha = incomingAlpha
+                }
                 for (line in currentLayoutLines) {
                     val drawY = line.baselineY - currentScrollY
                     for (w in line.words) {
+                        if (effectiveGlowColor != null) {
+                            canvas.drawText(w.word, w.x, drawY, wordGlowPaint)
+                        }
                         canvas.drawText(w.word, w.x, drawY, wordActivePaint)
                     }
                 }
@@ -1749,7 +1789,7 @@ class MinimalOverlayView(
                     if (blurRadius > 0.8f) {
                         blurRevealPaint.color = hierarchy.activeColor
                         blurRevealPaint.alpha = ((1f - animProgress) * baseAlpha * 0.7f).toInt().coerceIn(0, 255)
-                        blurRevealPaint.setShadowLayer(blurRadius, 0f, 0f, hierarchy.activeColor)
+                        blurRevealPaint.setShadowLayer(blurRadius, 0f, 0f, activeGlowColor)
                         for (line in currentLayoutLines) {
                             val drawY = line.baselineY - currentScrollY
                             for (w in line.words) {
@@ -1762,9 +1802,16 @@ class MinimalOverlayView(
                 }
                 wordActivePaint.color = hierarchy.activeColor
                 wordActivePaint.alpha = incomingAlpha
+                if (effectiveGlowColor != null) {
+                    wordGlowPaint.color = activeGlowColor
+                    wordGlowPaint.alpha = incomingAlpha
+                }
                 for (line in currentLayoutLines) {
                     val drawY = line.baselineY - currentScrollY
                     for (w in line.words) {
+                        if (effectiveGlowColor != null) {
+                            canvas.drawText(w.word, w.x, drawY, wordGlowPaint)
+                        }
                         canvas.drawText(w.word, w.x, drawY, wordActivePaint)
                     }
                 }
@@ -1772,6 +1819,10 @@ class MinimalOverlayView(
             "TYPEWRITER" -> {
                 wordActivePaint.color = hierarchy.activeColor
                 wordActivePaint.alpha = baseAlpha
+                if (effectiveGlowColor != null) {
+                    wordGlowPaint.color = activeGlowColor
+                    wordGlowPaint.alpha = baseAlpha
+                }
                 val speed = typewriterSpeed.coerceIn(0.3f, 3.0f)
                 if (isWordSynced && activeLyricLine?.words?.isNotEmpty() == true) {
                     for (lineIdx in 0 until currentLayoutLines.size) {
@@ -1781,6 +1832,9 @@ class MinimalOverlayView(
                             val w = line.words[wIdx]
                             if (posMs < w.startMs) continue
                             if (posMs >= w.endMs) {
+                                if (effectiveGlowColor != null) {
+                                    canvas.drawText(w.word, w.x, drawY, wordGlowPaint)
+                                }
                                 canvas.drawText(w.word, w.x, drawY, wordActivePaint)
                             } else {
                                 val rawDuration = (w.endMs - w.startMs).coerceAtLeast(1L)
@@ -1789,6 +1843,9 @@ class MinimalOverlayView(
                                 val graphemesToReveal = (w.graphemeCount * frac).toInt().coerceIn(1, w.graphemeCount)
                                 val endIdx = w.graphemeBoundaries.getOrElse(graphemesToReveal - 1) { w.word.length }
                                 val sub = w.word.substring(0, endIdx)
+                                if (effectiveGlowColor != null) {
+                                    canvas.drawText(sub, w.x, drawY, wordGlowPaint)
+                                }
                                 canvas.drawText(sub, w.x, drawY, wordActivePaint)
                             }
                         }
@@ -1824,11 +1881,17 @@ class MinimalOverlayView(
                             val w = line.words[wIdx]
                             if (graphemesRemaining <= 0) break
                             if (graphemesRemaining >= w.graphemeCount) {
+                                if (effectiveGlowColor != null) {
+                                    canvas.drawText(w.word, w.x, drawY, wordGlowPaint)
+                                }
                                 canvas.drawText(w.word, w.x, drawY, wordActivePaint)
                                 graphemesRemaining -= w.graphemeCount
                             } else {
                                 val endIdx = w.graphemeBoundaries.getOrElse(graphemesRemaining - 1) { w.word.length }
                                 val sub = w.word.substring(0, endIdx)
+                                if (effectiveGlowColor != null) {
+                                    canvas.drawText(sub, w.x, drawY, wordGlowPaint)
+                                }
                                 canvas.drawText(sub, w.x, drawY, wordActivePaint)
                                 graphemesRemaining = 0
                             }
@@ -1839,9 +1902,16 @@ class MinimalOverlayView(
             "INSTANT" -> {
                 wordActivePaint.color = hierarchy.activeColor
                 wordActivePaint.alpha = baseAlpha
+                if (effectiveGlowColor != null) {
+                    wordGlowPaint.color = activeGlowColor
+                    wordGlowPaint.alpha = baseAlpha
+                }
                 for (line in currentLayoutLines) {
                     val drawY = line.baselineY - currentScrollY
                     for (w in line.words) {
+                        if (effectiveGlowColor != null) {
+                            canvas.drawText(w.word, w.x, drawY, wordGlowPaint)
+                        }
                         canvas.drawText(w.word, w.x, drawY, wordActivePaint)
                     }
                 }
