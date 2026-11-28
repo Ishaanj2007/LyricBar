@@ -4,8 +4,7 @@
 > **Audit Date:** 2026-11-28
 > **Repository Root:** `c:\AndroidProjects\LyricBar-main` (remote `origin`: `https://github.com/Ishaanj2007/LyricBar.git`)
 > **Inspected Branch:** `main`
-> **Inspected Commit:** `559267ba3a23e2a9aeb7eb3c5354cf951b1ee4f7` (`feat: order LyricsScreen provider menu by user priority`)
-> **Working Tree Note:** Audited with uncommitted local Task 3 (*Playback History Toggle*) changes present in the working tree (see [Section 2](#2-repository-identity--current-state)).
+> **Inspected Commit:** `40f5bb2` + `v2.7.2` bump (`versionCode = 13`, `versionName = "2.7.2"`)
 > **Primary Source of Truth:** Current source code overrides `README.md`, release notes, and historical commit descriptions wherever they diverge.
 
 ---
@@ -67,25 +66,16 @@
 | **Module Structure** | Single-module Gradle project (`include(":app")`) |
 | **Application ID** | `com.ishaan.lyricbar` (`app/build.gradle.kts`) |
 | **Kotlin / Android Namespace** | `com.example` (`app/build.gradle.kts`) |
-| **Version Name / Code** | `2.7.1` / `12` (`app/build.gradle.kts`) |
+| **Version Name / Code** | `2.7.2` / `13` (`app/build.gradle.kts`, `strings.xml`) |
 | **SDK Levels** | `minSdk = 24`, `compileSdk = 35`, `targetSdk = 35` |
 | **Git Remote (`origin`)** | `https://github.com/Ishaanj2007/LyricBar.git` |
 | **Branches** | `main` (checked out), `dev/v2.7.0` (`00be842` local / `b93b83d` on `origin`) |
 | **HEAD Commit on `main`** | `559267ba3a23e2a9aeb7eb3c5354cf951b1ee4f7` (`feat: order LyricsScreen provider menu by user priority`) |
 | **Untracked Secret/Local Files Present** | `keystore.properties` (present, contents excluded), `local.properties` (present, contents excluded), `debug.keystore` (absent), `debug.keystore.base64` (absent) |
 
-### Working Tree Status at Audit Time
-Modified (unstaged, Task 3 — Playback History Toggle):
-- `app/src/main/java/com/example/data/backup/BackupModels.kt`
-- `app/src/main/java/com/example/data/backup/BackupZipCodec.kt`
-- `app/src/main/java/com/example/data/preferences/UserPreferencesRepository.kt`
-- `app/src/main/java/com/example/service/MediaPlaybackManager.kt`
-- `app/src/main/java/com/example/service/MediaSessionPipelineEngine.kt`
-- `app/src/main/java/com/example/ui/screens/SettingsScreen.kt`
-
-Untracked at audit time:
-- `app/src/scr.zip` (1,584,778 bytes, timestamp `2026-11-26 18:37:48` — binary archive not in `.gitignore`)
-- `app/src/test/java/com/example/service/PlaybackHistoryToggleTest.kt` (5 `@Test` methods for Task 3)
+### Working Tree Status at Latest Update (`v2.7.2`)
+- Task 3 (*Playback History Toggle*, `15614d5`), Dynamic Accent OKLCH & 3-second Info Dialog (`7a314c2`, `de1ca05`), Playback History 12h/24h & Timezone formatting (`78fea87`), and Dynamic Rotating Lyrics-Loading Messages (`40f5bb2`) are all committed on `main`.
+- Only `app/src/scr.zip` (1,584,778 bytes, binary archive not in `.gitignore`) remains untracked.
 
 ---
 
@@ -149,7 +139,8 @@ LyricBar uses a **single `:app` Android module** with code organized under packa
 
 #### Domain Layer (`domain/`)
 - **Lyrics Engine & Parsers (`domain/lyricsengine/`, `domain/parser/`)**
-  - `LyricsTimingEngine.kt` (142 lines) — Pure timing math for word glow, line reveal, transition, and adaptive scroll progress.
+  - `LyricsTimingEngine.kt` — Pure timing math for word glow, line reveal, transition, and adaptive scroll progress.
+  - `LyricsLoadingMessages.kt` — Shared provider-agnostic rotating lyrics-loading messages (`2800L` ms interval, deterministic per `trackKey`) for `LyricsScreen` and `NowPlayingScreen`.
   - `LyricsSearchQueryBuilder.kt` (68 lines) — Cleans track metadata and constructs Google search URLs for LRC/SRT/TXT.
   - `LrcParser.kt` (228 lines) — Parses `[mm:ss.xxx]` lines, `[offset:]`, `<word>` timestamps, `[x-attribution-*:]`, detects TTML.
   - `TtmlParser.kt` (265 lines) — XXE-hardened DOM XML parser converting TTML `<tt><body><p>` into `ParsedLyrics`.
@@ -250,7 +241,7 @@ All dependency versions are declared in `gradle/libs.versions.toml` and applied 
 - Root `build.gradle.kts` is 6 lines defining plugin aliases (`apply false`). **Discrepancy:** `README.md` documents a debug keystore restoration hook reading `debug.keystore.base64` in root `build.gradle.kts`; this hook does **not** exist in the current file, and `debug.keystore.base64` is absent from the workspace.
 - `app/build.gradle.kts`:
   - `namespace = "com.example"`, `applicationId = "com.ishaan.lyricbar"`.
-  - `compileSdk = 35`, `minSdk = 24`, `targetSdk = 35`, `versionCode = 12`, `versionName = "2.7.1"`.
+  - `compileSdk = 35`, `minSdk = 24`, `targetSdk = 35`, `versionCode = 13`, `versionName = "2.7.2"`.
   - Java 17 (`JavaVersion.VERSION_17`), Kotlin JVM target `"17"`.
   - `buildFeatures { compose = true; buildConfig = true }`.
   - `ksp { arg("room.schemaLocation", "$projectDir/schemas") }`, wired into `sourceSets["test"].assets` and `sourceSets["androidTest"].assets`.
@@ -720,11 +711,17 @@ Triggered on `push` / `pull_request` to `main` and `master`, plus `workflow_disp
 ### Git Branches, Tags & Recent Commits (Observed Locally)
 - **Remote URL:** `https://github.com/Ishaanj2007/LyricBar.git`
 - **Tags (`12` total):** `1.0`, `1.1.0`, `1.5`, `1.9.0`, `2.0.0`, `2.1.0`, `2.2.0`, `2.5.0` (Updater), `2.6.0` (Unison + Attribution), `2.6.1` (Backup & Restore), `2.7.0` (Signing/ID `com.ishaan.lyricbar`/Auto Backup/Room tests/R8), `2.7.1` (Active lyric glow, adaptive scroll, Bold Lyrics, Enhanced Karaoke glow, Landscape UI refinement).
-- **Post-`2.7.1` commits on `main` (still carrying `versionName = "2.7.1"`, `versionCode = 12`):**
+- **Post-`2.7.1` commits on `main` leading to `v2.7.2` (`versionCode = 13`):**
   - `af33ded` — `chore(release): bump version to v2.7.1 (12) and make README evergreen`
   - `3700cc2` — `feat: add Custom Font Manager with TTF/OTF, ZIP import, backup, and multi-select delete`
   - `d591476` — `feat: add customizable Lyrics Provider priority with long-press drag reordering`
-  - `559267b` (`HEAD`) — `feat: order LyricsScreen provider menu by user priority`
+  - `559267b` — `feat: order LyricsScreen provider menu by user priority`
+  - `15614d5` — `feat: add playback history recording toggle`
+  - `b063400` — `docs: add master repository context documentation (LYRICBAR_CONTEXT.md)`
+  - `7a314c2` — `fix(hud): improve dynamic accent colour selection and OKLCH glow contrast`
+  - `de1ca05` — `feat(settings): show 3-second info dialog when enabling dynamic accent colour`
+  - `78fea87` — `fix(history): respect 12h/24h format and current timezone in history timestamps`
+  - `40f5bb2` — `feat(lyrics): add dynamic rotating lyrics-loading messages`
 - **GitHub Repository Templates:** `.github/ISSUE_TEMPLATE/bug_report.yml` and `feature_request.yml` align with `FeedbackCentreScreen`'s form fields.
 
 ### Remote GitHub API Status
@@ -739,14 +736,14 @@ Triggered on `push` / `pull_request` to `main` and `master`, plus `workflow_disp
 |---|---|---|---|
 | **TD-01** | Dead Feature / Doc Drift | `Theme.kt:255`, `UserPreferencesRepository.kt`, `README.md` | `MyApplicationTheme` hardcodes `val isDark = true`. `ThemeMode` (`FOLLOW_SYSTEM`, `LIGHT`, `DARK`) and light palettes in `Color.kt`/`Theme.kt` remain unused at runtime while `README.md` still advertises Follow System / Light / Dark modes. |
 | **TD-02** | Unused Dependencies & Implicit Transitive Gson | `gradle/libs.versions.toml`, `app/build.gradle.kts`, `MainActivity.kt` | `navigation-compose` (`2.8.3`), `retrofit2` (`2.11.0`), and `okhttp3:logging-interceptor` (`4.12.0`) have zero source imports. `com.google.gson` is used directly in production & test code solely as a transitive dependency of `converter-gson`. |
-| **TD-03** | Stale App Version String Resource | `app/src/main/res/values/strings.xml:4`, `app/build.gradle.kts:40` | `<string name="app_version">2.6.1</string>` is outdated compared to `BuildConfig.VERSION_NAME` (`"2.7.1"`, `versionCode = 12`). Settings UI reads `BuildConfig.VERSION_NAME`, leaving the string resource stale. |
+| **TD-03** | *(Resolved in v2.7.2)* | `app/src/main/res/values/strings.xml:4` | `app_version` updated to `2.7.2` matching `app/build.gradle.kts`. |
 | **TD-04** | README Build Hook Drift | `README.md`, `build.gradle.kts` | `README.md` documents a debug keystore restoration hook reading `debug.keystore.base64` in root `build.gradle.kts`, which does not exist (`build.gradle.kts` is 6 lines). |
 | **TD-05** | Dead / Unregistered Blocking Provider | `domain/provider/LyricsOvhProvider.kt`, `CompositeLyricsRepository.kt` | `LyricsOvhProvider` uses synchronous OkHttp `.execute()` and is excluded from `createDefaultProviders()`. |
 | **TD-06** | History Query Cap Mismatch | `SongHistoryDao.kt`, `BackupDao.kt` | `HistoryScreen` reads `SongHistoryDao.getRecentHistory()` capped at `LIMIT 100`, whereas `BackupDao.getAllHistory()` exports/restores all rows without limit. Rows beyond 100 are invisible in UI until newer rows are deleted. |
 | **TD-07** | Dialog Dismiss Inconsistency During Verification | `UpdateDialog.kt:61` | `DialogProperties` sets `dismissOnBackPress` / `dismissOnClickOutside` to `uiState !is UpdateUiState.Downloading`, whereas `onDismissRequest` guards both `Downloading` and `Verifying`. During `Verifying`, back press/outside tap may bypass the guard depending on platform dialog dispatch. |
 | **TD-08** | Unbounded Process-Lifetime Caches | `MinimalOverlayView.kt`, `UnisonProvider.kt`, `BiniLyricsApi.kt` | Built-in typeface maps in `MinimalOverlayView`, `UnisonProvider.etagCache`, and `BiniLyricsApi.hitCache`/`negativeCache` use `ConcurrentHashMap` inside singletons with no size cap or LRU eviction (unlike `CustomFontRepository`'s targeted file cache eviction and `ArtworkMemoryCache`'s 32-entry LRU). |
 | **TD-09** | Legacy Boilerplate & Untracked Archive | `metadata.json`, `app/src/scr.zip` | Root `metadata.json` contains unrelated Google AI Studio metadata (`MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API`); untracked 1.58 MB `app/src/scr.zip` sits inside `app/src/` (not `.gitignore`d). |
-| **TD-10** | Uncommitted Task 3 Edits | Working tree (`6` modified, `2` untracked) | Task 3 (*Playback History Toggle*) changes are not yet committed to `main`. |
+| **TD-10** | *(Resolved)* | `main` | Task 3 (`15614d5`), Task 4 (`40f5bb2`), Task 6 (`78fea87`), and Dynamic Accent OKLCH/Dialog fixes (`7a314c2`, `de1ca05`) are committed on `main`. |
 
 ---
 
